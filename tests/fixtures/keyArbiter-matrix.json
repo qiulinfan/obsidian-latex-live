@@ -1,0 +1,383 @@
+{
+ "about": "Golden Tab/Enter/Escape/arrow matrix for keyArbiter + yoloBridge, measured with real DOM key events against YOLO 1.6.9.7's controllers on Obsidian 1.13.7's CodeMirror versions. State setups: tests/support/keyMatrix.ts.",
+ "versions": {
+  "state": "6.7.0",
+  "view": "6.43.8",
+  "autocomplete": "6.20.3",
+  "commands": "6.10.4",
+  "language": "6.12.2"
+ },
+ "yoloMainSha256_16": "e7acb19151e0daa8",
+ "expected": {
+  "none": {
+   "Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"  x = 1\" sel=7"
+   },
+   "Shift-Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "no-op"
+   },
+   "Enter": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"x = 1\\n\" sel=6"
+   },
+   "Escape": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "no-op"
+   },
+   "Backspace": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"x = \" sel=4"
+   },
+   "ArrowDown": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "no-op"
+   },
+   "ArrowUp": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "sel=0"
+   }
+  },
+  "popup": {
+   "Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{}{}\" sel=8 popup:active->null snippet:off->f0"
+   },
+   "Shift-Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "popup:active->null"
+   },
+   "Enter": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{}{}\" sel=8 popup:active->null snippet:off->f0"
+   },
+   "Escape": {
+    "handled": true,
+    "toDocument": false,
+    "outcome": "popup:active->null"
+   },
+   "Backspace": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\f\" sel=4"
+   },
+   "ArrowDown": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "pick:0->1"
+   },
+   "ArrowUp": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "pick:0->1"
+   }
+  },
+  "snippet": {
+   "Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "sel=10 snippet:f0->off"
+   },
+   "Shift-Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "no-op"
+   },
+   "Enter": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{\\n\\n}{}\" sel=9"
+   },
+   "Escape": {
+    "handled": true,
+    "toDocument": false,
+    "outcome": "snippet:f0->off"
+   },
+   "Backspace": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{}\" sel=7 snippet:f0->off"
+   },
+   "ArrowDown": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "sel=11 snippet:f0->off"
+   },
+   "ArrowUp": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "sel=0 snippet:f0->off"
+   }
+  },
+  "ghost": {
+   "Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"x = 1+ 2\" sel=8 ai:\"+ 2\"->null"
+   },
+   "Shift-Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "ai:\"+ 2\"->null"
+   },
+   "Enter": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"x = 1\\n\" sel=6 ai:\"+ 2\"->null"
+   },
+   "Escape": {
+    "handled": true,
+    "toDocument": false,
+    "outcome": "ai:\"+ 2\"->null"
+   },
+   "Backspace": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"x = \" sel=4 ai:\"+ 2\"->null"
+   },
+   "ArrowDown": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "no-op"
+   },
+   "ArrowUp": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "sel=0 ai:\"+ 2\"->null"
+   }
+  },
+  "ghost2": {
+   "Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"x = 1+ 2\" sel=8 ai:\"+ 2\"->null"
+   },
+   "Shift-Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "ai:\"+ 2\"->null"
+   },
+   "Enter": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"x = 1\\n\" sel=6 ai:\"+ 2\"->null"
+   },
+   "Escape": {
+    "handled": true,
+    "toDocument": false,
+    "outcome": "ai:\"+ 2\"->null"
+   },
+   "Backspace": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"x = \" sel=4 ai:\"+ 2\"->null"
+   },
+   "ArrowDown": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "ai:\"+ 2\"->\"- 3\""
+   },
+   "ArrowUp": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "ai:\"+ 2\"->\"- 3\""
+   }
+  },
+  "ghost_pending": {
+   "Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"  x = 1\" sel=7 ai:\"(generating)\"->null"
+   },
+   "Shift-Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "ai:\"(generating)\"->null"
+   },
+   "Enter": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"x = 1\\n\" sel=6 ai:\"(generating)\"->null"
+   },
+   "Escape": {
+    "handled": true,
+    "toDocument": false,
+    "outcome": "ai:\"(generating)\"->null"
+   },
+   "Backspace": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"x = \" sel=4 ai:\"(generating)\"->null"
+   },
+   "ArrowDown": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "no-op"
+   },
+   "ArrowUp": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "sel=0 ai:\"(generating)\"->null"
+   }
+  },
+  "popup+ghost": {
+   "Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{}{}\" sel=8 popup:active->null snippet:off->f0"
+   },
+   "Shift-Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "popup:active->null"
+   },
+   "Enter": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{}{}\" sel=8 popup:active->null snippet:off->f0"
+   },
+   "Escape": {
+    "handled": true,
+    "toDocument": false,
+    "outcome": "popup:active->null"
+   },
+   "Backspace": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\f\" sel=4"
+   },
+   "ArrowDown": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "pick:0->1"
+   },
+   "ArrowUp": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "pick:0->1"
+   }
+  },
+  "snippet+ghost": {
+   "Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{n+1}{}\" sel=11 ai:\"n+1\"->null"
+   },
+   "Shift-Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "ai:\"n+1\"->null"
+   },
+   "Enter": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{\\n\\n}{}\" sel=9 ai:\"n+1\"->null"
+   },
+   "Escape": {
+    "handled": true,
+    "toDocument": false,
+    "outcome": "ai:\"n+1\"->null"
+   },
+   "Backspace": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{}\" sel=7 snippet:f0->off ai:\"n+1\"->null"
+   },
+   "ArrowDown": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "sel=11 snippet:f0->off ai:\"n+1\"->null"
+   },
+   "ArrowUp": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "sel=0 snippet:f0->off ai:\"n+1\"->null"
+   }
+  },
+  "snippet+popup": {
+   "Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{\\\\alpha}{}\" sel=14 popup:active->null"
+   },
+   "Shift-Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "popup:active->null"
+   },
+   "Enter": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{\\\\alpha}{}\" sel=14 popup:active->null"
+   },
+   "Escape": {
+    "handled": true,
+    "toDocument": false,
+    "outcome": "popup:active->null"
+   },
+   "Backspace": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{\\\\a}{}\" sel=10"
+   },
+   "ArrowDown": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "no-op"
+   },
+   "ArrowUp": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "no-op"
+   }
+  },
+  "snippet+popup+ghost": {
+   "Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{\\\\alpha}{}\" sel=14 popup:active->null"
+   },
+   "Shift-Tab": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "popup:active->null"
+   },
+   "Enter": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{\\\\alpha}{}\" sel=14 popup:active->null"
+   },
+   "Escape": {
+    "handled": true,
+    "toDocument": false,
+    "outcome": "popup:active->null"
+   },
+   "Backspace": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "doc=\"a \\\\frac{\\\\a}{}\" sel=10"
+   },
+   "ArrowDown": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "no-op"
+   },
+   "ArrowUp": {
+    "handled": true,
+    "toDocument": true,
+    "outcome": "no-op"
+   }
+  }
+ }
+}

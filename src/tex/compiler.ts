@@ -1,0 +1,468 @@
+import { ChildProcess, spawn } from "child_process";
+import { createHash } from "crypto";
+import { existsSync, promises as fsp } from "fs";
+import { basename, delimiter, dirname, extname, join, resolve, sep } from "path";
+import { texEnv, texTool } from "./binaries";
+import { ParsedLog, parseLog } from "./logParser";
+import { Engine, logicalMapper, preambleOf } from "./project";
+
+export type BuildMode = "fast" | "full";
+
+export interface CompileOptions {
+  binDir: string;
+  engine: Engine;
+  outDir: string;
+  /** Precompile the preamble into a format (pdfLaTeX only). */
+  preambleCache: boolean;
+  shellEscape: boolean;
+}
+
+export interface CompileResult {
+  mode: BuildMode;
+  engine: Engine;
+  /** The run produced a PDF (possibly with errors). */
+  pdfWritten: boolean;
+  pdfPath: string;
+  pdfData: Uint8Array | null;
+  log: ParsedLog;
+  rawLog: string;
+  durationMs: number;
+  passes: number;
+  usedPreambleCache: boolean;
+}
+
+export interface CompilerListener {
+  onStart(mode: BuildMode): void;
+  onResult(result: CompileResult): void;
+  onFailure(error: Error): void;
+}
+
+interface FormatCache {
+  key: string;
+  fmtBase: string;
+  /** Project-local files the preamble read, with their mtimes at build. */
+  inputs: Map<string, number>;
+  state: "building" | "ready" | "failed";
+}
+
+const RUN_TIMEOUT_MS = 5 * 60_000;
+const OUTPUT_TAIL = 64 * 1024;
+
+/**
+ * Compiles one root document into a private output directory. At most one
+ * compile runs at a time; requests arriving meanwhile coalesce into a single
+ * follow-up run, so a stream of edits never starves the preview.
+ */
+export class Compiler {
+  readonly rootDir: string;
+  readonly jobName: string;
+  /** Maps physical paths reported by TeX tools to vault (logical) paths. */
+  readonly toLogical: (p: string) => string;
+  /** Absolute paths the last compile read (from the -recorder .fls file). */
+  deps = new Set<string>();
+
+  private pending: BuildMode | null = null;
+  private busy = false;
+  private disposed = false;
+  private children = new Set<ChildProcess>();
+  private format: FormatCache | null = null;
+
+  constructor(
+    readonly root: string,
+    private options: () => CompileOptions,
+    private listener: CompilerListener,
+  ) {
+    this.rootDir = dirname(root);
+    this.jobName = basename(root, extname(root));
+    this.toLogical = logicalMapper(this.rootDir);
+  }
+
+  get compiling(): boolean {
+    return this.busy;
+  }
+
+  pdfPath(): string {
+    return join(this.options().outDir, `${this.jobName}.pdf`);
+  }
+
+  request(mode: BuildMode = "fast"): void {
+    if (this.disposed) return;
+    this.pending = this.pending === "full" || mode === "full" ? "full" : "fast";
+    if (!this.busy) void this.drain();
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.pending = null;
+    for (const child of this.children) killTree(child);
+    this.children.clear();
+  }
+
+  private async drain(): Promise<void> {
+    this.busy = true;
+    try {
+      while (this.pending && !this.disposed) {
+        const mode = this.pending;
+        this.pending = null;
+        this.listener.onStart(mode);
+        try {
+          const result =
+            mode === "full" ? await this.runFull() : await this.runFast();
+          if (!this.disposed) this.listener.onResult(result);
+        } catch (err) {
+          if (!this.disposed) {
+            this.listener.onFailure(
+              err instanceof Error ? err : new Error(String(err)),
+            );
+          }
+        }
+      }
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async runFast(): Promise<CompileResult> {
+    const o = this.options();
+    const started = Date.now();
+    await this.prepareOutDir(o.outDir);
+    const rootText = await fsp.readFile(this.root, "utf8");
+    const fmt =
+      o.engine === "pdflatex" && o.preambleCache
+        ? await this.readyFormat(rootText, o)
+        : null;
+
+    let passes = 0;
+    let usedFormat = fmt !== null;
+    let run = await this.runEngine(o, fmt);
+    passes++;
+    if (usedFormat && /Fatal format file error|I can't find the format file/.test(
+        run.rawLog + run.output,
+      )) {
+      // A broken format must never cost a preview: disable it and retry.
+      if (this.format) this.format.state = "failed";
+      usedFormat = false;
+      run = await this.runEngine(o, null);
+      passes++;
+    }
+    // One extra pass settles labels and references when nothing newer
+    // waits. Show the first pass meanwhile: on slow documents the second
+    // pass would otherwise double the wait for any preview at all.
+    if (run.log.rerun && !this.pending && !this.disposed) {
+      this.listener.onResult(
+        await this.finish("fast", o, run, started, passes, usedFormat),
+      );
+      this.listener.onStart("fast");
+      run = await this.runEngine(o, usedFormat ? fmt : null);
+      passes++;
+    }
+    return this.finish("fast", o, run, started, passes, usedFormat);
+  }
+
+  private async runFull(): Promise<CompileResult> {
+    const o = this.options();
+    const started = Date.now();
+    await this.prepareOutDir(o.outDir);
+    const flag =
+      o.engine === "xelatex" ? "-pdfxe" : o.engine === "lualatex" ? "-pdflua" : "-pdf";
+    const args = [
+      flag,
+      "-interaction=nonstopmode",
+      "-file-line-error",
+      "-synctex=1",
+      "-recorder",
+      `-outdir=${o.outDir}`,
+      ...(o.shellEscape ? ["-shell-escape"] : []),
+      basename(this.root),
+    ];
+    await this.removeLog(o.outDir);
+    const output = await this.exec(texTool(o.binDir, "latexmk"), args, o);
+    const rawLog = await this.readLog(o.outDir, this.jobName);
+    const run = { rawLog, output, log: parseLog(rawLog, this.rootDir) };
+    return this.finish("full", o, run, started, 1, false);
+  }
+
+  private async finish(
+    mode: BuildMode,
+    o: CompileOptions,
+    run: EngineRun,
+    started: number,
+    passes: number,
+    usedPreambleCache: boolean,
+  ): Promise<CompileResult> {
+    const pdfPath = join(o.outDir, `${this.jobName}.pdf`);
+    let pdfData: Uint8Array | null = null;
+    let pdfWritten = run.log.pages !== null;
+    if (!pdfWritten && mode === "full" && existsSync(pdfPath)) {
+      // latexmk may skip TeX entirely when nothing changed.
+      pdfWritten = (await fsp.stat(pdfPath)).mtimeMs >= started - 1000;
+    }
+    if (pdfWritten) {
+      try {
+        pdfData = new Uint8Array(await fsp.readFile(pdfPath));
+      } catch {
+        pdfWritten = false;
+      }
+    }
+    await this.readDeps(o.outDir);
+    if (!run.rawLog && run.output.trim()) {
+      // No log at all (engine missing, bad option): surface what it printed.
+      run.log.diagnostics.push({
+        severity: "error",
+        file: null,
+        line: null,
+        message: run.output.trim().split(/\r?\n/).slice(-3).join(" "),
+      });
+    }
+    return {
+      mode,
+      engine: o.engine,
+      pdfWritten,
+      pdfPath,
+      pdfData,
+      log: run.log,
+      rawLog: run.rawLog || run.output,
+      durationMs: Date.now() - started,
+      passes,
+      usedPreambleCache,
+    };
+  }
+
+  private async runEngine(
+    o: CompileOptions,
+    fmtBase: string | null,
+  ): Promise<EngineRun> {
+    const args = [
+      "-interaction=nonstopmode",
+      "-file-line-error",
+      "-synctex=1",
+      "-recorder",
+      `-output-directory=${o.outDir}`,
+      ...(o.shellEscape ? ["-shell-escape"] : []),
+      // By name, found through TEXFORMATS: an absolute -fmt path breaks the
+      // -recorder temp file name (pdfTeX prefixes it with the output dir).
+      ...(fmtBase ? [`-fmt=${basename(fmtBase)}`] : []),
+      basename(this.root),
+    ];
+    await this.removeLog(o.outDir);
+    const output = await this.exec(
+      texTool(o.binDir, o.engine),
+      args,
+      o,
+      fmtBase ? { TEXFORMATS: dirname(fmtBase) + delimiter } : {},
+    );
+    const rawLog = await this.readLog(o.outDir, this.jobName);
+    return { rawLog, output, log: parseLog(rawLog, this.rootDir) };
+  }
+
+  /** Format path when a current preamble format exists; else build one. */
+  private async readyFormat(
+    rootText: string,
+    o: CompileOptions,
+  ): Promise<string | null> {
+    const preamble = preambleOf(rootText);
+    if (preamble === null || /\s/.test(basename(this.root))) return null;
+    const key = createHash("sha1")
+      .update(o.engine + "\0" + preamble)
+      .digest("hex");
+    const f = this.format;
+    if (f && f.key === key) {
+      if (f.state !== "ready") return null;
+      if (await inputsUnchanged(f.inputs)) return f.fmtBase;
+    }
+    void this.buildFormat(key, o);
+    return null;
+  }
+
+  private async buildFormat(key: string, o: CompileOptions): Promise<void> {
+    const fmtJob = `${this.jobName}-preamble`;
+    const fmtBase = join(o.outDir, fmtJob);
+    const cache: FormatCache = {
+      key,
+      fmtBase,
+      inputs: new Map(),
+      state: "building",
+    };
+    this.format = cache;
+    try {
+      await this.exec(
+        texTool(o.binDir, o.engine),
+        [
+          "-ini",
+          "-interaction=nonstopmode",
+          "-halt-on-error",
+          "-recorder",
+          `-output-directory=${o.outDir}`,
+          `-jobname=${fmtJob}`,
+          `&${o.engine}`,
+          "mylatexformat.ltx",
+          basename(this.root),
+        ],
+        o,
+      );
+      if (this.format !== cache) return;
+      if (!existsSync(`${fmtBase}.fmt`)) {
+        cache.state = "failed";
+        return;
+      }
+      const fls = join(o.outDir, `${fmtJob}.fls`);
+      for (const p of await readFls(fls, this.toLogical)) {
+        if (resolve(p) === resolve(this.root) || !isInside(p, this.rootDir)) {
+          continue;
+        }
+        try {
+          cache.inputs.set(p, (await fsp.stat(p)).mtimeMs);
+        } catch {
+          // Files that vanished simply invalidate on the next check.
+        }
+      }
+      cache.state = "ready";
+    } catch {
+      if (this.format === cache) cache.state = "failed";
+    }
+  }
+
+  private async prepareOutDir(outDir: string): Promise<void> {
+    await fsp.mkdir(outDir, { recursive: true });
+    // \include writes aux files into matching subdirectories of outDir.
+    let text = "";
+    try {
+      text = await fsp.readFile(this.root, "utf8");
+    } catch {
+      return;
+    }
+    for (const m of text.matchAll(/\\include\s*\{([^}]+)\}/g)) {
+      const sub = dirname(m[1].trim());
+      if (sub && sub !== "." && !sub.startsWith("..")) {
+        await fsp.mkdir(join(outDir, sub), { recursive: true });
+      }
+    }
+  }
+
+  /** A run that dies before writing its log must not report the old one. */
+  private async removeLog(outDir: string): Promise<void> {
+    await fsp.rm(join(outDir, `${this.jobName}.log`), { force: true });
+  }
+
+  private async readLog(outDir: string, job: string): Promise<string> {
+    try {
+      return await fsp.readFile(join(outDir, `${job}.log`), "utf8");
+    } catch {
+      return "";
+    }
+  }
+
+  private async readDeps(outDir: string): Promise<void> {
+    const inputs = await readFls(
+      join(outDir, `${this.jobName}.fls`),
+      this.toLogical,
+    );
+    if (!inputs.length) return;
+    const deps = new Set<string>([resolve(this.root)]);
+    for (const p of inputs) {
+      if (!isInside(p, outDir)) deps.add(resolve(p));
+    }
+    this.deps = deps;
+  }
+
+  private exec(
+    cmd: string,
+    args: string[],
+    o: CompileOptions,
+    extraEnv: NodeJS.ProcessEnv = {},
+  ): Promise<string> {
+    return new Promise((resolvePromise, reject) => {
+      if (this.disposed) {
+        reject(new Error("compiler disposed"));
+        return;
+      }
+      const child = spawn(cmd, args, {
+        cwd: this.rootDir,
+        env: { ...texEnv(o.binDir), ...extraEnv },
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
+        windowsHide: true,
+      });
+      this.children.add(child);
+      let output = "";
+      const collect = (chunk: Buffer) => {
+        output = (output + chunk.toString("utf8")).slice(-OUTPUT_TAIL);
+      };
+      child.stdout?.on("data", collect);
+      child.stderr?.on("data", collect);
+      const timer = setTimeout(() => killTree(child), RUN_TIMEOUT_MS);
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        this.children.delete(child);
+        reject(err);
+      });
+      child.on("close", () => {
+        clearTimeout(timer);
+        this.children.delete(child);
+        if (this.disposed) reject(new Error("compiler disposed"));
+        else resolvePromise(output);
+      });
+    });
+  }
+}
+
+interface EngineRun {
+  rawLog: string;
+  output: string;
+  log: ParsedLog;
+}
+
+/** INPUT paths recorded in a TeX `.fls` file, absolute. */
+export async function readFls(
+  flsPath: string,
+  toLogical: (p: string) => string = resolve,
+): Promise<string[]> {
+  let text: string;
+  try {
+    text = await fsp.readFile(flsPath, "utf8");
+  } catch {
+    return [];
+  }
+  let pwd = dirname(flsPath);
+  const out = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith("PWD ")) pwd = line.slice(4);
+    else if (line.startsWith("INPUT ")) {
+      out.add(toLogical(resolve(pwd, line.slice(6))));
+    }
+  }
+  return [...out];
+}
+
+async function inputsUnchanged(inputs: Map<string, number>): Promise<boolean> {
+  for (const [p, mtime] of inputs) {
+    try {
+      if ((await fsp.stat(p)).mtimeMs !== mtime) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isInside(p: string, dir: string): boolean {
+  const a = resolve(p);
+  const d = resolve(dir);
+  return a === d || a.startsWith(d.endsWith(sep) ? d : d + sep);
+}
+
+/** Kill a spawned TeX tool and its children (latexmk runs the engine). */
+export function killTree(child: ChildProcess): void {
+  if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
+  try {
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        windowsHide: true,
+      });
+    } else {
+      process.kill(-child.pid, "SIGTERM");
+    }
+  } catch {
+    child.kill("SIGTERM");
+  }
+}

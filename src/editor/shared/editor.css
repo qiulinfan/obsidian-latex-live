@@ -1,0 +1,182 @@
+/* Shared with obsidian-latex-live / obsidian-tinymist: keep byte-identical (canonical copy: obsidian-tinymist/src/editor/shared). */
+/* CodeMirror chrome for the plugins' editor views. Each view adds "lsp-cm-view" to the
+   element that holds its .cm-editor; tooltips and panels mount inside .cm-editor, so these
+   rules reach them. Obsidian's editor CSS only targets Markdown views (.cm-s-obsidian). */
+
+/* Caret: drawSelection() draws its own cursor, black unless EditorView.darkTheme is set. */
+.lsp-cm-view .cm-editor .cm-cursor,
+.lsp-cm-view .cm-editor .cm-dropCursor {
+  border-left-color: var(--caret-color, var(--text-normal));
+}
+.lsp-cm-view .cm-editor .cm-scroller {
+  line-height: var(--line-height-normal, 1.5);
+}
+
+/* Selection matches and search hits (CM defaults are bright green / yellow). */
+.lsp-cm-view .cm-editor .cm-selectionMatch {
+  background: var(--text-highlight-bg);
+}
+.lsp-cm-view .cm-editor .cm-searchMatch {
+  background: var(--text-highlight-bg);
+  outline: none;
+}
+.lsp-cm-view .cm-editor .cm-searchMatch.cm-searchMatch-selected {
+  background: var(--text-highlight-bg-active, var(--text-highlight-bg));
+  outline: 1px solid var(--interactive-accent);
+}
+
+/* Panels: search / replace, go to line. */
+.lsp-cm-view .cm-editor .cm-panels {
+  background: var(--background-secondary);
+  color: var(--text-normal);
+}
+.lsp-cm-view .cm-editor .cm-panels-top {
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.lsp-cm-view .cm-editor .cm-panels-bottom {
+  border-top: 1px solid var(--background-modifier-border);
+}
+.lsp-cm-view .cm-editor .cm-panel {
+  padding: 4px 8px;
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+}
+.lsp-cm-view .cm-editor .cm-panel label {
+  color: var(--text-muted);
+  font-size: inherit;
+}
+.lsp-cm-view .cm-editor .cm-panel .cm-textfield {
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  padding: 2px 6px;
+  font-size: inherit;
+}
+.lsp-cm-view .cm-editor .cm-panel .cm-textfield:focus {
+  border-color: var(--interactive-accent);
+}
+.lsp-cm-view .cm-editor .cm-panel .cm-button {
+  background: var(--interactive-normal);
+  background-image: none;
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  padding: 2px 8px;
+  font-size: inherit;
+}
+.lsp-cm-view .cm-editor .cm-panel .cm-button:hover {
+  background: var(--interactive-hover);
+}
+.lsp-cm-view .cm-editor .cm-panel button[name="close"] {
+  color: var(--text-muted);
+}
+
+/* Tooltips: hover docs, diagnostics, completion. */
+.lsp-cm-view .cm-editor .cm-tooltip {
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+}
+.lsp-cm-view .cm-editor .cm-tooltip-lint {
+  max-width: 560px;
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+}
+
+/* Completion list. Obsidian's app.css hides .cm-completionDetail for every editor. */
+.lsp-cm-view .cm-tooltip.cm-tooltip-autocomplete > ul {
+  font-family: var(--font-monospace);
+}
+.lsp-cm-view .cm-tooltip.cm-tooltip-autocomplete > ul > li[role="option"] {
+  display: flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+.lsp-cm-view .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.lsp-cm-view .cm-tooltip.cm-tooltip-autocomplete .cm-completionIcon,
+.lsp-cm-view .cm-tooltip.cm-tooltip-autocomplete .cm-completionLabel {
+  flex: none;
+}
+.lsp-cm-view .cm-tooltip.cm-tooltip-autocomplete .cm-completionDetail {
+  display: inline;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-left: 1em;
+  font-style: normal;
+  font-size: 0.9em;
+  color: var(--text-faint);
+}
+.lsp-cm-view .cm-tooltip.cm-tooltip-autocomplete .cm-completionMatchedText {
+  text-decoration: none;
+  font-weight: 600;
+  color: var(--text-accent);
+}
+/* Symbol glyph column (lspGlyphColumn) takes the kind icon's place. */
+.lsp-cm-view .cm-tooltip-autocomplete .lsp-completion-glyph {
+  flex: none;
+  width: 1.4em;
+  text-align: center;
+  font-family: var(--font-text);
+}
+.lsp-cm-view .cm-tooltip-autocomplete li:has(> .lsp-completion-glyph) > .cm-completionIcon {
+  display: none;
+}
+.lsp-cm-view .cm-tooltip-autocomplete li:has(> .cm-completionIcon-deprecated) > .cm-completionLabel {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+.lsp-cm-view .cm-completionIcon-snippet::after {
+  content: "⧉";
+}
+.lsp-cm-view .cm-completionIcon-file::after {
+  content: "▭";
+}
+.lsp-cm-view .cm-completionIcon-folder::after {
+  content: "▸";
+}
+.lsp-cm-view .cm-completionIcon-reference::after {
+  content: "¶";
+}
+.lsp-cm-view .cm-completionIcon-color::after {
+  content: "●";
+}
+.lsp-cm-view .cm-tooltip.cm-completionInfo {
+  max-width: 420px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 6px 10px;
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+}
+.lsp-cm-view .cm-completionInfo .lsp-completion-info {
+  white-space: pre-wrap;
+}
+.lsp-cm-view .cm-completionInfo img {
+  max-height: 3em;
+}
+/* texlab's symbol images are black on opaque white. */
+.theme-dark .lsp-cm-view .cm-completionInfo img[src^="data:image/png"] {
+  filter: invert(1);
+}
+
+/* Snippet fields (CM's #00000022 is invisible on a dark background). */
+.lsp-cm-view .cm-editor .cm-snippetField {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+  border-radius: 2px;
+}
+.lsp-cm-view .cm-editor .cm-snippetFieldPosition {
+  border-left-color: var(--text-accent);
+}
+
+/* YOLO ghost text: its own 60% opacity on --text-muted is too faint here. */
+.lsp-cm-view .cm-editor .yolo-ghost-text {
+  color: var(--text-muted);
+  opacity: 0.85;
+}

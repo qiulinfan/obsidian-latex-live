@@ -1,0 +1,41 @@
+{
+  "name": "obsidian-latex-live",
+  "version": "0.1.0",
+  "description": "Live LaTeX compilation and PDF preview for .tex files in Obsidian, driven by the TeX installation already on the machine",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "dev": "node esbuild.config.mjs watch",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "check": "tsc --noEmit",
+    "test": "node scripts/run-tests.mjs",
+    "test:yolo": "node scripts/yolo-contract.mjs"
+  },
+  "keywords": [
+    "obsidian",
+    "latex",
+    "pdf",
+    "synctex"
+  ],
+  "overrides": {
+    "@codemirror/state": "6.5.0",
+    "@codemirror/view": "6.38.6"
+  },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/commands": "6.10.4",
+    "@codemirror/language": "6.12.2",
+    "@codemirror/lint": "^6.8.0",
+    "@codemirror/search": "6.7.1",
+    "@codemirror/state": "6.5.0",
+    "@codemirror/view": "6.38.6",
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.0.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.1.0",
+    "obsidian": "latest",
+    "typescript": "^5.5.0"
+  }
+}
