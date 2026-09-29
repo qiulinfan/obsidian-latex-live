@@ -9,6 +9,7 @@ import { ChangeSet, EditorState, Extension, Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import type { Scope } from "obsidian";
 import {
+  CLOSE_BEFORE,
   EDITOR_SCOPE_KEYS,
   HistoryCache,
   applyEphemeralState,
@@ -314,6 +315,52 @@ test("mathInput: \\$ \\{ \\} (and Typst \\( \\\") are escapes, never paired and 
     const view = makeView(start.replace("|", ""), start.indexOf("|"), exts);
     typeInput(view, typed);
     assert.equal(withCursor(view), want, `${start} + ${typed}`);
+    view.destroy();
+  }
+});
+
+test("mathInput: $ pairs after CJK text, \\( \\[ before CJK punctuation; Typst gets the same $", () => {
+  const latex = [
+    mathInput({ latexDelimiters: true }),
+    languageData({ brackets: ["(", "[", "{", "$"], before: CLOSE_BEFORE }),
+    closeBrackets(),
+  ];
+  const typst = [mathInput({ display: ["$ ", " $"] }), languageData({ brackets: ["(", "[", "{", '"', "$"] }), closeBrackets()];
+  const cases: [Extension[], string, string, string][] = [];
+  for (const exts of [latex, typst]) {
+    for (const punct of "，。：；）、！？」』") cases.push([exts, `设|${punct}则`, "$", `设$|$${punct}则`]);
+    cases.push(
+      [exts, "设|，则", "$x$", "设$x$|，则"], // the closer steps over
+      [exts, "设|", "$", "设$|$"], // the line end
+      [exts, "设| 则", "$", "设$|$ 则"],
+      [exts, "设|则", "$", "设$|则"], // before CJK text: not paired
+      [exts, "𠀀|，", "$", "𠀀$|$，"], // a Han character outside the BMP
+      [exts, "かな|。", "$x$", "かな$x$|。"],
+      [exts, "설명|.", "$", "설명$|."], // `.` is not in the set
+      [exts, "设$x$，则|", "$y$", "设$x$，则$y$|"],
+      [exts, "$x+y|", "$", "$x+y$|"], // after a Latin letter `$` closes math, as before
+      [exts, "设\\|，", "$", "设\\$|，"], // an escaped dollar
+      // Math open on the line: this `$` closes it, also after CJK text.
+      [exts, "$a 集|", "$", "$a 集$|"],
+      [exts, "设$x$，令$y 属于集|，", "$", "设$x$，令$y 属于集$|，"],
+      [exts, "价格\\$5，设|，", "$", "价格\\$5，设$|$，"], // an escaped `$` opens nothing
+    );
+  }
+  cases.push(
+    [latex, "$$x 集|", "$", "$$x 集$|"], // `$$` opens display math once
+    [latex, "设|，则", "$$", "设$$|$$，则"],
+    [typst, "设|，则", "$$", "设$ | $，则"],
+    [latex, "见|，", "\\(", "见\\(|\\)，"],
+    [latex, "见|。", "\\[", "见\\[|\\]。"],
+    [latex, "见|则", "\\(", "见\\(|则"],
+    [latex, "见|，", "(", "见(|)，"], // closeBrackets with CLOSE_BEFORE
+    [[mathInput({ latexDelimiters: true, closeBefore: ")" }), languageData({ brackets: ["$"] }), closeBrackets()], "设|，", "$", "设$|，"],
+    [[mathInput({ latexDelimiters: true, closeBefore: ")" }), languageData({ brackets: ["$"] }), closeBrackets()], "见|，", "\\(", "见\\(|，"],
+  );
+  for (const [exts, start, typed, want] of cases) {
+    const view = makeView(start.replace("|", ""), start.indexOf("|"), exts);
+    typeInput(view, typed);
+    assert.equal(withCursor(view), want, `${start} + ${typed}${exts === typst ? " (Typst)" : ""}`);
     view.destroy();
   }
 });

@@ -27,6 +27,7 @@ import {
   defaultGlyph,
   lspCompletionSource,
   lspGlyphColumn,
+  lspQueryEmpty,
 } from "../src/editor/shared/lspCompletion";
 
 interface FixtureCase {
@@ -326,6 +327,126 @@ test("texlab: an incomplete command list is re-queried on every key (triggerKind
   await settle(view);
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1].context, { triggerKind: 3 });
+  view.destroy();
+});
+
+test("texlab: an incomplete list is re-queried only while the new query continues it", async () => {
+  // `\fr` gives an incomplete list; accepting `frac` brings `{}{}` after the cursor. A `\`
+  // typed in the field is a new start, which this activation policy declines (as LaTeX
+  // Live's does); it must not pass as a re-query of the finished `\fr` list.
+  for (const triggers of [TEXLAB.triggerCharacters, []]) {
+    const { backend, calls } = fixtureBackend({ ...TEXLAB, triggerCharacters: triggers }, (state, pos) => {
+      const before = state.doc.line(pos.line + 1).text.slice(0, pos.character);
+      const w = /\\([A-Za-z]*)$/.exec(before);
+      if (!w) return null;
+      const range = { start: { line: pos.line, character: pos.character - w[1].length }, end: pos };
+      const item = (label: string, newText = label) => ({ label, insertTextFormat: 2, textEdit: { range, newText } });
+      return { isIncomplete: true, items: [item("frac", "frac{$1}{$2}"), item("frame"), item("alpha")] };
+    });
+    const activate = (ctx: CompletionContext) => ctx.matchBefore(/\\[A-Za-z]+$/) !== null;
+    const view = makeView("", 0, lspCompletionSource(backend, { activate }));
+    const kinds = () => calls.map((c) => c.context.triggerKind).join(",");
+    type(view, "\\fr");
+    await settle(view);
+    type(view, "a");
+    await settle(view);
+    assert.equal(kinds(), "1,3", "typing on re-queries");
+    assert.ok(acceptCompletion(view));
+    assert.equal(lineAtCursor(view), "\\frac{|}{}");
+    type(view, triggers.length ? "\\" : "x");
+    await settle(view);
+    assert.equal(kinds(), "1,3", `${triggers.length ? "trigger" : "rest of line"}: no stale re-query`);
+    type(view, triggers.length ? "al" : "\\al");
+    await settle(view);
+    assert.equal(calls.length, 3);
+    assert.equal(calls[2].context.triggerKind, 1, "a fresh request");
+    view.destroy();
+  }
+});
+
+test("a complete list answers its query and what extends it: backspacing into the query asks again", async () => {
+  // A server that filters complete lists by the query, fuzzily (as texlab does). The list
+  // for `alp` must not survive `alp` backspaced away: `bet` filtered against it once gave
+  // `setmathalphabet` (b..e..t) instead of `beta`, which that list never held.
+  const WORDS = ["alpha", "alph", "algebra", "mathalpha", "setmathalphabet", "beta", "between"];
+  const fuzzy = (q: string, w: string) => [...w].reduce((i, ch) => (ch === q[i] ? i + 1 : i), 0) === q.length;
+  const queries: string[] = [];
+  const backend: LspCompletionBackend = {
+    triggerCharacters: () => [],
+    async request(pos, _context, state) {
+      const q = /[a-z]*$/.exec(state.doc.line(pos.line + 1).text.slice(0, pos.character))![0];
+      queries.push(q);
+      const range = { start: { line: pos.line, character: pos.character - q.length }, end: pos };
+      const items = WORDS.filter((w) => fuzzy(q, w)).map((label) => ({ label, textEdit: { range, newText: label } }));
+      return { isIncomplete: false, items };
+    },
+  };
+  const backspace = (view: EditorView) => {
+    const head = view.state.selection.main.head;
+    view.dispatch({ changes: { from: head - 1, to: head }, selection: { anchor: head - 1 }, userEvent: "delete.backward" });
+  };
+
+  // Typing on filters locally; backspacing into `alp` asks for `al` (algebra is back).
+  const view = makeView("x ", 2, lspCompletionSource(backend));
+  await typeSlowly(view, "alp", 20);
+  assert.deepEqual(queries, ["alp"]);
+  assert.ok(!labels(view).includes("algebra"));
+  type(view, "h");
+  await settle(view);
+  assert.deepEqual(queries, ["alp"], "extending the query filters locally");
+  backspace(view);
+  backspace(view);
+  await settle(view);
+  assert.deepEqual(queries, ["alp", "al"]);
+  assert.ok(labels(view).includes("algebra"), labels(view).join(" "));
+  view.destroy();
+
+  // An explicit list survives Backspace down to its start in CM; it must ask again too.
+  queries.length = 0;
+  const explicit = makeView("x alp", 5, lspCompletionSource(backend));
+  startCompletion(explicit);
+  await settle(explicit);
+  for (let i = 0; i < 3; i++) backspace(explicit);
+  await settle(explicit);
+  await typeSlowly(explicit, "bet", 20);
+  assert.equal(queries[0], "alp");
+  assert.equal(queries.at(-1), "", "asked again once `alp` was backspaced away");
+  assert.equal(selectedCompletion(explicit.state)?.label, "beta", labels(explicit).join(" "));
+  assert.ok(acceptCompletion(explicit));
+  assert.equal(lineAtCursor(explicit), "x beta|");
+  explicit.destroy();
+});
+
+test("lspQueryEmpty: a list a trigger character opened, until something is typed", async () => {
+  const items = (preselect: boolean): LspCompletionItem[] => [{ label: "abs" }, { label: "pow", preselect }];
+  let pre = false;
+  const backend: LspCompletionBackend = { triggerCharacters: () => ["."], request: async () => ({ items: items(pre) }) };
+  const view = makeView("x", 1, lspCompletionSource(backend));
+  type(view, ".");
+  await settle(view);
+  assert.equal(selectedCompletion(view.state)?.label, "abs");
+  assert.equal(lspQueryEmpty(view.state), true);
+  type(view, "a");
+  await settle(view);
+  assert.equal(selectedCompletion(view.state)?.label, "abs");
+  assert.equal(lspQueryEmpty(view.state), false, "typed on");
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "x." }, selection: { anchor: 2 } });
+  startCompletion(view);
+  await settle(view);
+  assert.equal(lspQueryEmpty(view.state), false, "an explicit request");
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "y" }, selection: { anchor: 1 } });
+  pre = true;
+  type(view, ".");
+  await settle(view);
+  assert.equal(selectedCompletion(view.state)?.label, "pow");
+  assert.equal(lspQueryEmpty(view.state), false, "the server preselected it");
+  select(view, "abs");
+  assert.equal(lspQueryEmpty(view.state), true);
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "x ab" }, selection: { anchor: 4 } });
+  type(view, "s");
+  await settle(view);
+  assert.equal(selectedCompletion(view.state)?.label, "abs");
+  assert.equal(lspQueryEmpty(view.state), false, "opened by a word, not a trigger");
   view.destroy();
 });
 

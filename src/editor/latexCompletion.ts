@@ -9,13 +9,12 @@
 //   - implicit requests only after `\` + a letter or inside argument braces such as
 //     \ref{ \cite{ \begin{ \usepackage{ (D5), never in a `%` comment or verbatim, where
 //     texlab has nothing and the built-in layer alone would turn Enter into a snippet;
-//   - accepting `\ref` (etc.) opens the argument's list right away;
+//   - accepting `\ref` (etc.) opens the argument's list right away, as if `{` was typed;
 //   - a citation query texlab cannot match (title or author words) asks for the whole
 //     list, which the shared source filters on author and title (TL-05).
 // No obsidian imports: tests run this against recorded and live texlab responses.
-import { Completion, CompletionSource, pickedCompletion, snippet, startCompletion } from "@codemirror/autocomplete";
-import { EditorState, Extension, Text } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { Completion, CompletionSource, snippet } from "@codemirror/autocomplete";
+import { EditorState, Text } from "@codemirror/state";
 import { Definitions, emptyDefinitions, mergeDefinitions, scanDefinitions } from "../tex/macros";
 import {
   ARGUMENT_COMMANDS,
@@ -234,6 +233,8 @@ function templateApply(template: string, tail: number): Completion["apply"] {
 }
 
 const VARIANTS = new Map(COMMAND_VARIANTS.map(([label, template]) => [label, template]));
+/** Options whose snippet leaves the cursor in an empty list argument (`\ref{|}`, `\begin{|}`). */
+const opensArgument = new WeakSet<Completion>();
 
 export function latexCompletionOptions(env: LatexCompletionEnv = {}, analysis = analyses(env)): LspCompletionOptions {
   const meta = new WeakMap<Completion, Meta>();
@@ -272,6 +273,9 @@ export function latexCompletionOptions(env: LatexCompletionEnv = {}, analysis = 
         edit.text = snippetText(template);
         edit.snippet = true;
         templates.set(option, { template, tail: Math.max(0, edit.to - ctx.pos) });
+        if (c?.kind === "command" && ARGUMENT_COMMANDS[baseName(name)] && template.startsWith(`${name}{#1}`)) {
+          opensArgument.add(option);
+        }
       };
 
       if (c?.kind === "argument") {
@@ -389,6 +393,7 @@ export function latexBackend(
           if (item.textEdit) item.textEdit = { range, newText: item.textEdit.newText };
         }
       }
+      if (c?.kind === "command" && c.from === c.to) bareBackslash(list, state, c.to, a.inMath);
       addBuiltins(list, state, a);
       return list.items.length ? list : null;
     },
@@ -404,6 +409,29 @@ function asList(raw: unknown): LspCompletionList {
       : { items: [] };
   list.items = [...(list.items ?? [])];
   return list;
+}
+
+/**
+ * A bare `\` at the cursor, no letter on either side. Before a non-letter texlab reads a
+ * control symbol and answers with that one item, its range covering the character. When that
+ * character is a `}` or a `$` closing the surrounding group or math (`\frac{\|}{}`, `$\|$`;
+ * `inMath`: the cursor is in math), keep the ranges off it: picking `}` gives `\}` and keeps
+ * the brace. Other symbols, and a `$` that opens math, keep texlab's range (`a\|,b`: picking
+ * `,` makes the comma `\,`; `Cost \|$5`: picking `$` escapes that dollar). The list is
+ * incomplete either way (texlab's first page or that one symbol, plus only the popular
+ * built-ins), so the next letter asks again instead of filtering this answer.
+ */
+function bareBackslash(list: LspCompletionList, state: EditorState, pos: number, inMath: boolean): void {
+  const next = state.sliceDoc(pos, pos + 1);
+  const closer = next === "}" || (next === "$" && inMath);
+  for (const item of list.items) {
+    const edit = item.textEdit;
+    const range = edit ? ("range" in edit ? edit.range : edit.replace) : null;
+    if (closer && edit && range && lspPosToOffset(state.doc, range.end) > pos) {
+      item.textEdit = { range: { start: range.start, end: offsetToLspPos(state.doc, pos) }, newText: edit.newText };
+    }
+  }
+  list.isIncomplete = true;
 }
 
 function addBuiltins(list: LspCompletionList, state: EditorState, a: Analysis): void {
@@ -460,15 +488,18 @@ export function latexCompletionSource(inner: LspCompletionBackend | null, env: L
 }
 
 /**
- * After a completion is accepted into an empty argument (`\ref{|}`, `\begin{|}`,
- * `\usepackage{|}`), open that argument's list.
+ * autocompletion's activateOnCompletion: accepting `\ref`, `\cite`, `\begin`, `\usepackage`...
+ * (`\re` + Tab -> `\ref{|}`) opens the argument's list as if the `{` had been typed. An
+ * implicit list, like the one `\ref{` typed by hand opens: Enter takes an entry only once
+ * something is typed or the selection moved.
  */
-export const argumentRetrigger: Extension = EditorView.updateListener.of((u) => {
-  if (!u.transactions.some((tr) => tr.annotation(pickedCompletion))) return;
-  const head = u.state.selection.main.head;
-  const c = latexContext(u.state, head);
-  if (c?.kind !== "argument" || c.query) return;
-  setTimeout(() => {
-    if (u.view.state.doc === u.state.doc && u.view.state.selection.main.head === head) startCompletion(u.view);
-  }, 0);
-});
+export const opensArgumentList = (completion: Completion): boolean => opensArgument.has(completion);
+
+/**
+ * keyArbiter's completesWord: the cursor ends a command name (`\alp|`, not a bare `\` or
+ * the `\\` line break), so a Tab in a snippet field waits for its list (`\frac{\alp|}{}`).
+ */
+export function typingCommand(state: EditorState): boolean {
+  const c = latexContext(state, state.selection.main.head);
+  return c?.kind === "command" && c.word !== "";
+}

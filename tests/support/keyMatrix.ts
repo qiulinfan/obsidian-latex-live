@@ -99,6 +99,7 @@ export interface SetupOptions {
   source?: CompletionSource;
   enter?: Command | Command[];
   tabFallback?: Command;
+  completesWord?: (state: EditorState) => boolean;
   title?: string;
 }
 
@@ -112,7 +113,7 @@ export function setup(makeYolo: YoloFactory | null, o: SetupOptions = {}): Ctx {
   const freshState = () => EditorState.create({
     doc: o.doc ?? "",
     extensions: [
-      keyArbiter({ inline: () => bridge.inline, enter: o.enter, tabFallback: o.tabFallback }),
+      keyArbiter({ inline: () => bridge.inline, enter: o.enter, tabFallback: o.tabFallback, completesWord: o.completesWord }),
       bridge.extension(() => o.title ?? "notes.typ"),
       history(),
       closeBrackets(),

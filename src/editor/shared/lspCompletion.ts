@@ -2,7 +2,9 @@
 //
 // LSP textDocument/completion -> CodeMirror CompletionSource, used with tinymist and texlab.
 //   - Every item is passed on (no truncation); CM renders at most 100 rows itself.
-//   - validFor only for complete lists: an isIncomplete list is re-queried on every key.
+//   - validFor only for complete lists: an isIncomplete list is re-queried on every key. A
+//     complete list stays valid only while the query extends the one it was requested
+//     for; backspacing into that query asks again.
 //   - Each item's own textEdit range (or InsertReplaceEdit `replace`) is honoured, including
 //     an end past the cursor (mid-word), and additionalTextEdits land in the same
 //     transaction (tinymist postfix items).
@@ -11,7 +13,10 @@
 //   - Server order survives through sortText (CM breaks score ties with it). Complete
 //     lists whose items carry a filterText (texlab citations) are filtered on it here.
 //   - Implicit requests follow the server's trigger characters plus an activation policy;
-//     nothing is requested while an IME composition is open.
+//     nothing is requested while an IME composition is open. An incomplete list is
+//     re-queried (triggerKind 3) only while the new query continues the previous one.
+//   - lspQueryEmpty tells keyArbiter's smart Enter that the selected option comes from a
+//     list a trigger character opened and nothing has been typed since.
 // Only type imports from "obsidian" are allowed here: tests bundle this without Obsidian.
 import {
   Completion,
@@ -20,6 +25,7 @@ import {
   CompletionResult,
   CompletionSource,
   pickedCompletion,
+  selectedCompletion,
   snippet,
 } from "@codemirror/autocomplete";
 import { EditorState, Text, Transaction, TransactionSpec } from "@codemirror/state";
@@ -229,6 +235,23 @@ function plainInfo(doc: { value: string }): CompletionInfo {
 
 const glyphs = new WeakMap<Completion, string>();
 const filterTexts = new WeakMap<Completion, string>();
+/**
+ * Options of a list that typing a trigger character opened (`.` `#` `(` `{`...), keyed to
+ * the request position: nothing was typed after the trigger yet. A server-preselected item
+ * (texlab's open environment after `\end{`) is left out, the server picked it.
+ */
+const emptyQueryAt = new WeakMap<Completion, number>();
+
+/**
+ * Whether the selected option comes from a list a trigger character opened (not an
+ * explicit request) and the cursor is still where that list was requested: the popup
+ * appeared unasked and holds no query, so Enter should not take its first entry.
+ */
+export function lspQueryEmpty(state: EditorState): boolean {
+  const c = selectedCompletion(state);
+  const at = c ? emptyQueryAt.get(c) : undefined;
+  return at !== undefined && state.selection.main.head === at;
+}
 
 /**
  * autocompletion({ addToOptions: [lspGlyphColumn] }): renders the symbol glyph of LSP
@@ -339,6 +362,32 @@ function itemKey(it: LspCompletionItem, edit: CompletionEdit): string {
   return [it.label, it.kind, edit.text, edit.from, edit.to].join("\u0000");
 }
 
+/** An incomplete list: where it starts, its query, and the line after the cursor then. */
+interface IncompleteList {
+  from: number;
+  query: string;
+  rest: string;
+}
+
+const restOfLine = (state: EditorState, pos: number) => state.sliceDoc(pos, state.doc.lineAt(pos).to);
+
+/**
+ * Whether the text before the cursor still continues the query of the incomplete list
+ * `last`: typed on (no whitespace or trigger character added) or backspaced within it, the
+ * rest of the line untouched. Otherwise that list is over (an accepted snippet's `{}` now
+ * follows the cursor, a trigger character or a space was typed, the cursor is elsewhere):
+ * the request starts fresh and goes through the activation policy, as `\` inside a
+ * just-accepted `\frac{|}{}` must.
+ */
+function continuesQuery(last: IncompleteList, ctx: CompletionContext, triggers: readonly string[]): boolean {
+  if (ctx.pos < last.from) return false;
+  const query = ctx.state.sliceDoc(last.from, ctx.pos);
+  if (/\s/.test(query) || restOfLine(ctx.state, ctx.pos) !== last.rest) return false;
+  if (last.query.startsWith(query)) return true;
+  if (!query.startsWith(last.query)) return false;
+  return ![...query.slice(last.query.length)].some((ch) => triggers.includes(ch));
+}
+
 export function lspCompletionSource(
   backend: LspCompletionBackend,
   opts: LspCompletionOptions = {},
@@ -346,24 +395,21 @@ export function lspCompletionSource(
   const wordPattern = opts.wordPattern ?? DEFAULT_WORD;
   const minWord = opts.minWordLength ?? 2;
   const glyphOf = opts.glyph ?? defaultGlyph;
-  // Where the last incomplete list started, per view: typing on re-queries it (kind 3).
-  const incomplete = new WeakMap<object, { from: number; prefix: string }>();
+  // The last incomplete list per view: typing on its query re-queries it (kind 3).
+  const incomplete = new WeakMap<object, IncompleteList>();
   const noView = {};
 
   return async (ctx: CompletionContext): Promise<CompletionResult | null> => {
     if (ctx.view?.compositionStarted) return null;
     const key = ctx.view ?? noView;
+    const triggers = backend.triggerCharacters();
     const prev = ctx.pos > 0 ? ctx.state.sliceDoc(ctx.pos - 1, ctx.pos) : "";
-    const trigger = backend.triggerCharacters().includes(prev) ? prev : null;
+    const trigger = triggers.includes(prev) ? prev : null;
     const wordMatch = ctx.matchBefore(wordPattern);
     const word = wordMatch?.text ?? "";
-    // Typing on (or backspacing within) the word of an incomplete list re-queries it.
     const last = incomplete.get(key);
     incomplete.delete(key);
-    const typedNow = last && ctx.pos >= last.from ? ctx.state.sliceDoc(last.from, ctx.pos) : null;
-    const continues =
-      !!last && typedNow !== null && !/\s/.test(typedNow) &&
-      (typedNow.startsWith(last.prefix) || last.prefix.startsWith(typedNow));
+    const continues = !!last && continuesQuery(last, ctx, triggers);
     let context: LspCompletionContext;
     if (ctx.explicit) context = { triggerKind: 1 };
     else if (trigger) context = { triggerKind: 2, triggerCharacter: trigger };
@@ -400,6 +446,7 @@ export function lspCompletionSource(
     }
 
     const built: { option: Completion; edit: CompletionEdit }[] = [];
+    const preselected = new Set<Completion>();
     for (const { item, edit } of byKey.values()) {
       const glyph = glyphOf(item);
       const single = item.detail && !item.detail.includes("\n") ? item.detail : undefined;
@@ -419,6 +466,7 @@ export function lspCompletionSource(
       if (opts.augment?.(item, option, edit, ctx) === false) continue;
       option.info ??= infoFor(item, backend, opts.renderInfo);
       if (glyph) glyphs.set(option, glyph);
+      if (item.preselect) preselected.add(option);
       if (item.filterText && item.filterText !== item.label) filterTexts.set(option, item.filterText);
       built.push({ option, edit });
     }
@@ -433,15 +481,30 @@ export function lspCompletionSource(
       return option;
     });
     if (opts.rank) options = opts.rank(options, ctx, from);
+    if (trigger && !ctx.explicit) {
+      for (const o of options) if (!preselected.has(o)) emptyQueryAt.set(o, ctx.pos);
+    }
+    const query = ctx.state.sliceDoc(from, ctx.pos);
     if (list?.isIncomplete) {
-      incomplete.set(key, { from, prefix: ctx.state.sliceDoc(from, ctx.pos) });
+      incomplete.set(key, { from, query, rest: restOfLine(ctx.state, ctx.pos) });
       return { from, options };
     }
-    if (options.some((o) => filterTexts.has(o))) {
-      return filteredByText(options, from, ctx.state.sliceDoc(from, ctx.pos));
-    }
-    return { from, options, validFor: opts.validFor ? opts.validFor(ctx, from) : DEFAULT_VALID };
+    if (options.some((o) => filterTexts.has(o))) return filteredByText(options, from, query, query);
+    return { from, options, validFor: extending(opts.validFor ? opts.validFor(ctx, from) : DEFAULT_VALID, query) };
   };
+}
+
+/**
+ * A complete list answers the query it was requested for and whatever extends it: the
+ * server filtered it by that query. Once the query is backspaced into or edited into
+ * something else (`\alp` Backspace x3 `bet`), CM asks again instead of filtering the list
+ * for `alp` (VS Code re-triggers once the cursor moves left of where the list was asked).
+ */
+function extending(valid: CompletionResult["validFor"], query: string): CompletionResult["validFor"] {
+  if (!valid) return valid;
+  if (typeof valid === "function") return (text, from, to, state) => text.startsWith(query) && valid(text, from, to, state);
+  const re = new RegExp(`^(?:${valid.source})$`, valid.flags.replace(/[gy]/g, ""));
+  return (text) => text.startsWith(query) && re.test(text);
 }
 
 /**
@@ -449,9 +512,10 @@ export function lspCompletionSource(
  * type, title, authors) is filtered here: CM's matcher only sees the label, and it matches
  * a one-character query only at the label start, so `\cite{M` could never reach "Masked".
  * Every query word must occur in the filterText; label-prefix matches come first. Typing
- * `,` `{` `}` or `\` ends the local filtering and queries the server again.
+ * `,` `{` `}` or `\`, or backspacing into the query the list was `asked` for, ends the
+ * local filtering and queries the server again.
  */
-function filteredByText(all: readonly Completion[], from: number, query: string): CompletionResult | null {
+function filteredByText(all: readonly Completion[], from: number, query: string, asked: string): CompletionResult | null {
   const q = query.toLowerCase();
   const words = q.split(/\s+/).filter(Boolean);
   const hits = all.filter((o) => {
@@ -467,7 +531,7 @@ function filteredByText(all: readonly Completion[], from: number, query: string)
     filter: false,
     update: (_current, start, to, ctx) => {
       const text = ctx.state.sliceDoc(start, to);
-      return /[{},\\\n]/.test(text) ? null : filteredByText(all, start, text);
+      return /[{},\\\n]/.test(text) || !text.startsWith(asked) ? null : filteredByText(all, start, text, asked);
     },
   };
 }

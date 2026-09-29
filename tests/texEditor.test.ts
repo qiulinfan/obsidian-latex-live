@@ -237,7 +237,7 @@ test("fast Enter after \\begin{ali is dropped when typing goes on", async () => 
   done(c);
 });
 
-test("$ and { pair after Chinese text and before Chinese punctuation", () => {
+test("$, { and \\( \\[ pair after Chinese text and before Chinese punctuation", () => {
   for (const punct of "，。：；）") {
     const c = make(`设|${punct}则`);
     typeKeys(c.view, "$");
@@ -249,12 +249,20 @@ test("$ and { pair after Chinese text and before Chinese punctuation", () => {
   const c = make("设|，则");
   typeKeys(c.view, "$$");
   assert.equal(line(c.view), "设$$|$$，则", "$$ still opens display math");
+  c.view.dispatch({ changes: { from: 0, to: c.view.state.doc.length, insert: "𠀀，" }, selection: { anchor: 2 } });
+  typeKeys(c.view, "$x$");
+  assert.equal(line(c.view), "𠀀$x$|，", "a Han character outside the BMP counts too");
   c.view.dispatch({ changes: { from: 0, to: c.view.state.doc.length, insert: "见\\ref，" }, selection: { anchor: 5 } });
   typeKeys(c.view, "{");
   assert.equal(line(c.view), "见\\ref{|}，");
   c.view.dispatch({ changes: { from: 0, to: c.view.state.doc.length, insert: "$x+y" }, selection: { anchor: 4 } });
   typeKeys(c.view, "$");
   assert.equal(line(c.view), "$x+y$|", "after a Latin letter $ closes math, as before");
+  for (const [open, close] of [["\\(", "\\)"], ["\\[", "\\]"]]) {
+    c.view.dispatch({ changes: { from: 0, to: c.view.state.doc.length, insert: "见，" }, selection: { anchor: 1 } });
+    typeKeys(c.view, open);
+    assert.equal(line(c.view), `见${open}|${close}，`, `${open} pairs before Chinese punctuation`);
+  }
   done(c);
 });
 

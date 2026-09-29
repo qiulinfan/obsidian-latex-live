@@ -29,14 +29,21 @@
 - Editor keys: `keyArbiter` (from `src/editor/shared/`) is mounted FIRST in
   `texEditorExtensions` and owns Tab, Shift-Tab, Enter, Escape, ArrowUp and
   ArrowDown (completion popup > YOLO ghost text > snippet field > indent; Enter
-  accepts only when that changes the text and never accepts AI text). Never bind
+  accepts only when that changes the text, never from a list a trigger character
+  opened before anything was typed or the selection moved (`\ref{` + Enter is a
+  newline, and so is `\re` + Tab + Enter: accepting `\ref` reopens the argument's list
+  through autocompletion's `activateOnCompletion`, as if `{` was typed, never with the
+  explicit `startCompletion`; texlab's preselected name after `\end{` still counts), and
+  never accepts AI text). Never bind
   these keys anywhere else; LaTeX Enter behaviour goes into the arbiter's `enter`
   hooks (`src/editor/latexEnter.ts`, which also holds `latexIndent`, the
-  indentService for new lines). A hook that must wait for the completion popup
-  (`\begin{ali|}` + a fast Enter) swallows the key and pumps like Tab-ahead instead
-  of binding anything. The arbiter never intercepts Backspace; the view keymap binds
-  editorKit's `deleteMathPair` (empty `\(|\)` / `\[|\]`) just before
-  `closeBracketsKeymap`. Obsidian
+  indentService for new lines). In a snippet field a Tab typed while completions load
+  waits only under a popup already shown or after a command name (the arbiter's
+  `completesWord` is `typingCommand`: `\frac{\alp|}{}` + a fast Tab completes). A
+  hook that must wait for the completion popup (`\begin{ali|}` + a fast Enter)
+  swallows the key and pumps like Tab-ahead instead of binding anything. The arbiter
+  never intercepts Backspace; the view keymap binds editorKit's `deleteMathPair`
+  (empty `\(|\)` / `\[|\]`) just before `closeBracketsKeymap`. Obsidian
   hotkeys that would swallow editor keys (Mod-/, Mod-D, Mod-G, Mod-B, Mod-I,
   Mod-E, ...) are routed through the view's `Scope` (`registerEditorScope`);
   Mod-S and Mod-F keep their Obsidian meaning (`showSearch` handles Mod-F).
@@ -77,8 +84,13 @@
     misplaces a field after three or more escapes right before it).
   - texlab 5.26 sends files and folders as kind 1 (never 17): file-argument rules
     key on the argument context. At `\frac{\|}{}` it reads the control symbol `\}`
-    and its range covers the `}`; built-ins never take a texlab range that reaches
-    past the word.
+    and its range covers the `}` (`$\|$`: `\$` and the closing `$`); built-ins never
+    take a texlab range that reaches past the word, after a bare `\` in front of a `}`
+    or of a `$` closing math every item's range stops at the cursor (a `$` opening math
+    keeps texlab's range), and a bare-`\` list counts as incomplete (the next letter
+    asks again).
+  - A complete list is reused only while the query extends the one it was asked for
+    (shared `lspCompletion`); backspacing into it asks texlab again, explicit lists too.
 - Build output goes to `$TMPDIR/obsidian-latex-live/<hash of root>/`, never
   into the vault.
 - Desktop only (`isDesktopOnly: true`).

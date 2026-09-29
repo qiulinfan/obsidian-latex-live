@@ -9,6 +9,7 @@
 //   editNotifier          committed edits only: nothing while an IME composition is open
 //   languageData / detectIndentUnit           closeBrackets, commentTokens, indent unit
 //   mathInput / mathEnter / deleteMathPair    $, \( \[ and escapes, which closeBrackets cannot express
+//   CLOSE_BEFORE          what brackets and math pair before, CJK closing punctuation included
 //   wrapSelection, indentOrInsertTab, showSearch
 //   registerEditorScope   Obsidian hotkeys that would otherwise swallow editor keys
 // Only type imports from "obsidian" are allowed here: tests bundle this without Obsidian.
@@ -32,6 +33,7 @@ import {
   Prec,
   StateEffect,
   Text,
+  TransactionSpec,
 } from "@codemirror/state";
 import { Command, EditorView, KeyBinding } from "@codemirror/view";
 import type { Modifier, Scope } from "obsidian";
@@ -299,11 +301,20 @@ export function indentUnitFor(text: string, fallback = "  "): Extension {
 
 // ---- Math delimiters ----------------------------------------------------------------
 
+/**
+ * CodeMirror's closeBrackets default `before` (")]}:;>") plus Chinese and Japanese closing
+ * punctuation: a pair opens before these, whitespace or the line end. mathInput uses it for
+ * `$` after CJK text and for `\(` / `\[`; pass it to languageData's `before` for the brackets.
+ */
+export const CLOSE_BEFORE = ")]}:;>，。：；）、！？」』";
+
 export interface MathInputOptions {
   /** `$` typed inside an empty `$|$` becomes open|close (default ["$$", "$$"]; null: off). */
   display?: [string, string] | null;
   /** LaTeX: `\(` / `\[` insert `\)` / `\]`, and typing `\)` / `\]` steps over that closer. */
   latexDelimiters?: boolean;
+  /** What `$` after CJK text, `\(` and `\[` pair before, besides whitespace (default CLOSE_BEFORE). */
+  closeBefore?: string;
 }
 
 const unescapedBackslashBefore = (state: EditorState, pos: number): boolean => {
@@ -314,15 +325,29 @@ const unescapedBackslashBefore = (state: EditorState, pos: number): boolean => {
 
 /** Characters closeBrackets may pair or step over; after a backslash they are escapes. */
 const ESCAPABLE = "$(){}[]\"";
+/** The line ends in CJK text (Han, kana, Hangul): inline math follows it without a space. */
+const CJK_END = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]$/u;
+/** Math is open at the end of `text`: an odd number of unescaped `$` delimiters (`$$` counts once). */
+const mathOpen = (text: string): boolean =>
+  (text.match(/\\[\s\S]|\$\$?/g) ?? []).filter((m) => m[0] === "$").length % 2 === 1;
 
 /**
  * Input rules on top of closeBrackets (with "$" among its brackets, which already pairs,
  * wraps a selection and steps over `$`). Mount next to closeBrackets(); it runs first.
- * A bracket or `$` typed after an unescaped backslash (`\$`, `\{`, `\}`, Typst `\(`) is an
- * escaped character: inserted as is, never paired and never stepping over a closer.
+ *   - `$` inside an empty `$|$` opens display math (`display`).
+ *   - `$` right after CJK text opens a pair before whitespace, the line end or `closeBefore`
+ *     (`设|，则` -> `设$|$，则`): closeBrackets never pairs `$` after a word character, where
+ *     it usually closes math, and CJK characters are word characters. With math open on the
+ *     line (`$a \in 集|`) that `$` closes it and stays single. closeBrackets only steps over
+ *     closers it inserted itself, so `$` in front of the closer of such a pair steps over it.
+ *   - LaTeX `\(` / `\[` pair before whitespace, the line end, `$` or `closeBefore`.
+ *   - A bracket or `$` typed after an unescaped backslash (`\$`, `\{`, `\}`, Typst `\(`) is
+ *     an escaped character: inserted as is, never paired and never stepping over a closer.
  */
 export function mathInput(opts: MathInputOptions = {}): Extension {
   const display = opts.display === undefined ? (["$$", "$$"] as [string, string]) : opts.display;
+  const closeBefore = opts.closeBefore ?? CLOSE_BEFORE;
+  const opensBefore = (next: string) => next === "" || /\s/.test(next) || closeBefore.includes(next);
   return Prec.high(
     EditorView.inputHandler.of((view, from, to, text) => {
       const { state } = view;
@@ -342,11 +367,27 @@ export function mathInput(opts: MathInputOptions = {}): Extension {
         });
         return true;
       }
-      if (!unescapedBackslashBefore(state, from)) return false;
+      const escaped = unescapedBackslashBefore(state, from);
+      if (text === "$" && !escaped) {
+        // After CJK text: open a pair, or step over the closer of such a pair.
+        const line = state.doc.lineAt(from);
+        const lineBefore = line.text.slice(0, from - line.from);
+        const open = /\$[^$]+$/.exec(lineBefore); // the math this `$` would close
+        let spec: TransactionSpec | null = null;
+        if (CJK_END.test(lineBefore) && opensBefore(after.slice(0, 1)) && !mathOpen(lineBefore)) {
+          spec = { changes: { from, insert: "$$" }, selection: { anchor: from + 1 } };
+        } else if (after[0] === "$" && after[1] !== "$" && open && CJK_END.test(lineBefore.slice(0, open.index))) {
+          spec = { selection: { anchor: from + 1 } };
+        }
+        if (!spec) return false;
+        view.dispatch({ ...spec, userEvent: "input.type", scrollIntoView: true });
+        return true;
+      }
+      if (!escaped) return false;
       if (opts.latexDelimiters && (text === "(" || text === "[")) {
         const closer = text === "(" ? "\\)" : "\\]";
         const next = after[0] ?? "";
-        const pair = next === "" || /\s/.test(next) || ")]}:;>$".includes(next);
+        const pair = next === "$" || opensBefore(next);
         view.dispatch({
           changes: { from, insert: pair ? text + closer : text },
           selection: { anchor: from + 1 },

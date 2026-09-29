@@ -9,11 +9,12 @@ import {
   currentCompletions,
   hasNextSnippetField,
   selectedCompletionIndex,
+  setSelectedCompletion,
   startCompletion,
 } from "@codemirror/autocomplete";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { latexBackend, latexCompletionSource, latexContext } from "../src/editor/latexCompletion";
+import { latexBackend, latexCompletionSource, latexContext, typingCommand } from "../src/editor/latexCompletion";
 import {
   LspCompletionBackend,
   LspCompletionContext,
@@ -24,7 +25,7 @@ import {
 import { TexEditorOptions, texEditorExtensions } from "../src/editor/texExtensions";
 import { TexlabServer, resolveTexlab, texlabSettings } from "../src/lsp/texlab";
 import { scanDefinitions } from "../src/tex/macros";
-import { press } from "./support/keyMatrix";
+import { applySnippet, press } from "./support/keyMatrix";
 
 interface FixtureCase {
   doc: string;
@@ -315,24 +316,37 @@ test("typing activates only after \\ + a letter or inside argument braces", asyn
 
 test("accepting \\ref opens the label list inside the braces", async () => {
   const c = CASE.ref;
-  const { backend: b } = backend((state, pos) => {
+  const { backend: b, calls } = backend((state, pos) => {
     const line = state.doc.line(pos.line + 1).text.slice(0, pos.character);
     if (line.endsWith("\\ref{")) return c.response;
     if (line.endsWith("\\re")) return { items: [item("ref", "built-in", range(pos.line, 1, pos.character))] };
     return null;
   });
   // The recorded document has `\ref{}`: type `re`, accept, and get it back.
-  const view = editor(c.doc.slice(0, c.offset - 4) + "|" + c.doc.slice(c.offset + 1), latexCompletionSource(b));
+  const start = c.doc.slice(0, c.offset - 4) + "|" + c.doc.slice(c.offset + 1);
+  const view = editor(start, latexCompletionSource(b));
   type(view, "re");
   await settle(view);
   press(view, "Tab");
   assert.equal(lineAtCursor(view), "\\ref{|}");
   await settle(view);
   assert.deepEqual(labels(view).sort(), ["distribution function 的性质", "eq:cdf", "eq:main", "sec:intro"]);
+  assert.deepEqual(calls.at(-1)!.context, { triggerKind: 2, triggerCharacter: "{" }, "opened as if `{` was typed");
   press(view, "ArrowDown");
   press(view, "Tab");
   assert.match(lineAtCursor(view), /^\\ref\{[^}]+\|\}$/);
   view.destroy();
+  // Nothing typed or selected in that list yet: Enter is a newline, as after `\ref{` typed.
+  const enter = editor(start, latexCompletionSource(b));
+  type(enter, "re");
+  await settle(enter);
+  press(enter, "Tab");
+  await settle(enter);
+  assert.ok(labels(enter).length);
+  press(enter, "Enter");
+  assert.equal(completionStatus(enter.state), null);
+  assert.match(enter.state.doc.toString(), /\\begin\{document\}\n\\ref\{\n\s*\n\}\n/);
+  enter.destroy();
 });
 
 test("a citation typed by title before the list opened: texlab's key-only miss falls back", async () => {
@@ -442,6 +456,85 @@ test("a built-in never takes over texlab's range past the word (`\\frac{\\|}{}` 
   press(view, "Tab");
   assert.equal(lineAtCursor(view), "\\frac{\\alpha|}{}");
   view.destroy();
+});
+
+test("a bare `\\` before `}` or `$`: texlab's control symbol keeps the closer; the next letter asks again", async () => {
+  // texlab 5.26 (probed): at `\frac{\|}{}` / `$\|$` only the control symbol `\}` / `\$`, a
+  // complete list whose range covers the closer; at `\alp|` its commands, range `alp`.
+  const { backend: b, calls } = backend((state, pos) => {
+    const text = state.doc.line(pos.line + 1).text;
+    const word = /[A-Za-z]*$/.exec(text.slice(0, pos.character))![0];
+    if (!word) {
+      const symbol = text[pos.character];
+      return { items: [{ label: symbol, kind: 1, textEdit: { range: range(pos.line, pos.character, pos.character + 1), newText: symbol } }] };
+    }
+    const r = range(pos.line, pos.character - word.length, pos.character);
+    return { items: ["alph", "aleph"].filter((l) => l.startsWith(word)).map((l) => item(l, "texlab", r)) };
+  });
+  for (const [start, symbol, want] of [
+    ["\\frac{|}{}", "}", "\\frac{\\}|}{}"],
+    ["see \\textbf{|} here", "}", "see \\textbf{\\}|} here"],
+    ["$|$", "$", "$\\$|$"],
+    ["$$x = |$$", "$", "$$x = \\$|$$"],
+    ["$a|,b$", ",", "$a\\,|b$"], // not a closer: texlab's range turns the comma into `\,`
+    ["Cost |$5$ more", "$", "Cost \\$|5$ more"], // a `$` opening math: texlab's range escapes it
+  ]) {
+    const view = editor(start, latexCompletionSource(b));
+    type(view, "\\");
+    startCompletion(view);
+    await settle(view);
+    const i = labels(view).indexOf(symbol);
+    assert.ok(i >= 0, labels(view).join(" "));
+    view.dispatch({ effects: setSelectedCompletion(i) });
+    press(view, "Tab");
+    assert.equal(lineAtCursor(view), want, `${start}: picking \`\\${symbol}\``);
+    view.destroy();
+  }
+  const view = editor("$\\frac{|}{}$", latexCompletionSource(b));
+  type(view, "\\");
+  startCompletion(view);
+  await settle(view);
+  calls.length = 0;
+  type(view, "alp");
+  await settle(view);
+  assert.equal(calls.at(-1)?.before, "$\\frac{\\alp", "texlab is asked again, not the one-symbol answer filtered");
+  assert.ok(labels(view).includes("alph"), labels(view).join(" "));
+  press(view, "Tab");
+  assert.equal(lineAtCursor(view), "$\\frac{\\alpha|}{}$");
+  view.destroy();
+});
+
+test("in a snippet field a fast Tab after a command name waits for its list (typingCommand)", async () => {
+  const at = (text: string) => {
+    const i = text.indexOf("|");
+    return typingCommand(EditorState.create({ doc: text.replace("|", ""), selection: { anchor: i } }));
+  };
+  assert.deepEqual(
+    ["$\\alp|$", "\\sec|tion", "$\\|$", "a \\\\al|", "\\ref{se|}", "plain|"].map(at),
+    [true, true, false, false, false, false],
+  );
+  const { backend: b } = backend(async (state, pos) => {
+    await sleep(30);
+    const word = /\\([A-Za-z]*)$/.exec(state.doc.line(pos.line + 1).text.slice(0, pos.character))?.[1];
+    if (word === undefined) return null;
+    const r = range(pos.line, pos.character - word.length, pos.character);
+    return { items: ["alpha", "alph", "beta"].filter((l) => l.startsWith(word)).map((l) => item(l, "texlab", r)) };
+  });
+  for (const [typed, after, want] of [
+    ["\\alp", "", "$\\frac{\\alpha|}{}$"],
+    ["\\alpha", "", "$\\frac{\\alpha}{|}$"], // the list only holds the word as typed
+    ["\\alp", "2", "$\\frac{\\alp}{2|}$"], // typed on before the list came: the Tab went first
+    ["\\\\al", "", "$\\frac{\\\\al}{|}$"], // `\\` is a line break, `al` plain text
+  ]) {
+    const view = editor("$|$", latexCompletionSource(b));
+    applySnippet(view, "\\frac{${1}}{${2}}");
+    typeKeys(view, typed);
+    press(view, "Tab");
+    typeKeys(view, after);
+    await sleep(400);
+    assert.equal(lineAtCursor(view), want, `${typed} Tab ${after}`);
+    view.destroy();
+  }
 });
 
 test("glyphs: texlab detail and built-in symbols", () => {
@@ -585,6 +678,213 @@ test("live texlab on a copied project", { skip: !TEXLAB_BIN && "texlab not found
       done(view);
     });
 
+  } finally {
+    await server.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("live texlab: smart Enter on untouched argument lists; no stale re-query after a snippet", { skip: !TEXLAB_BIN && "texlab not found (set TEXLAB_BIN)" }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ll-texlab-keys-"));
+  cpSync("tests/fixtures/texproj", dir, { recursive: true });
+  const main = join(dir, "main.tex");
+  const original = readFileSync(main, "utf8");
+  const server = new TexlabServer({
+    binary: () => TEXLAB_BIN,
+    root: dir,
+    env: () => process.env,
+    settings: () => texlabSettings(null),
+  });
+  /** Every request as "text before the cursor|triggerKind". */
+  const calls: string[] = [];
+  const texlab: LspCompletionBackend = {
+    triggerCharacters: () => server.triggerCharacters(),
+    request: (pos, context, state) => {
+      calls.push(state.doc.line(pos.line + 1).text.slice(0, pos.character) + "|" + context.triggerKind);
+      return server.completion(main, state.doc, pos, context);
+    },
+  };
+  const open = (line: string) => {
+    const doc = original.replace("\\begin{document}\n", () => `\\begin{document}\n${line}\n`); // a function keeps `$$` in `line`
+    const view = editor(doc, latexCompletionSource(texlab), (v, changes, startDoc) =>
+      server.change(main, v.state.doc, changes, startDoc),
+    );
+    server.open(main, view.state.doc);
+    return view;
+  };
+  const done = (view: EditorView) => {
+    server.close(main);
+    view.destroy();
+  };
+  try {
+    assert.equal(await server.ensureStarted(), true);
+
+    await t.test("\\ref{ + Enter right away is a newline; ArrowDown + Enter takes a label", async () => {
+      const view = open("See |");
+      typeKeys(view, "\\ref{");
+      await settle(view);
+      assert.ok(labels(view).includes("sec:intro"), labels(view).join(" | "));
+      press(view, "Enter");
+      assert.equal(completionStatus(view.state), null);
+      assert.match(view.state.doc.toString(), /See \\ref\{\n\s*\n\}/);
+      done(view);
+      const nav = open("See |");
+      typeKeys(nav, "\\ref{");
+      await settle(nav);
+      const second = labels(nav)[1];
+      press(nav, "ArrowDown");
+      press(nav, "Enter");
+      assert.equal(lineAtCursor(nav), `See \\ref{${second}|}`);
+      done(nav);
+    });
+
+    await t.test("\\end{ + Enter takes the environment texlab preselects", async () => {
+      const view = open("\\begin{align}\n  a\n|");
+      typeKeys(view, "\\end{");
+      await settle(view);
+      assert.equal(labels(view)[0], "align");
+      press(view, "Enter");
+      assert.equal(lineAtCursor(view), "\\end{align}|");
+      done(view);
+    });
+
+    await t.test("\\fr + Tab, then \\ in \\frac{|}{}: nothing is asked until a letter follows", async () => {
+      const view = open("Let $x = |$ be.");
+      type(view, "\\fr");
+      await settle(view);
+      press(view, "Tab");
+      assert.equal(lineAtCursor(view), "Let $x = \\frac{|}{}$ be.");
+      calls.length = 0;
+      type(view, "\\");
+      await settle(view);
+      assert.deepEqual(calls, [], "the finished \\fr list is not re-queried");
+      type(view, "alp");
+      await settle(view);
+      assert.equal(calls[0], "Let $x = \\frac{\\alp|1", calls.join(" ; "));
+      press(view, "Tab");
+      assert.equal(lineAtCursor(view), "Let $x = \\frac{\\alpha|}{}$ be.");
+      done(view);
+    });
+
+    await t.test("\\re + Tab opens the label list as if typed: Enter right away is a newline, Tab takes a label", async () => {
+      const view = open("See |");
+      type(view, "\\re");
+      await settle(view);
+      assert.equal(labels(view)[0], "ref");
+      press(view, "Tab");
+      assert.equal(lineAtCursor(view), "See \\ref{|}");
+      await settle(view);
+      assert.ok(labels(view).includes("sec:intro"), labels(view).join(" | "));
+      press(view, "Enter");
+      assert.equal(completionStatus(view.state), null);
+      assert.match(view.state.doc.toString(), /See \\ref\{\n\s*\n\}/);
+      done(view);
+      const tab = open("See |");
+      type(tab, "\\re");
+      await settle(tab);
+      press(tab, "Tab");
+      await settle(tab);
+      const first = labels(tab)[0];
+      press(tab, "Tab");
+      assert.equal(lineAtCursor(tab), `See \\ref{${first}|}`);
+      done(tab);
+    });
+
+    await t.test("a bare \\ before } or $: texlab's control symbol keeps the closer; letters ask texlab again", async () => {
+      // texlab reads `\}` / `\$` there and its range covers the closer of the group.
+      for (const [line, symbol, want] of [
+        ["Let $x = \\frac{|}{}$ be.", "}", "Let $x = \\frac{\\}|}{}$ be."],
+        ["Let $|$ be.", "$", "Let $\\$|$ be."],
+        ["See \\textbf{|} here.", "}", "See \\textbf{\\}|} here."],
+        ["Let $a|,b$ be.", ",", "Let $a\\,|b$ be."], // not a closer: the comma becomes `\,`
+        ["Let $$x = |$$ be.", "$", "Let $$x = \\$|$$ be."],
+        ["Cost |$5$ more.", "$", "Cost \\$|5$ more."], // a `$` opening math is escaped as texlab says
+      ]) {
+        const view = open(line);
+        type(view, "\\");
+        startCompletion(view);
+        await settle(view);
+        const i = labels(view).indexOf(symbol);
+        assert.ok(i >= 0, labels(view).slice(0, 10).join(" "));
+        view.dispatch({ effects: setSelectedCompletion(i) });
+        press(view, "Tab");
+        assert.equal(lineAtCursor(view), want);
+        done(view);
+      }
+      // `\`, Ctrl-Space, a pause, then letters: texlab's commands for `\alp`, the `}` kept.
+      const view = open("Let $x = \\frac{|}{}$ be.");
+      type(view, "\\");
+      startCompletion(view);
+      await settle(view);
+      calls.length = 0;
+      for (const ch of "alp") {
+        type(view, ch);
+        await sleep(130);
+      }
+      await settle(view);
+      assert.equal(calls.at(-1), "Let $x = \\frac{\\alp|1", calls.join(" ; "));
+      assert.ok(labels(view).includes("alph"), labels(view).join(" "));
+      press(view, "Tab");
+      assert.equal(lineAtCursor(view), "Let $x = \\frac{\\alpha|}{}$ be.");
+      done(view);
+    });
+
+    await t.test("an explicit list is asked again once its query is backspaced away", async () => {
+      // Ctrl-Space at `\alp` (or at a bare `\`, then `alp`), Backspace x3, `bet`: texlab's
+      // list for `alp` once stayed open and `bet` picked `\SetMathAlphabet` from it.
+      for (const explicitAt of ["\\alp", "\\"]) {
+        const view = open("Let $x = |$ be.");
+        type(view, explicitAt);
+        await settle(view);
+        startCompletion(view);
+        await settle(view);
+        for (const ch of "\\alp".slice(explicitAt.length)) {
+          type(view, ch);
+          await sleep(130);
+        }
+        await settle(view);
+        calls.length = 0;
+        for (let i = 0; i < 3; i++) {
+          press(view, "Backspace");
+          await sleep(130);
+        }
+        await settle(view);
+        assert.equal(calls.at(-1), "Let $x = \\|1", calls.join(" ; "));
+        for (const ch of "bet") {
+          type(view, ch);
+          await sleep(130);
+        }
+        await settle(view);
+        assert.equal(labels(view)[0], "beta", labels(view).slice(0, 6).join(" "));
+        press(view, "Tab");
+        assert.equal(lineAtCursor(view), "Let $x = \\beta|$ be.", `Ctrl-Space at ${explicitAt}`);
+        done(view);
+      }
+    });
+
+    await t.test("\\frac{|}{}: a fast Tab after \\alp completes it; after a full name the next key goes on", async () => {
+      // [typed at 40 ms a key, then Tab 40 ms later, then typed right away, want]
+      for (const [typed, after, want] of [
+        ["\\alp", "", "Let $x = \\frac{\\alpha|}{}$ be."],
+        ["\\alpha", "2", "Let $x = \\frac{\\alpha}{2|}$ be."],
+        ["\\alpha", "", "Let $x = \\frac{\\alpha}{|}$ be."],
+      ]) {
+        const view = open("Let $x = |$ be.");
+        type(view, "\\fr");
+        await settle(view);
+        press(view, "Tab");
+        assert.equal(lineAtCursor(view), "Let $x = \\frac{|}{}$ be.");
+        for (const ch of typed) {
+          typeKeys(view, ch);
+          await sleep(40);
+        }
+        press(view, "Tab");
+        typeKeys(view, after);
+        await sleep(500);
+        assert.equal(lineAtCursor(view), want, `${typed} Tab ${after}`);
+        done(view);
+      }
+    });
   } finally {
     await server.dispose();
     rmSync(dir, { recursive: true, force: true });

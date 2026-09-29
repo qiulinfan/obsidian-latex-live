@@ -9,6 +9,7 @@ import { Command, EditorView } from "@codemirror/view";
 import type { App } from "obsidian";
 import { indentOrInsertTab } from "../src/editor/shared/editorKit";
 import { acceptWouldChange, keyArbiter } from "../src/editor/shared/keyArbiter";
+import { LspCompletionItem, lspCompletionSource } from "../src/editor/shared/lspCompletion";
 import { YoloBridge, bindYolo } from "../src/editor/shared/yoloBridge";
 import { FakeYolo, fakeYolo } from "./support/fakeYolo";
 import {
@@ -91,6 +92,52 @@ test("X1b smart Enter dry-runs function applies (LSP-style items)", async () => 
     press(c.view, "Enter");
     await sleep(0);
     assert.equal(diff(b, snap(c)), want, typed);
+    done(c);
+  }
+});
+
+test("X1c smart Enter: a list a trigger character opened is a newline until typed on or navigated", async () => {
+  // LSP-style members after `.` (tinymist: edits at the cursor, no sortText). Tab still
+  // accepts the first entry; Enter takes it only once the user typed or moved the selection.
+  const MEMBERS: LspCompletionItem[] = [{ label: "abs" }, { label: "pow" }, { label: "sqrt" }];
+  const members = (items: LspCompletionItem[]) =>
+    lspCompletionSource({ triggerCharacters: () => ["."], request: async () => ({ items: structuredClone(items) }) });
+  const usable = async (c: Ctx) => {
+    await waitFor(() => autocomplete.selectedCompletionIndex(c.view.state) !== null);
+    await sleep(90); // interactionDelay
+  };
+  for (const [name, steps, want, items] of [
+    ["Enter", ["Enter"], "x.\n|"],
+    ["Tab", ["Tab"], "x.abs|"],
+    ["ArrowDown Enter", ["ArrowDown", "Enter"], "x.pow|"],
+    ["ArrowDown ArrowUp Enter", ["ArrowDown", "ArrowUp", "Enter"], "x.abs|"],
+    ["typed s, Enter", ["s", "Enter"], "x.sqrt|"],
+    ["typed s, Backspace, Enter", ["s", "Backspace", "Enter"], "x.\n|"],
+    ["explicit request, Enter", ["explicit", "Enter"], "x.abs|"],
+    ["a server-preselected entry, Enter", ["Enter"], "x.pow|", [{ label: "abs" }, { label: "pow", preselect: true }]],
+  ] as [string, string[], string, LspCompletionItem[]?][]) {
+    const c = make({ doc: "x", source: members(items ?? MEMBERS) });
+    c.view.dispatch({ selection: { anchor: 1 } });
+    typeText(c.view, ".");
+    if (steps[0] === "explicit") autocomplete.startCompletion(c.view);
+    await usable(c);
+    for (const step of steps) {
+      if (step === "explicit") continue;
+      if (step.length === 1) {
+        typeText(c.view, step);
+        await usable(c);
+      } else if (step === "Backspace") {
+        press(c.view, step);
+        await usable(c);
+      } else {
+        press(c.view, step);
+      }
+    }
+    await sleep(0);
+    const { head } = c.view.state.selection.main;
+    const doc = c.view.state.doc.toString();
+    assert.equal(doc.slice(0, head) + "|" + doc.slice(head), want, name);
+    assert.equal(autocomplete.completionStatus(c.view.state), null, name);
     done(c);
   }
 });
@@ -280,6 +327,43 @@ test("X2h in a snippet field, Tab right after a non-word character moves on at o
   await sleep(300);
   assert.equal(diff(b, snap(c)), "sel=14 popup:pending->null snippet:f0->off");
   done(c);
+});
+
+test("X2i in a snippet field, Tab after a word that always asks (completesWord) waits for its list", async () => {
+  // LaTeX's `\alp` in `\frac{|}{}`: a fast Tab completes it instead of leaving it
+  // unfinished. It still moves on when the list holds the word as typed, when nothing
+  // matches, at the deadline (400 ms), or when a character is typed before the list arrives
+  // (that character goes into the next field, as if the Tab had moved on at once).
+  const command = (s: EditorState) => /\\[A-Za-z]+$/.test(s.sliceDoc(0, s.selection.main.head));
+  const typeInput = (view: EditorView, text: string) => {
+    for (const ch of text) {
+      const { from, to } = view.state.selection.main;
+      const insert = () => view.state.update({ changes: { from, to, insert: ch }, selection: { anchor: from + 1 }, userEvent: "input.type" });
+      if (!view.state.facet(EditorView.inputHandler).some((h) => h(view, from, to, ch, insert))) view.dispatch(insert());
+    }
+  };
+  for (const [typed, after, want, o, wait] of [
+    ["\\al", "", "a \\frac{\\alpha|}{}", {}, 300],
+    ["\\alpha", "", "a \\frac{\\alpha}{|}", {}, 300],
+    ["\\zz", "", "a \\frac{\\zz}{|}", {}, 300], // a list, none of it matching
+    ["\\al", "2", "a \\frac{\\al}{2|}", {}, 300],
+    ["\\al", "", "a \\frac{\\al}{|}", { sourceDelay: 700 }, 550], // the deadline
+    ["xy", "", "a \\frac{xy}{|}", {}, 300], // not such a word: the next field at once (X2c)
+  ] as [string, string, string, SetupOptions, number][]) {
+    const c = make({ ...o, completesWord: command });
+    typeText(c.view, "a ");
+    await settle(c.view);
+    applySnippet(c.view, "\\frac{${1}}{${2}}");
+    typeText(c.view, typed);
+    assert.equal(snap(c).cmp, "pending", typed);
+    assert.equal(press(c.view, "Tab").handled, true);
+    typeInput(c.view, after);
+    await sleep(wait);
+    const { head } = c.view.state.selection.main;
+    const doc = c.view.state.doc.toString();
+    assert.equal(doc.slice(0, head) + "|" + doc.slice(head), want, `${typed} Tab ${after}`);
+    done(c);
+  }
 });
 
 test("without an inline provider or options the arbiter still owns the keys", async () => {
