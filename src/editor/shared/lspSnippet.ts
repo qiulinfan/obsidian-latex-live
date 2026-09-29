@@ -7,103 +7,115 @@
 //   ${n|a,b|}                 -> ${n:a}
 //   $VAR / ${VAR:default}     -> default text (variables are not resolved)
 //   \$ \} \\                  -> literal $ } \        (the LSP escapes)
-//   literal { }               -> \{ \}   (CM also treats #{...} as a field: Typst code blocks)
+//   literal { }               -> raw, except `{` after `#` `$` `\` and `}` after `\`, which
+//                                become \{ \} (CM reads `#{...}` / `${...}` as fields and
+//                                `\{` / `\}` as escapes)
+// Escapes are kept to that minimum because 6.20.3's Snippet.parse compares each escape's
+// position against field positions that earlier escapes on the line already shifted:
+// `\frac\{${1}\}\{${2}\}` puts field 2 after the closing brace. Three or more escapes right
+// before a field on one line can still misplace it.
 // CM numbered field defaults cannot contain braces or line breaks; such a field keeps its
 // tab stop but loses its default text. Nested fields are flattened into the outer default.
 
+/** Literal text, or a numbered tab stop with its default text. */
+type Part = string | { n: string; def: string };
+
 interface Cursor { s: string; i: number }
 
-function parseAny(c: Cursor, stop: string | null): string {
-  let out = "";
+function parseAny(c: Cursor, stop: string | null): Part[] {
+  const out: Part[] = [];
   while (c.i < c.s.length) {
     const ch = c.s[c.i];
     if (stop && ch === stop) return out;
     if (ch === "\\" && c.i + 1 < c.s.length && "$}\\".includes(c.s[c.i + 1])) {
-      out += escapeText(c.s[c.i + 1]);
+      out.push(c.s[c.i + 1]);
       c.i += 2;
     } else if (ch === "$") {
-      out += parseDollar(c);
+      out.push(...parseDollar(c));
     } else {
-      out += escapeText(ch);
+      out.push(ch);
       c.i++;
     }
   }
   return out;
 }
 
-function escapeText(t: string): string {
-  return t.replace(/[{}]/g, (b) => "\\" + b);
-}
-
-function parseDollar(c: Cursor): string {
+function parseDollar(c: Cursor): Part[] {
   const s = c.s;
   let m = /^\$(\d+)/.exec(s.slice(c.i));
   if (m) {
     c.i += m[0].length;
-    return "${" + m[1] + "}";
+    return [{ n: m[1], def: "" }];
   }
   m = /^\$([A-Za-z_][A-Za-z0-9_]*)/.exec(s.slice(c.i));
   if (m) {
     c.i += m[0].length;
-    return ""; // unresolved variable
-  }
-  if (s[c.i + 1] !== "{") {
-    c.i++;
-    return "$";
+    return []; // unresolved variable
   }
   const head = /^\$\{(\d+|[A-Za-z_][A-Za-z0-9_]*)/.exec(s.slice(c.i));
   if (!head) {
     c.i++;
-    return "$";
+    return ["$"];
   }
   c.i += head[0].length;
   const numbered = /^\d+$/.test(head[1]);
   const next = s[c.i];
   if (next === "}") {
     c.i++;
-    return numbered ? "${" + head[1] + "}" : "";
+    return numbered ? [{ n: head[1], def: "" }] : [];
   }
   if (next === "|" && numbered) {
     const end = s.indexOf("|}", c.i + 1);
     const first = (end < 0 ? "" : s.slice(c.i + 1, end)).split(/(?<!\\),/)[0].replace(/\\([,|$}\\])/g, "$1");
     c.i = end < 0 ? s.length : end + 2;
-    return plainField(head[1], escapeText(first));
+    return [field(head[1], first)];
   }
   if (next === ":") {
     c.i++;
     const inner = parseAny(c, "}");
     c.i++; // closing brace
-    if (!numbered) return inner;
-    return plainField(head[1], stripFields(inner));
+    // Nested fields are not supported by CM: keep only their text inside a default.
+    return numbered ? [field(head[1], textOf(inner))] : inner;
   }
   // ${VAR/regex/format/opts} and anything else: drop up to the closing brace
   const end = s.indexOf("}", c.i);
   c.i = end < 0 ? s.length : end + 1;
-  return numbered ? "${" + head[1] + "}" : "";
+  return numbered ? [{ n: head[1], def: "" }] : [];
 }
 
-// Nested fields are not supported by CM: keep only their text inside a default.
-function stripFields(t: string): string {
-  return t.replace(/\$\{\d+(?::((?:\\[{}]|[^{}])*))?\}/g, (_m, d: string | undefined) => d ?? "");
-}
+const textOf = (parts: Part[]): string => parts.map((p) => (typeof p === "string" ? p : p.def)).join("");
 
-function plainField(n: string, def: string): string {
-  if (!def || /[{}\r\n]/.test(def)) return "${" + n + "}"; // CM numbered defaults cannot hold these
-  return "${" + n + ":" + def + "}";
+// CM numbered defaults cannot hold braces or line breaks.
+const field = (n: string, def: string): Part => ({ n, def: /[{}\r\n]/.test(def) ? "" : def });
+
+/** The CM template for parsed parts, escaping only the braces CM would misread. */
+function template(parts: Part[]): string {
+  let out = "";
+  let last = ""; // the last character CM sees once every field is replaced by its default
+  for (const p of parts) {
+    if (typeof p !== "string") {
+      out += p.def ? "${" + p.n + ":" + p.def + "}" : "${" + p.n + "}";
+      if (p.def) last = p.def[p.def.length - 1];
+      continue;
+    }
+    for (const ch of p) {
+      const escape = ch === "{" ? last === "#" || last === "$" || last === "\\" : ch === "}" && last === "\\";
+      out += escape ? "\\" + ch : ch;
+      last = ch;
+    }
+  }
+  return out;
 }
 
 /** Convert LSP snippet text (insertTextFormat 2) to a CM snippet() template. */
 export function lspSnippetToCm(text: string): string {
-  const tpl = parseAny({ s: text, i: 0 }, null);
+  const parts = parseAny({ s: text, i: 0 }, null);
   // Linked occurrences (`\\begin{${1:env}} ... \\end{${1}}`): CM only fills the
   // occurrence that carries the default, so copy it to the bare ones.
   const defaults = new Map<string, string>();
-  for (const m of tpl.matchAll(/\$\{(\d+):([^{}]*)\}/g)) if (!defaults.has(m[1])) defaults.set(m[1], m[2]);
-  return tpl.replace(/\$\{(\d+)\}/g, (all, n: string) => (defaults.has(n) ? "${" + n + ":" + defaults.get(n) + "}" : all));
+  for (const p of parts) if (typeof p !== "string" && p.def && !defaults.has(p.n)) defaults.set(p.n, p.def);
+  return template(parts.map((p) => (typeof p !== "string" && !p.def && defaults.has(p.n) ? { n: p.n, def: defaults.get(p.n)! } : p)));
 }
-
-// The field pattern of CM's Snippet.parse, applied per line.
-const CM_FIELD = /[#$]\{(?:\d+(?::[^{}]*)?|(?:\\[{}]|[^{}])*)\}/;
 
 /**
  * The literal text an LSP snippet inserts when it has no tab stop, or null when it has
@@ -111,7 +123,6 @@ const CM_FIELD = /[#$]\{(?:\d+(?::[^{}]*)?|(?:\\[{}]|[^{}])*)\}/;
  * the insertion when a template has no fields.
  */
 export function lspSnippetPlain(text: string): string | null {
-  const tpl = lspSnippetToCm(text);
-  if (tpl.split(/\r\n?|\n/).some((line) => CM_FIELD.test(line))) return null;
-  return tpl.replace(/\\([{}])/g, "$1");
+  const parts = parseAny({ s: text, i: 0 }, null);
+  return parts.every((p) => typeof p === "string") ? parts.join("") : null;
 }

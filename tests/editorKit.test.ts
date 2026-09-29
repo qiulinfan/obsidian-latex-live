@@ -13,6 +13,7 @@ import {
   HistoryCache,
   applyEphemeralState,
   darkThemeExtension,
+  deleteMathPair,
   detectIndentUnit,
   editNotifier,
   getEphemeralState,
@@ -290,6 +291,46 @@ test("mathInput + mathEnter: \\[ and \\( pair, Enter opens the block, \\] steps 
   typeInput(noPair, "\\[");
   assert.equal(withCursor(noPair), "\\[|x", "no closer before a word, and no bare ]");
   for (const v of [view, inline, escaped, noPair]) v.destroy();
+});
+
+test("mathInput: \\$ \\{ \\} (and Typst \\( \\\") are escapes, never paired and never stepping over", () => {
+  const latex = [mathInput({ latexDelimiters: true }), languageData({ brackets: ["(", "[", "{", "$"] }), closeBrackets()];
+  const typst = [mathInput({ display: ["$ ", " $"] }), languageData({ brackets: ["(", "[", "{", '"', "$"] }), closeBrackets()];
+  const cases: [Extension[], string, string, string][] = [
+    [latex, "costs |", "\\$5 each", "costs \\$5 each|"],
+    [latex, "set |", "\\{", "set \\{|"],
+    [latex, "f(x) = |", "\\left\\{ a \\right.", "f(x) = \\left\\{ a \\right.|"],
+    [latex, "|", "$x = \\$", "$x = \\$|$"], // the closing $ stays
+    [latex, "|", "\\set{\\{x\\}", "\\set{\\{x\\}|}"], // the group's own } is kept
+    [latex, "\\\\|", "$", "\\\\$|$"], // after an escaped backslash $ still pairs
+    [latex, "|", "\\(", "\\(|\\)"],
+    [typst, "costs |", "\\$5 each", "costs \\$5 each|"],
+    [typst, "|", "\\{", "\\{|"],
+    [typst, "|", "$x = \\$", "$x = \\$|$"],
+    [typst, "|", "\\(", "\\(|"],
+    [typst, "|", '\\"', '\\"|'],
+  ];
+  for (const [exts, start, typed, want] of cases) {
+    const view = makeView(start.replace("|", ""), start.indexOf("|"), exts);
+    typeInput(view, typed);
+    assert.equal(withCursor(view), want, `${start} + ${typed}`);
+    view.destroy();
+  }
+});
+
+test("deleteMathPair: Backspace in an empty \\(|\\) or \\[|\\] deletes both delimiters", () => {
+  for (const [doc, want, handled] of [
+    ["a \\(|\\) b", "a | b", true],
+    ["\\[|\\]", "|", true],
+    ["\\(x|\\)", "\\(x|\\)", false],
+    ["\\\\(|\\)", "\\\\(|\\)", false], // `\\` is a line break: `(` is not a delimiter
+    ["$|$", "$|$", false], // closeBracketsKeymap's job
+  ] as [string, string, boolean][]) {
+    const view = makeView(doc.replace("|", ""), doc.indexOf("|"));
+    assert.equal(deleteMathPair(view), handled, doc);
+    assert.equal(withCursor(view), want, doc);
+    view.destroy();
+  }
 });
 
 // ---- commands -----------------------------------------------------------------------------

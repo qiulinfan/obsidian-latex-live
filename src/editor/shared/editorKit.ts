@@ -8,7 +8,7 @@
 //   darkThemeExtension / syncDarkTheme        EditorView.darkTheme following Obsidian's theme
 //   editNotifier          committed edits only: nothing while an IME composition is open
 //   languageData / detectIndentUnit           closeBrackets, commentTokens, indent unit
-//   mathInput / mathEnter $ and \( \[ pairing details closeBrackets cannot express
+//   mathInput / mathEnter / deleteMathPair    $, \( \[ and escapes, which closeBrackets cannot express
 //   wrapSelection, indentOrInsertTab, showSearch
 //   registerEditorScope   Obsidian hotkeys that would otherwise swallow editor keys
 // Only type imports from "obsidian" are allowed here: tests bundle this without Obsidian.
@@ -312,9 +312,14 @@ const unescapedBackslashBefore = (state: EditorState, pos: number): boolean => {
   return n % 2 === 1;
 };
 
+/** Characters closeBrackets may pair or step over; after a backslash they are escapes. */
+const ESCAPABLE = "$(){}[]\"";
+
 /**
  * Input rules on top of closeBrackets (with "$" among its brackets, which already pairs,
  * wraps a selection and steps over `$`). Mount next to closeBrackets(); it runs first.
+ * A bracket or `$` typed after an unescaped backslash (`\$`, `\{`, `\}`, Typst `\(`) is an
+ * escaped character: inserted as is, never paired and never stepping over a closer.
  */
 export function mathInput(opts: MathInputOptions = {}): Extension {
   const display = opts.display === undefined ? (["$$", "$$"] as [string, string]) : opts.display;
@@ -337,8 +342,8 @@ export function mathInput(opts: MathInputOptions = {}): Extension {
         });
         return true;
       }
-      if (!opts.latexDelimiters || !unescapedBackslashBefore(state, from)) return false;
-      if (text === "(" || text === "[") {
+      if (!unescapedBackslashBefore(state, from)) return false;
+      if (opts.latexDelimiters && (text === "(" || text === "[")) {
         const closer = text === "(" ? "\\)" : "\\]";
         const next = after[0] ?? "";
         const pair = next === "" || /\s/.test(next) || ")]}:;>$".includes(next);
@@ -350,7 +355,7 @@ export function mathInput(opts: MathInputOptions = {}): Extension {
         });
         return true; // never let closeBrackets add a bare `]` / `)` after a backslash
       }
-      if ((text === ")" || text === "]") && after === "\\" + text) {
+      if (opts.latexDelimiters && (text === ")" || text === "]") && after === "\\" + text) {
         view.dispatch({
           changes: { from: from - 1, to: from + 2, insert: "\\" + text },
           selection: { anchor: from + 1 },
@@ -359,10 +364,39 @@ export function mathInput(opts: MathInputOptions = {}): Extension {
         });
         return true;
       }
-      return false;
+      if (!ESCAPABLE.includes(text)) return false;
+      view.dispatch({
+        changes: { from, insert: text },
+        selection: { anchor: from + 1 },
+        userEvent: "input.type",
+        scrollIntoView: true,
+      });
+      return true;
     }),
   );
 }
+
+/**
+ * Backspace in an empty `\(|\)` or `\[|\]` (as mathInput pairs them) deletes both
+ * delimiters; closeBracketsKeymap only knows one-character pairs. Bind it before
+ * closeBracketsKeymap in a LaTeX view's keymap.
+ */
+export const deleteMathPair: Command = (view) => {
+  const { state } = view;
+  if (state.readOnly) return false;
+  let other = false;
+  const tr = state.changeByRange((r) => {
+    const pair = state.sliceDoc(r.from - 2, r.from + 2);
+    if (r.empty && (pair === "\\(\\)" || pair === "\\[\\]") && unescapedBackslashBefore(state, r.from - 1)) {
+      return { changes: { from: r.from - 2, to: r.from + 2 }, range: EditorSelection.cursor(r.from - 2) };
+    }
+    other = true;
+    return { range: r };
+  });
+  if (other) return false;
+  view.dispatch(state.update(tr, { userEvent: "delete.backward", scrollIntoView: true }));
+  return true;
+};
 
 /** Enter between `\[|\]` or `$$|$$`: open the block on its own indented line. */
 export const mathEnter: Command = (view) => {

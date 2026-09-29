@@ -11,6 +11,11 @@
 // Precedence, modelled on VS Code
 // (suggest widget > inline suggestion > snippet tab stop > indent):
 //   Tab       popup accept > AI ghost accept > next snippet field > Tab-ahead > view keymap
+//             (Tab-ahead: completions are still loading, so the Tab waits for them. In a
+//             snippet field it goes first while the popup for the word being typed is on
+//             screen; an incomplete list keeps it there, disabled, while it re-queries on
+//             every key. When nothing comes back the Tab moves to the next field, or runs
+//             `tabFallback`.)
 //   Shift-Tab AI ghost dismiss (consumes) > previous snippet field > view keymap
 //   Enter     popup accept (only if it changes text) > language hooks > view keymap
 //   Escape    close popup + dismiss ghost > dismiss ghost > clear snippet > swallow
@@ -65,6 +70,14 @@ export interface KeyArbiterOptions {
   swallowEscape?: boolean;
   /** Tab typed while completions are still loading waits this long for them (0 = off). */
   tabAheadMs?: number;
+  /**
+   * Runs when a Tab-ahead outside a snippet field ends because completion came back with
+   * nothing (CodeMirror reports completions as loading for its typing delay after every
+   * typed character, even when the source then declines), so a fast Tab does what a slow
+   * one does. Pass a Tab that never shifts the line from mid-word (editorKit's
+   * `indentOrInsertTab`); without it that Tab is dropped.
+   */
+  tabFallback?: Command;
 }
 
 const REQUIRED: Record<string, unknown> = {
@@ -108,7 +121,14 @@ export function acceptWouldChange(state: EditorState): boolean {
   return !cur.doc.eq(state.doc);
 }
 
-interface TabAhead { doc: Text; head: number; deadline: number; timer: ReturnType<typeof setTimeout> | null }
+interface TabAhead {
+  doc: Text;
+  head: number;
+  deadline: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  /** Tabs pressed while waiting. An accept takes them all; with nothing to accept each runs. */
+  count: number;
+}
 
 export function keyArbiter(opts: KeyArbiterOptions = {}): Extension {
   const missing = Object.keys(REQUIRED).filter((k) => typeof REQUIRED[k] !== "function");
@@ -140,6 +160,9 @@ export function keyArbiter(opts: KeyArbiterOptions = {}): Extension {
   // (activateOnTypingDelay 100 ms + source latency + interactionDelay 75 ms). Without
   // this, Tab right after `\sec` indents the whole line.
   const pendingTab = new WeakMap<EditorView, TabAhead>();
+  // Views whose popup has been on screen since completion was last idle (it stays on
+  // screen, disabled, while an incomplete list re-queries after each key).
+  const popupShown = new WeakSet<EditorView>();
   const dropTab = (view: EditorView) => {
     const t = pendingTab.get(view);
     if (t?.timer) clearTimeout(t.timer);
@@ -150,23 +173,29 @@ export function keyArbiter(opts: KeyArbiterOptions = {}): Extension {
     if (!t) return;
     const s = view.state;
     const sel = s.selection.main;
+    // Typed on, moved, or still loading at the deadline: the Tab is stale, drop it.
     if (Date.now() > t.deadline || s.doc !== t.doc || !sel.empty || sel.head !== t.head) return dropTab(view);
     if (popupUsable(s)) {
       if (acceptCompletion(view)) return dropTab(view);
     } else if (completionStatus(s) === null) {
-      return dropTab(view); // nothing came back: the Tab was a no-op
+      // Nothing came back: do what each Tab does without a popup.
+      dropTab(view);
+      for (let i = 0; i < t.count; i++) {
+        if (hasNextSnippetField(view.state)) nextSnippetField(view);
+        else opts.tabFallback?.(view);
+      }
+      return;
     }
     if (t.timer) clearTimeout(t.timer);
     t.timer = setTimeout(() => pumpTab(view), 15); // still loading or inside interactionDelay
   };
   const startTab = (view: EditorView) => {
+    const { doc } = view.state;
+    const head = view.state.selection.main.head;
+    const prev = pendingTab.get(view);
+    const count = prev && prev.doc === doc && prev.head === head ? prev.count + 1 : 1;
     dropTab(view);
-    pendingTab.set(view, {
-      doc: view.state.doc,
-      head: view.state.selection.main.head,
-      deadline: Date.now() + tabAheadMs,
-      timer: null,
-    });
+    pendingTab.set(view, { doc, head, deadline: Date.now() + tabAheadMs, timer: null, count });
     pumpTab(view);
   };
 
@@ -174,19 +203,23 @@ export function keyArbiter(opts: KeyArbiterOptions = {}): Extension {
     const s = view.state;
     if (popupUsable(s) && acceptCompletion(view)) return true; // T1
     if (inlineStatus(view) === "visible" && inline()!.accept(view)) return true; // T2
-    if (hasNextSnippetField(s)) return nextSnippetField(view); // T3
+    const field = hasNextSnippetField(s);
     const sel = s.selection.main;
+    const before = s.sliceDoc(s.doc.lineAt(sel.head).from, sel.head);
     if (
       tabAheadMs > 0 && completionStatus(s) !== null && sel.empty &&
-      /\S$/.test(s.sliceDoc(s.doc.lineAt(sel.head).from, sel.head))
+      // In a snippet field only while the popup for the word being typed is on screen.
+      (field ? popupShown.has(view) && /[\p{L}\p{N}_]$/u.test(before) : /\S$/.test(before))
     ) {
       startTab(view); // T4
       return true;
     }
+    if (field) return nextSnippetField(view); // T3
     return false; // T5: the view keymap's Tab (indentWithTab)
   };
 
   const onShiftTab: Command = (view) => {
+    dropTab(view);
     const st = inlineStatus(view);
     if (st === "visible") {
       inline()!.dismiss(view);
@@ -210,6 +243,7 @@ export function keyArbiter(opts: KeyArbiterOptions = {}): Extension {
   };
 
   const onEscape: Command = (view) => {
+    dropTab(view); // before closeCompletion, which would read as "nothing came back"
     let handled = false;
     if (completionStatus(view.state) !== null) handled = closeCompletion(view) || handled;
     if (inlineStatus(view) !== "none") {
@@ -248,9 +282,14 @@ export function keyArbiter(opts: KeyArbiterOptions = {}): Extension {
     ),
     ViewPlugin.define((view) => ({
       update: (u: ViewUpdate) => {
+        if (completionStatus(u.state) === null) popupShown.delete(view);
+        else if (popupVisible(u.state)) popupShown.add(view);
         if (pendingTab.has(view) && u.transactions.length) queueMicrotask(() => pumpTab(view));
       },
-      destroy: () => dropTab(view),
+      destroy: () => {
+        dropTab(view);
+        popupShown.delete(view);
+      },
     })),
   ];
 }

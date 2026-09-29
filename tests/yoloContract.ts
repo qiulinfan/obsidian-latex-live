@@ -84,6 +84,27 @@ test("X8 no arming under the popup; closing it arms YOLO", async () => {
   done(c);
 });
 
+test("X17b destroy and setState disarm YOLO's pending trigger (its timer would still run)", async () => {
+  const settings = triggerSettings({ idleTriggerEnabled: false });
+  let c = setup(makeReal, { settings });
+  typeText(c.view, "x, ");
+  await sleep(0);
+  assert.equal(snap(c).armed, true);
+  c.view.destroy();
+  await sleep(80);
+  assert.deepEqual(c.yolo!.runCalls, [], "no AI request for a closed file");
+  c.bridge.destroy();
+  c = setup(makeReal, { settings, doc: "one two three" });
+  typeText(c.view, "x, ");
+  await sleep(0);
+  assert.equal(snap(c).armed, true);
+  c.view.setState(c.freshState());
+  c.view.dispatch({ selection: { anchor: 3 } }); // the cursor restored to the same offset
+  await sleep(80);
+  assert.deepEqual(c.yolo!.runCalls, [], "no AI request for the file switched away from");
+  done(c);
+});
+
 test("X16 accept inserts raw text where YOLO's own path would escape it", async () => {
   const text = "<intro>\nSee @intro, and $x> 0$.";
   assert.equal(yolo.escapeForMarkdown(text, { escapeAngleBrackets: true, preserveCodeBlocks: true }), "\\<intro\\>\nSee @intro, and $x\\> 0$.");

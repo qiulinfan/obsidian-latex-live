@@ -2,17 +2,18 @@ import "./support/dom";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as autocomplete from "@codemirror/autocomplete";
-import { Completion } from "@codemirror/autocomplete";
+import { Completion, CompletionContext } from "@codemirror/autocomplete";
 import { undo } from "@codemirror/commands";
 import { EditorState, StateField } from "@codemirror/state";
 import { Command, EditorView } from "@codemirror/view";
 import type { App } from "obsidian";
+import { indentOrInsertTab } from "../src/editor/shared/editorKit";
 import { acceptWouldChange, keyArbiter } from "../src/editor/shared/keyArbiter";
 import { YoloBridge, bindYolo } from "../src/editor/shared/yoloBridge";
 import { FakeYolo, fakeYolo } from "./support/fakeYolo";
 import {
-  Ctx, GOLDEN, KEYS, STATES, SetupOptions, applySnippet, diff, ghost, matrixRow, openPopup, press, quietSettings,
-  settle, setup, sleep, snap, triggerSettings, typeText,
+  Ctx, GOLDEN, KEYS, STATES, SetupOptions, applySnippet, diff, ghost, incompleteSource, matrixRow, openPopup, press,
+  quietSettings, settle, setup, sleep, snap, triggerSettings, typeText, waitFor,
 } from "./support/keyMatrix";
 
 let last: FakeYolo | null = null;
@@ -209,6 +210,78 @@ test("X2d Tab-ahead waits for an async source, up to the deadline", async () => 
   }
 });
 
+test("X2g Tab-ahead that gets nothing runs tabFallback; Escape or Shift-Tab cancel it", async () => {
+  // CM reports completions as loading for its typing delay after every typed character,
+  // even when the source then answers nothing: a fast Tab does what a slow one does.
+  for (const [keys, want] of [
+    [["Tab"], 'doc="a zz  " sel=6 popup:pending->null'],
+    [["Tab", "Tab"], 'doc="a zz    " sel=8 popup:pending->null'],
+    [["Tab", "Escape"], "popup:pending->null"],
+    [["Tab", "Shift-Tab"], "popup:pending->null"],
+  ] as [string[], string][]) {
+    const c = make({ tabFallback: indentOrInsertTab });
+    typeText(c.view, "a zz");
+    const b = snap(c);
+    assert.equal(b.cmp, "pending");
+    for (const k of keys) assert.equal(press(c.view, k).handled, true, k);
+    await sleep(350);
+    assert.equal(diff(b, snap(c)), want, keys.join(", "));
+    done(c);
+  }
+});
+
+test("X2e in a snippet field, Tab under a re-querying (disabled) popup completes the word", async () => {
+  const c = make({ source: incompleteSource(25) });
+  typeText(c.view, "a ");
+  await settle(c.view);
+  applySnippet(c.view, "\\frac{${1}}{${2}}");
+  typeText(c.view, "\\al");
+  await openPopup(c.view);
+  typeText(c.view, "p");
+  const b = snap(c);
+  assert.deepEqual([b.cmp, b.pick, b.snip], ["pending", null, "f0"]);
+  press(c.view, "Tab");
+  await sleep(400);
+  assert.equal(diff(b, snap(c)), 'doc="a \\\\frac{\\\\alpha}{}" sel=14 popup:pending->null');
+  done(c);
+});
+
+test("X2f in a snippet field, Tab under a re-querying popup that comes back empty moves on", async () => {
+  const c = make({ source: incompleteSource(25) });
+  typeText(c.view, "a ");
+  await settle(c.view);
+  applySnippet(c.view, "\\frac{${1}}{${2}}");
+  typeText(c.view, "\\al");
+  await openPopup(c.view);
+  typeText(c.view, "z");
+  const b = snap(c);
+  press(c.view, "Tab");
+  await sleep(400);
+  assert.equal(diff(b, snap(c)), "sel=14 popup:pending->null snippet:f0->off");
+  done(c);
+});
+
+test("X2h in a snippet field, Tab right after a non-word character moves on at once", async () => {
+  // The popup on screen was for the word; what `{` asks for has not been seen yet.
+  const labels = async (ctx: CompletionContext) => {
+    if (!ctx.matchBefore(/\{$/)) return incompleteSource(25)(ctx);
+    await sleep(25);
+    return { from: ctx.pos, options: [{ label: "label1" }] };
+  };
+  const c = make({ source: labels });
+  typeText(c.view, "a ");
+  await settle(c.view);
+  applySnippet(c.view, "\\frac{${1}}{${2}}");
+  typeText(c.view, "\\al");
+  await openPopup(c.view);
+  typeText(c.view, "{");
+  const b = snap(c);
+  press(c.view, "Tab");
+  await sleep(300);
+  assert.equal(diff(b, snap(c)), "sel=14 popup:pending->null snippet:f0->off");
+  done(c);
+});
+
 test("without an inline provider or options the arbiter still owns the keys", async () => {
   const view = new EditorView({
     state: EditorState.create({ doc: "x", extensions: [keyArbiter(), autocomplete.autocompletion({ override: [] })] }),
@@ -280,6 +353,26 @@ test("X8 no arming while the popup is visible; closing it arms", async () => {
   await sleep(0);
   assert.equal(snap(c).armed, true);
   await sleep(100);
+  assert.equal(yoloOf(c).runCalls.length, 1);
+  done(c);
+});
+
+test("X8b no arming under a popup that is re-querying (disabled, still on screen)", async () => {
+  const c = make({ source: incompleteSource(60) });
+  typeText(c.view, "some text \\fr");
+  await openPopup(c.view);
+  yoloOf(c).settings.continuationOptions = triggerSettings({ autoTriggerDelayMs: 40 }).continuationOptions;
+  typeText(c.view, "a");
+  await sleep(0);
+  const s = snap(c);
+  assert.deepEqual({ cmp: s.cmp, pick: s.pick, armed: s.armed }, { cmp: "pending", pick: null, armed: false });
+  await sleep(100); // past YOLO's delay, the re-query still running
+  assert.equal(yoloOf(c).runCalls.length, 0);
+  await waitFor(() => snap(c).pick !== null);
+  press(c.view, "Escape");
+  await sleep(0);
+  assert.equal(snap(c).armed, true);
+  await sleep(80);
   assert.equal(yoloOf(c).runCalls.length, 1);
   done(c);
 });
@@ -538,6 +631,32 @@ test("X17 setState (file switch) and destroy release YOLO's suggestion", async (
   await sleep(0);
   assert.equal(yoloOf(c).tab.tabCompletionSuggestion, null);
   c.bridge.destroy();
+});
+
+test("X17b destroy and setState also disarm YOLO's pending trigger", async () => {
+  const settings = triggerSettings({ idleTriggerEnabled: false });
+  // destroy (the tab closes) while a trigger is armed
+  let c = make({ settings });
+  typeText(c.view, "x, ");
+  await sleep(0);
+  assert.equal(snap(c).armed, true);
+  c.view.destroy();
+  await sleep(80);
+  assert.deepEqual(yoloOf(c).runCalls, [], "no AI request for a closed file");
+  c.bridge.destroy();
+  // setState (another file) with the cursor restored to the same offset
+  c = make({ settings, doc: "one two three" });
+  typeText(c.view, "x, ");
+  await sleep(0);
+  assert.equal(snap(c).armed, true);
+  c.view.setState(c.freshState());
+  c.view.dispatch({ selection: { anchor: 3 } });
+  await sleep(80);
+  assert.deepEqual(yoloOf(c).runCalls, [], "no AI request for the file switched away from");
+  typeText(c.view, ", ");
+  await sleep(80);
+  assert.deepEqual(yoloOf(c).runCalls, [{ title: "notes.typ", head: 5, replaceFromOffset: null }]);
+  done(c);
 });
 
 test("X18 compositionstart dismisses and disarms", async () => {

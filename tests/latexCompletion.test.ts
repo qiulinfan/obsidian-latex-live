@@ -87,6 +87,15 @@ function before(c: FixtureCase, typed: string): string {
   return c.doc.slice(0, c.offset - typed.length) + "|" + c.doc.slice(c.offset);
 }
 
+/** Type through the input handlers (closeBrackets adds `}` after `{`). */
+function typeKeys(view: EditorView, text: string) {
+  for (const ch of text) {
+    const { from, to } = view.state.selection.main;
+    const insert = () => view.state.update({ changes: { from, to, insert: ch }, selection: { anchor: from + 1 }, userEvent: "input.type" });
+    if (!view.state.facet(EditorView.inputHandler).some((h) => h(view, from, to, ch, insert))) view.dispatch(insert());
+  }
+}
+
 function type(view: EditorView, text: string) {
   for (const ch of text) {
     const head = view.state.selection.main.head;
@@ -384,6 +393,57 @@ test("without texlab: built-in commands, environments and project colors", async
   view.destroy();
 });
 
+test("\\input{ drops .tex from texlab's file items (sent as kind 1) and shows the file icon", async () => {
+  const { backend: b } = backend((state, pos) => {
+    const text = state.doc.line(pos.line + 1).text;
+    const from = text.lastIndexOf("/", pos.character) + 1;
+    return {
+      items: [
+        { label: "02-random-variables.tex", kind: 1, textEdit: { range: range(pos.line, from, pos.character), newText: "02-random-variables.tex" } },
+        { label: "0sub", kind: 1, textEdit: { range: range(pos.line, from, pos.character), newText: "0sub" } },
+      ],
+    };
+  });
+  const view = editor("\\input{chapters/|}", latexCompletionSource(b));
+  type(view, "0");
+  await settle(view);
+  assert.deepEqual(currentCompletions(view.state).map((c) => `${c.label}:${c.type}`), ["02-random-variables.tex:file", "0sub:text"]);
+  press(view, "Tab");
+  assert.equal(lineAtCursor(view), "\\input{chapters/02-random-variables|}");
+  view.destroy();
+});
+
+test("accepting a name after \\end{ lands after closeBrackets' brace; Enter then starts a line", async () => {
+  const { backend: b } = backend((_s, pos) => ({
+    items: [{ label: "align", kind: 1, preselect: true, textEdit: { range: range(pos.line, 5, pos.character), newText: "align" } }],
+  }));
+  const view = editor("\\begin{align}\n  a\n\\end{|}", latexCompletionSource(b));
+  type(view, "al");
+  await settle(view);
+  press(view, "Tab");
+  assert.equal(lineAtCursor(view), "\\end{align}|");
+  press(view, "Enter");
+  assert.equal(view.state.doc.toString(), "\\begin{align}\n  a\n\\end{align}\n");
+  view.destroy();
+});
+
+test("a built-in never takes over texlab's range past the word (`\\frac{\\|}{}` reads as `\\}`)", async () => {
+  // texlab 5.26 at `\frac{\|}{}`: only the control symbol `\}`, its range covering the `}`.
+  const { backend: b } = backend((_s, pos) => ({
+    items: [{ label: "}", kind: 1, textEdit: { range: range(pos.line, pos.character, pos.character + 1), newText: "}" } }],
+  }));
+  const view = editor("\\frac{|}{}", latexCompletionSource(b));
+  type(view, "\\");
+  startCompletion(view);
+  await settle(view);
+  type(view, "alp");
+  await settle(view);
+  assert.equal(labels(view)[0], "alpha");
+  press(view, "Tab");
+  assert.equal(lineAtCursor(view), "\\frac{\\alpha|}{}");
+  view.destroy();
+});
+
 test("glyphs: texlab detail and built-in symbols", () => {
   assert.equal(defaultGlyph({ label: "alpha", detail: "α, built-in" }), "α");
   const su = CASE.math_su.response.items.find((i) => i.label === "sum")!;
@@ -447,6 +507,27 @@ test("live texlab on a copied project", { skip: !TEXLAB_BIN && "texlab not found
       press(view, "Enter");
       assert.ok(view.state.doc.toString().includes("\\begin{align}\n  \n\\end{align}\n"), view.state.doc.toString());
       assert.equal(lineAtCursor(view), "  |");
+      done(view);
+    });
+
+    await t.test("\\begin{ali + an immediate Enter still inserts the align pair (KY-2)", async () => {
+      const view = open("|");
+      typeKeys(view, "\\begin{ali");
+      assert.equal(lineAtCursor(view), "\\begin{ali|}");
+      press(view, "Enter");
+      await sleep(600);
+      assert.ok(view.state.doc.toString().includes("\\begin{align}\n  \n\\end{align}\n"), view.state.doc.toString());
+      assert.equal(lineAtCursor(view), "  |");
+      done(view);
+    });
+
+    await t.test("\\input{chapters/o + Tab inserts the chapter without .tex", async () => {
+      const view = open("|");
+      typeKeys(view, "\\input{chapters/o");
+      await settle(view);
+      assert.deepEqual(labels(view), ["one.tex"]);
+      press(view, "Tab");
+      assert.equal(lineAtCursor(view), "\\input{chapters/one|}");
       done(view);
     });
 

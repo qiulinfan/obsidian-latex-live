@@ -199,7 +199,9 @@ export class YoloBridge {
           destroy: () => {
             entry.destroyed = true;
             this.entries.delete(entry);
-            this.later(() => this.dismiss(view)); // setState/destroy: never dispatch inside
+            // setState/destroy: never dispatch inside. Also disarm YOLO's pending trigger,
+            // or it still runs for the closed file (or shows a ghost in the next one).
+            this.later(() => this.dismiss(view, true));
           },
         };
       }),
@@ -322,7 +324,9 @@ export class YoloBridge {
     const b = this.bound;
     if (!b) return;
     const view = u.view;
-    const popup = popupVisible(view.state);
+    // The popup is on screen when visible, or when it was and completion has not been idle
+    // since: CM keeps it on screen, disabled, while an incomplete list re-queries.
+    const popup = popupVisible(view.state) || (entry.popupWas && completionStatus(view.state) !== null);
     if (u.selectionSet && !u.docChanged) entry.armDeferred = false;
     if (u.docChanged) {
       const userEdit = u.transactions.some(

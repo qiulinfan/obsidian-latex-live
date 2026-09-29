@@ -3,7 +3,7 @@
 import "./support/dom";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { completionStatus, currentCompletions } from "@codemirror/autocomplete";
+import { completionStatus, currentCompletions, selectedCompletionIndex } from "@codemirror/autocomplete";
 import { undo } from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
@@ -12,7 +12,7 @@ import { latexCompletionSource } from "../src/editor/latexCompletion";
 import { YoloBridge } from "../src/editor/shared/yoloBridge";
 import { texEditorExtensions } from "../src/editor/texExtensions";
 import { FakeYolo, fakeYolo } from "./support/fakeYolo";
-import { Ctx, diff, ghost, press, quietSettings, sleep, snap, typeText } from "./support/keyMatrix";
+import { Ctx, diff, ghost, press, quietSettings, sleep, snap, typeText, waitFor } from "./support/keyMatrix";
 
 interface TexCtx extends Ctx {
   yolo: FakeYolo;
@@ -54,6 +54,15 @@ function done(c: TexCtx) {
   assert.deepEqual(c.yolo.hijacked, [], "YOLO's own keymap must never be mounted");
   c.view.destroy();
   c.bridge.destroy();
+}
+
+/** Type through the input handlers (closeBrackets, mathInput), one key at a time. */
+function typeKeys(view: EditorView, text: string) {
+  for (const ch of text) {
+    const { from, to } = view.state.selection.main;
+    const insert = () => view.state.update({ changes: { from, to, insert: ch }, selection: { anchor: from + 1 }, userEvent: "input.type" });
+    if (!view.state.facet(EditorView.inputHandler).some((h) => h(view, from, to, ch, insert))) view.dispatch(insert());
+  }
 }
 
 const line = (view: EditorView) => {
@@ -126,6 +135,17 @@ test("Tab with nothing to accept inserts spaces mid-word, indents in leading spa
   done(c);
 });
 
+test("Tab right after a letter still inserts spaces when no completion comes", async () => {
+  // CM reports completions as loading for 100 ms after every typed letter, even when the
+  // source then answers nothing; Tab-ahead used to swallow that Tab.
+  const c = make("a & word|");
+  typeText(c.view, "s");
+  assert.equal(press(c.view, "Tab").handled, true);
+  await sleep(300);
+  assert.equal(line(c.view), "a & words   |");
+  done(c);
+});
+
 test("Escape with nothing to close is swallowed but still reaches the document", () => {
   const c = make("a|");
   const r = press(c.view, "Escape");
@@ -153,6 +173,13 @@ test("$ pairs, wraps a selection, and $|$ + $ becomes display math; \\[ gets its
   c.view.dispatch({ changes: { from: 0, to: c.view.state.doc.length, insert: "$$" }, selection: { anchor: 1 } });
   press(c.view, "Backspace");
   assert.equal(c.view.state.doc.toString(), "", "Backspace deletes an empty $|$ pair");
+  input("\\");
+  input("(");
+  assert.equal(line(c.view), "\\(|\\)");
+  press(c.view, "Backspace");
+  assert.equal(c.view.state.doc.toString(), "", "Backspace deletes an empty \\(|\\) pair");
+  for (const ch of "costs \\$5 and \\{x\\}") input(ch);
+  assert.equal(line(c.view), "costs \\$5 and \\{x\\}|", "escaped $ { } are never paired");
   done(c);
 });
 
@@ -167,5 +194,84 @@ test("edits are reported once committed; an IME composition waits for compositio
   c.view.contentDOM.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
   await sleep(10);
   assert.equal(edits.at(-1), "ani");
+  done(c);
+});
+
+// KY-2 / LL-ENTER-PENDING-BEGIN: Enter typed right after `\begin{ali` (closeBrackets' `}`
+// after the cursor) while the name's completion is still loading completes the name.
+for (const [typed, want] of [
+  ["\\begin{ali", "\\begin{align}\n    \n\\end{align}"],
+  ["\\begin{itemi", "\\begin{itemize}\n    \\item \n\\end{itemize}"],
+  ["\\begin{proof", "\\begin{proof}\n    \n\\end{proof}"],
+  ["\\begin{myenv", "\\begin{myenv}\n    \n\\end{myenv}"],
+] as const) {
+  test(`fast Enter after ${typed} waits for the name's completion`, async () => {
+    const c = make("|");
+    typeKeys(c.view, typed);
+    assert.equal(line(c.view), typed + "|}");
+    assert.equal(completionStatus(c.view.state), "pending");
+    assert.equal(press(c.view, "Enter").handled, true);
+    await sleep(600);
+    assert.equal(c.view.state.doc.toString(), want);
+    done(c);
+  });
+}
+
+test("Enter inside the popup's interactionDelay after \\begin{ali accepts once it ends", async () => {
+  const c = make("|");
+  typeKeys(c.view, "\\begin{ali");
+  await waitFor(() => selectedCompletionIndex(c.view.state) !== null);
+  press(c.view, "Enter");
+  await sleep(300);
+  assert.equal(c.view.state.doc.toString(), "\\begin{align}\n    \n\\end{align}");
+  done(c);
+});
+
+test("fast Enter after \\begin{ali is dropped when typing goes on", async () => {
+  const c = make("|");
+  typeKeys(c.view, "\\begin{ali");
+  press(c.view, "Enter");
+  typeKeys(c.view, "g");
+  await sleep(600);
+  assert.equal(line(c.view), "\\begin{alig|}");
+  done(c);
+});
+
+test("$ and { pair after Chinese text and before Chinese punctuation", () => {
+  for (const punct of "，。：；）") {
+    const c = make(`设|${punct}则`);
+    typeKeys(c.view, "$");
+    assert.equal(line(c.view), `设$|$${punct}则`);
+    typeKeys(c.view, "x$");
+    assert.equal(line(c.view), `设$x$|${punct}则`, "the closing $ steps over");
+    done(c);
+  }
+  const c = make("设|，则");
+  typeKeys(c.view, "$$");
+  assert.equal(line(c.view), "设$$|$$，则", "$$ still opens display math");
+  c.view.dispatch({ changes: { from: 0, to: c.view.state.doc.length, insert: "见\\ref，" }, selection: { anchor: 5 } });
+  typeKeys(c.view, "{");
+  assert.equal(line(c.view), "见\\ref{|}，");
+  c.view.dispatch({ changes: { from: 0, to: c.view.state.doc.length, insert: "$x+y" }, selection: { anchor: 4 } });
+  typeKeys(c.view, "$");
+  assert.equal(line(c.view), "$x+y$|", "after a Latin letter $ closes math, as before");
+  done(c);
+});
+
+test("no completion popup in % comments or verbatim; Enter stays a newline", async () => {
+  for (const text of ["x % note: |", "\\begin{verbatim}\n|\n\\end{verbatim}"]) {
+    const c = make(text);
+    typeKeys(c.view, "\\fr");
+    await settle(c.view);
+    assert.deepEqual(currentCompletions(c.view.state), [], text);
+    press(c.view, "Enter");
+    assert.equal(line(c.view), "|", text);
+    done(c);
+  }
+  // Outside the comment the same keys complete.
+  const c = make("x |% note");
+  typeKeys(c.view, "\\fr");
+  await settle(c.view);
+  assert.equal(currentCompletions(c.view.state)[0]?.label, "frac");
   done(c);
 });

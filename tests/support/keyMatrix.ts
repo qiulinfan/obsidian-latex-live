@@ -5,6 +5,7 @@ import {
   Completion,
   CompletionContext,
   CompletionResult,
+  CompletionSource,
   autocompletion,
   closeBrackets,
   closeBracketsKeymap,
@@ -49,6 +50,17 @@ export function source(ctx: CompletionContext, options = OPTIONS): CompletionRes
 }
 const delayed = (ms: number) => (ctx: CompletionContext) =>
   new Promise<CompletionResult | null>((r) => setTimeout(() => r(source(ctx)), ms));
+/**
+ * texlab-like: after `ms`, the fixture options matching the word as an incomplete list (no
+ * validFor, so CM re-queries on every key and disables the popup meanwhile); null when
+ * nothing matches.
+ */
+export const incompleteSource = (ms: number) => async (ctx: CompletionContext): Promise<CompletionResult | null> => {
+  await sleep(ms);
+  const w = ctx.matchBefore(/\\[A-Za-z]*/);
+  const options = w ? OPTIONS.filter((o) => o.label.startsWith(w.text)) : [];
+  return w && options.length ? { from: w.from, options } : null;
+};
 
 /** YOLO armed by nothing (no triggers, no idle trigger): ghosts only come from triggerNow. */
 export const quietSettings = (): YoloSettings => ({
@@ -83,7 +95,10 @@ export interface SetupOptions {
   /** Answer completions after this many ms (an LSP-like async source). */
   sourceDelay?: number;
   options?: Completion[];
+  /** Replaces the fixture completion source. */
+  source?: CompletionSource;
   enter?: Command | Command[];
+  tabFallback?: Command;
   title?: string;
 }
 
@@ -93,11 +108,11 @@ export function setup(makeYolo: YoloFactory | null, o: SetupOptions = {}): Ctx {
   const app = { plugins: { plugins: yolo ? { yolo: yolo.plugin as unknown } : {} } };
   const flags = { enabled: true };
   const bridge = new YoloBridge(app as unknown as App, { name: "test", enabled: () => flags.enabled });
-  const src = o.sourceDelay ? delayed(o.sourceDelay) : (ctx: CompletionContext) => source(ctx, o.options);
+  const src = o.source ?? (o.sourceDelay ? delayed(o.sourceDelay) : (ctx: CompletionContext) => source(ctx, o.options));
   const freshState = () => EditorState.create({
     doc: o.doc ?? "",
     extensions: [
-      keyArbiter({ inline: () => bridge.inline, enter: o.enter }),
+      keyArbiter({ inline: () => bridge.inline, enter: o.enter, tabFallback: o.tabFallback }),
       bridge.extension(() => o.title ?? "notes.typ"),
       history(),
       closeBrackets(),

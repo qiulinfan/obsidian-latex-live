@@ -2,7 +2,7 @@
   "id": "latex-live",
   "name": "LaTeX Live",
   "version": "0.1.0",
-  "minAppVersion": "1.5.0",
+  "minAppVersion": "1.13.7",
   "description": "Edit .tex files with live compilation and PDF preview, using the TeX distribution installed on your machine (pdfLaTeX, XeLaTeX, LuaLaTeX, latexmk, SyncTeX).",
   "author": "Qiulin Fan",
   "authorUrl": "https://github.com/qiulinfan",

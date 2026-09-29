@@ -155,18 +155,20 @@ export class LatexLiveSettingTab extends PluginSettingTab {
           }),
       );
 
-    new Setting(containerEl)
+    const yoloDesc = () =>
+      "Show the YOLO plugin's AI ghost text in LaTeX files. Tab order: completion popup > " +
+      "AI ghost text > next snippet field > indent; Enter never accepts AI text; Shift-Tab " +
+      "or Escape dismisses it. Uses YOLO's own triggers, delay and enable switch. Bridge: " +
+      `${s.yoloTabCompletion ? this.plugin.yolo.describe() : "off"}.`;
+    const yolo = new Setting(containerEl)
       .setName("YOLO AI tab completion")
-      .setDesc(
-        "Show the YOLO plugin's AI ghost text in LaTeX files; Tab accepts it when no " +
-          "completion popup or snippet field wants the key. Uses YOLO's own triggers, " +
-          `delay and enable switch. Bridge: ${this.plugin.yolo.describe()}.`,
-      )
+      .setDesc(yoloDesc())
       .addToggle((t) =>
         t.setValue(s.yoloTabCompletion).onChange(async (v) => {
           s.yoloTabCompletion = v;
           await this.plugin.saveSettings();
           this.plugin.yolo.refresh();
+          yolo.setDesc(yoloDesc());
         }),
       );
 

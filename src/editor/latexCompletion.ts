@@ -7,7 +7,8 @@
 //   - ranking: math commands first inside math, text commands first outside, commands
 //     already used in the document, the user's popularity prior (UX-08);
 //   - implicit requests only after `\` + a letter or inside argument braces such as
-//     \ref{ \cite{ \begin{ \usepackage{ (D5);
+//     \ref{ \cite{ \begin{ \usepackage{ (D5), never in a `%` comment or verbatim, where
+//     texlab has nothing and the built-in layer alone would turn Enter into a snippet;
 //   - accepting `\ref` (etc.) opens the argument's list right away;
 //   - a citation query texlab cannot match (title or author words) asks for the whole
 //     list, which the shared source filters on author and title (TL-05).
@@ -90,6 +91,8 @@ export function latexContext(state: EditorState, pos: number): LatexContext | nu
 interface Analysis {
   context: LatexContext | null;
   inMath: boolean;
+  /** The cursor is in a `%` comment or a verbatim-like environment. */
+  quiet: boolean;
   /** Command uses outside / inside math, by name. */
   textUses: Map<string, number>;
   mathUses: Map<string, number>;
@@ -111,12 +114,18 @@ function analyze(state: EditorState, pos: number, project: Definitions): Analysi
   const s: TokState = { math: null, verbatim: null };
   const cursorLine = doc.lineAt(pos);
   let inMath = false;
+  let quiet = false;
   for (let n = 1; n <= doc.lines; n++) {
     const line = doc.line(n);
     if (n === cursorLine.number) {
       const probe = { ...s };
-      tokenizeLine(line.text.slice(0, pos - line.from), 0, probe, () => {});
+      const upTo = line.text.slice(0, pos - line.from);
+      let last = "";
+      tokenizeLine(upTo, 0, probe, (_from, to, cls) => {
+        if (to === upTo.length) last = cls;
+      });
       inMath = probe.math !== null;
+      quiet = probe.verbatim !== null || last === "ll-comment";
     }
     let defining = false;
     tokenizeLine(line.text, 0, s, (from, to, cls) => {
@@ -139,6 +148,7 @@ function analyze(state: EditorState, pos: number, project: Definitions): Analysi
   return {
     context: latexContext(state, pos),
     inMath,
+    quiet,
     textUses,
     mathUses,
     envUses,
@@ -211,12 +221,11 @@ function argsOf(name: string, defs: Definitions): string | null {
 }
 
 /**
- * Apply for a template, through CodeMirror's snippet() directly. The shared LSP path
- * (lspSnippetToCm) escapes every literal brace, and @codemirror/autocomplete 6.20.3's
- * Snippet.parse misplaces fields after two or more `\{`/`\}` escapes on a line
- * (`\frac\{${1}\}\{${2}\}` puts field 2 after the closing brace). Here only braces
- * after a literal backslash are escaped. `tail`: text after the cursor that the
- * completion replaces (the rest of the word, closeBrackets' `}`).
+ * Apply for a template, through CodeMirror's snippet() directly: the template notation
+ * (#1 ... #0) maps onto CM's fields without the LSP round trip, and only braces after a
+ * literal backslash are escaped (@codemirror/autocomplete 6.20.3's Snippet.parse
+ * misplaces a field after several `\{`/`\}` escapes on a line). `tail`: text after the
+ * cursor that the completion replaces (the rest of the word, closeBrackets' `}`).
  */
 function templateApply(template: string, tail: number): Completion["apply"] {
   const cm = template.replace(/\\([{}])/g, "\\\\$1").replace(/#(\d)/g, "${$1}");
@@ -234,7 +243,9 @@ export function latexCompletionOptions(env: LatexCompletionEnv = {}, analysis = 
       const before = ctx.state.sliceDoc(ctx.state.doc.lineAt(ctx.pos).from, ctx.pos);
       if (env.bib) return /^\s*@?[A-Za-z]+$/.test(before) || /\\[A-Za-z]+$/.test(before);
       const c = latexContext(ctx.state, ctx.pos);
-      return c !== null && (c.kind === "argument" || c.word.length > 0);
+      if (c === null || (c.kind === "command" && !c.word)) return false;
+      // Comments and verbatim: texlab offers nothing there (`\end{verbatim}` still completes).
+      return !analysis(ctx.state, ctx.pos).quiet || (c.kind === "argument" && c.command === "end");
     },
 
     validFor(ctx) {
@@ -274,8 +285,14 @@ export function latexCompletionOptions(env: LatexCompletionEnv = {}, analysis = 
           const body = LIST_ENVIRONMENTS.has(name) ? "\t\\item #0" : "\t#0";
           edit.to += brace;
           useTemplate(`${name}}${args}\n${body}\n\\end{${name}}`);
-        } else if (c.arg === "file" && item.kind === 17 && /^(input|include|subfile)$/.test(c.command) && !edit.snippet) {
-          edit.text = edit.text.replace(/\.tex$/, ""); // the user's style (TL-06)
+        } else if (c.arg === "env" && c.command === "end" && next === "}" && !edit.snippet) {
+          // The name completes the environment: land after closeBrackets' `}`.
+          edit.to += 1;
+          edit.text += "}";
+        } else if (c.arg === "file" && !edit.snippet) {
+          // texlab 5.26 sends files and folders as kind 1 (text): files by their extension.
+          if (/\.[A-Za-z0-9]+$/.test(name)) option.type = "file";
+          if (/^(input|include|subfile)$/.test(c.command)) edit.text = edit.text.replace(/\.tex$/, ""); // the user's style (TL-06)
         }
         return;
       }
@@ -394,9 +411,13 @@ function addBuiltins(list: LspCompletionList, state: EditorState, a: Analysis): 
   if (!c) return;
   const have = new Set(list.items.map((i) => i.label));
   const first = list.items.find((i) => i.textEdit);
-  const range: LspRange = first?.textEdit
-    ? "range" in first.textEdit ? first.textEdit.range : first.textEdit.replace
-    : { start: offsetToLspPos(state.doc, c.from), end: offsetToLspPos(state.doc, c.to) };
+  const theirs = first?.textEdit ? ("range" in first.textEdit ? first.textEdit.range : first.textEdit.replace) : null;
+  // texlab's range keeps the built-ins in line with its items, unless it reaches past the
+  // word: at `\frac{\|}{}` texlab reads the control symbol `\}` and its range covers the `}`.
+  const range: LspRange =
+    theirs && lspPosToOffset(state.doc, theirs.end) <= c.to
+      ? theirs
+      : { start: offsetToLspPos(state.doc, c.from), end: offsetToLspPos(state.doc, c.to) };
   const typed = c.kind === "command" ? c.word : c.query;
   const word = typed.toLowerCase();
   const add = (label: string, kind: number, detail: string, text = label, snippet = false) => {

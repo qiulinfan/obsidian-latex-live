@@ -103,7 +103,12 @@ export default class LatexLivePlugin extends Plugin {
     this.addCommand({
       id: "trigger-ai-completion",
       name: "Trigger AI completion (YOLO)",
-      checkCallback: (checking) => this.withEditor(checking, (v) => this.yolo.triggerNow(v)),
+      checkCallback: (checking) => {
+        if (!this.settings.yoloTabCompletion) return false;
+        return this.withEditor(checking, (v) => {
+          if (!this.yolo.triggerNow(v)) new Notice(`LaTeX Live: no AI completion here (${this.yolo.describe()}).`);
+        });
+      },
     });
     this.addCommand({
       id: "restart-texlab",

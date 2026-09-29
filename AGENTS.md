@@ -31,14 +31,20 @@
   ArrowDown (completion popup > YOLO ghost text > snippet field > indent; Enter
   accepts only when that changes the text and never accepts AI text). Never bind
   these keys anywhere else; LaTeX Enter behaviour goes into the arbiter's `enter`
-  hooks (`src/editor/latexEnter.ts`). Backspace is never intercepted. Obsidian
+  hooks (`src/editor/latexEnter.ts`, which also holds `latexIndent`, the
+  indentService for new lines). A hook that must wait for the completion popup
+  (`\begin{ali|}` + a fast Enter) swallows the key and pumps like Tab-ahead instead
+  of binding anything. The arbiter never intercepts Backspace; the view keymap binds
+  editorKit's `deleteMathPair` (empty `\(|\)` / `\[|\]`) just before
+  `closeBracketsKeymap`. Obsidian
   hotkeys that would swallow editor keys (Mod-/, Mod-D, Mod-G, Mod-B, Mod-I,
   Mod-E, ...) are routed through the view's `Scope` (`registerEditorScope`);
   Mod-S and Mod-F keep their Obsidian meaning (`showSearch` handles Mod-F).
 - Edits reach saving, compiling and texlab only through `editNotifier` (committed
   text, never mid-IME-composition), and `TexView.save` defers every save (including
   Obsidian's own debounced one) while a composition is open, so uncommitted Pinyin is
-  never written or compiled.
+  never written or compiled. `TexView` keeps a CRLF file CRLF (CodeMirror holds LF;
+  `getViewData` converts back), so opening a file and switching away never rewrites it.
 - `src/editor/shared/` is shared with obsidian-tinymist and must stay
   byte-identical; the canonical copy lives in
   `obsidian-tinymist/src/editor/shared`. Never edit the copies here: change the
@@ -65,9 +71,14 @@
     texlab and the compiler see the same distribution.
   - texlab has no argument snippets, no `\end` insertion, no math awareness and a
     50-item cap; `src/editor/latexCompletion.ts` adds those on top. Snippets from
-    that layer are applied with CodeMirror's `snippet()` directly, because the
-    shared LSP conversion escapes every brace and @codemirror/autocomplete
-    6.20.3 misplaces fields after several escapes on one line.
+    that layer are applied with CodeMirror's `snippet()` directly from their
+    `#1 ... #0` templates (the shared `lspSnippetToCm` now escapes only `{` after
+    `#`/`$`/`\` and `}` after `\`, but @codemirror/autocomplete 6.20.3 still
+    misplaces a field after three or more escapes right before it).
+  - texlab 5.26 sends files and folders as kind 1 (never 17): file-argument rules
+    key on the argument context. At `\frac{\|}{}` it reads the control symbol `\}`
+    and its range covers the `}`; built-ins never take a texlab range that reaches
+    past the word.
 - Build output goes to `$TMPDIR/obsidian-latex-live/<hash of root>/`, never
   into the vault.
 - Desktop only (`isDesktopOnly: true`).
