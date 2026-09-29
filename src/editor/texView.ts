@@ -1,11 +1,25 @@
-import { EditorState } from "@codemirror/state";
+import { EditorState, Extension } from "@codemirror/state";
 import { EditorView, Tooltip } from "@codemirror/view";
 import { statSync } from "fs";
 import { dirname, resolve } from "path";
-import { Component, MarkdownRenderer, Scope, TFile, TextFileView, WorkspaceLeaf } from "obsidian";
+import {
+  Component,
+  MarkdownRenderer,
+  Notice,
+  Scope,
+  TFile,
+  TextFileView,
+  ViewStateResult,
+  WorkspaceLeaf,
+  setIcon,
+  setTooltip,
+} from "obsidian";
 import type LatexLivePlugin from "../main";
+import type { EditingMode } from "../settings";
 import { Definitions, emptyDefinitions, projectDefinitions } from "../tex/macros";
+import { preambleFiles } from "../tex/project";
 import { latexCompletionSource } from "./latexCompletion";
+import { latexLiveLanguage } from "./latexLive";
 import {
   EditorEphemeralState,
   applyEphemeralState,
@@ -14,6 +28,7 @@ import {
   setDocText,
   showSearch,
 } from "./shared/editorKit";
+import { LIVE_MAX_LINES, LiveLanguage, isLive, livePreview, livePreviewCompartment } from "./shared/livePreview";
 import { LspCompletionBackend, LspRange, lspPosToOffset, offsetToLspPos } from "./shared/lspCompletion";
 import { showTexDiagnostics, texEditorExtensions } from "./texExtensions";
 
@@ -21,6 +36,19 @@ export const VIEW_TYPE_TEX = "latex-live-editor";
 
 const PROJECT_TTL_MS = 5000;
 const PACKAGE_EXTENSIONS = new Set(["sty", "cls"]);
+
+/** The header action in each mode: the icon and title of the switch to the other mode. */
+const MODE_ACTION: Record<EditingMode, [icon: string, title: string]> = {
+  source: ["book-open", "Switch to live preview"],
+  live: ["code", "Switch to source mode"],
+};
+
+/**
+ * Package, class and bibliography files are code and data, and so are the files the root reads
+ * before \begin{document} (preambleFiles): live preview finds no constructs there.
+ */
+const NO_CONSTRUCTS: LiveLanguage = { scan: () => [], decorate: () => {} };
+const DATA_EXTENSIONS = new Set([...PACKAGE_EXTENSIONS, "bib"]);
 
 export class TexView extends TextFileView {
   private editor: EditorView | null = null;
@@ -37,6 +65,14 @@ export class TexView extends TextFileView {
   /** The file uses CRLF line breaks (CodeMirror keeps LF); saves write them back. */
   private crlf = false;
   private project: { abs: string; at: number; root: string; defs: Definitions } | null = null;
+  /**
+   * Source or live preview. Kept in the view state (a restart restores it); a new view starts
+   * in the `editingMode` setting, and a file opened in this view keeps it.
+   */
+  private mode: EditingMode;
+  private readonly modeAction: HTMLElement;
+  /** Waiting for MathJax before live preview mounts (texRender.preload). */
+  private preloading = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -50,6 +86,9 @@ export class TexView extends TextFileView {
       italic: ["\\emph{", "}"],
       togglePreview: () => this.plugin.togglePreview(this),
     });
+    this.mode = plugin.settings.editingMode;
+    // Actions are prepended: the mode switch ends up right of the preview's eye.
+    this.modeAction = this.addAction(...MODE_ACTION[this.mode], () => this.toggleMode());
     this.addAction("eye", "Open LaTeX preview", () => {
       void this.plugin.openPreview(this);
     });
@@ -72,6 +111,33 @@ export class TexView extends TextFileView {
     return this.editor;
   }
 
+  getState(): Record<string, unknown> {
+    return { ...super.getState(), mode: this.mode };
+  }
+
+  async setState(state: unknown, result: ViewStateResult): Promise<void> {
+    const mode = (state as { mode?: unknown } | null)?.mode;
+    // Before the file loads, so its editor mounts in the mode; an open editor switches below.
+    if (mode === "source" || mode === "live") this.mode = mode;
+    await super.setState(state, result);
+    this.applyMode();
+  }
+
+  /**
+   * The header action and the "Toggle live preview" command. Documents over LIVE_MAX_LINES
+   * lines stay in source mode. Only livePreviewCompartment is reconfigured: the text, the
+   * selection, the scroll position and the undo history stay.
+   */
+  toggleMode(): void {
+    if (this.mode === "source" && this.editor && this.editor.state.doc.lines > LIVE_MAX_LINES) {
+      new Notice(`LaTeX Live: live preview is off for documents over ${LIVE_MAX_LINES.toLocaleString("en-US")} lines.`);
+      return;
+    }
+    this.mode = this.mode === "live" ? "source" : "live";
+    this.applyMode();
+    this.app.workspace.requestSaveLayout();
+  }
+
   getViewData(): string {
     if (!this.editor) return this.data;
     const text = this.editor.state.doc.toString();
@@ -90,9 +156,13 @@ export class TexView extends TextFileView {
       this.openOnServer();
       if (this.pendingEState) applyEphemeralState(this.editor, this.pendingEState);
       this.pendingEState = null;
+      this.applyMode();
+      this.rereadRefs();
     } else if (clear) {
       this.editor.setState(this.stateFor(data));
       this.openOnServer();
+      this.applyMode();
+      this.rereadRefs();
     } else {
       // External change (another editor, git, an agent): a minimal diff keeps the cursor,
       // the scroll position and the undo history (F4).
@@ -120,6 +190,10 @@ export class TexView extends TextFileView {
     await super.onRename(file);
     this.closeOnServer();
     this.openOnServer();
+    // The root (or the kind of file) may have changed with the path.
+    const editor = this.editor;
+    const live = editor && isLive(editor.state) ? this.liveExtension() : null;
+    if (editor && live) editor.dispatch({ effects: livePreviewCompartment.reconfigure(live) });
   }
 
   async onClose(): Promise<void> {
@@ -202,6 +276,64 @@ export class TexView extends TextFileView {
     showTexDiagnostics(this.editor, this.plugin.diagnosticsFor(path));
   }
 
+  /**
+   * Bring the editor and the header action to `this.mode`. Live preview mounts once MathJax is
+   * preloaded (the editor shows source until then) and never over LIVE_MAX_LINES lines (the
+   * mode falls back to source).
+   */
+  private applyMode(): void {
+    const editor = this.editor;
+    if (editor && this.mode === "live" && editor.state.doc.lines > LIVE_MAX_LINES) this.mode = "source";
+    const [icon, title] = MODE_ACTION[this.mode];
+    setIcon(this.modeAction, icon);
+    setTooltip(this.modeAction, title);
+    if (!editor) return;
+    const live = this.mode === "live";
+    if (live !== isLive(editor.state)) {
+      const ext = live ? this.liveExtension() : [];
+      if (ext) editor.dispatch({ effects: livePreviewCompartment.reconfigure(ext) });
+      else this.preload();
+    }
+    const shown = isLive(editor.state);
+    this.contentEl.toggleClass("is-live-preview", shown);
+    if (shown) this.plugin.texRender.stylesFor(editor.dom.ownerDocument);
+  }
+
+  /** Live preview for this file's root, or null until MathJax is preloaded. */
+  private liveExtension(): Extension | null {
+    const project = this.projectInfo();
+    const render = this.plugin.texRender;
+    if (!project || !render.ready) return null;
+    const { root, abs } = project;
+    const code = DATA_EXTENSIONS.has(this.file?.extension ?? "") || preambleFiles(root).has(resolve(abs));
+    const language = code ? NO_CONSTRUCTS : latexLiveLanguage({ refs: () => render.refsOf(root) });
+    return livePreview({ language, renderer: render.rendererFor(root) });
+  }
+
+  /**
+   * A document opened here: its root's labels and bibliography are read again (a compile may
+   * have run elsewhere since), so chips work without the preview open (design 4.5).
+   */
+  private rereadRefs(): void {
+    const root = this.projectInfo()?.root;
+    if (root && !DATA_EXTENSIONS.has(this.file?.extension ?? "")) this.plugin.texRender.opened(root);
+  }
+
+  /** Load and warm up MathJax, then mount live preview (design 3.7). */
+  private preload(): void {
+    const root = this.projectInfo()?.root;
+    if (!root || this.preloading) return;
+    this.preloading = true;
+    void this.plugin.texRender.preload(root).then((ok) => {
+      this.preloading = false;
+      if (!ok && this.mode === "live") {
+        new Notice("LaTeX Live: MathJax is not available, so live preview stays off.");
+        this.mode = "source";
+      }
+      this.applyMode();
+    });
+  }
+
   /** The editor state for `data`: the cached one (with undo history) if the text matches. */
   private stateFor(data: string): EditorState {
     const extensions = this.extensions(data);
@@ -242,6 +374,8 @@ export class TexView extends TextFileView {
       },
       onCursor: () => this.onCursorMoved(),
       diagnostics: true,
+      // The mode's content of livePreviewCompartment, also for HistoryCache.restore.
+      live: this.mode === "live" ? (this.liveExtension() ?? []) : [],
       hover: {
         // Documents only: package and class files are code, their `$` rarely pair as math.
         enabled: () => plugin.settings.hoverRender && !PACKAGE_EXTENSIONS.has(this.file?.extension ?? ""),

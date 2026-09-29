@@ -217,6 +217,13 @@ test("prepareMath and inputEpoch", () => {
     "out of the inner environment, at the row's end",
   );
   assert.equal(prepareMath(align("5\\% \\label{a} % \\\\ {\n"), labels), align("5\\%  % \\\\ {\n\\tag{1.1}"), "comments and \\%");
+  // With `refs` (latexRefs' formulaRefs): every reference command, its text escaped for text mode.
+  const refs = (cmd: string, keys: readonly string[]) => `${cmd}:${keys.join("+")} a_b {c} 5% $ ^~\\`;
+  assert.equal(
+    prepareMath("\\cref{a, b} = \\autoref*{c}", labels, false, refs),
+    "\\textup{cref:a+b a\\_b \\{c\\} 5\\% \\$ ˆ˜∖} = \\textup{autoref:c a\\_b \\{c\\} 5\\% \\$ ˆ˜∖}",
+  );
+  assert.equal(prepareMath("\\eqref{a}\\pageref{a}\\nameref{a}\\Cref{a}\\ref{a}", labels, false, (cmd) => cmd), "\\textup{eqref}\\textup{pageref}\\textup{nameref}\\textup{Cref}\\textup{ref}");
   const input = { statements: ["\\newcommand{\\R}{x}"], physics: false };
   assert.equal(inputEpoch(input), inputEpoch({ ...input, statements: ["\\newcommand{\\R}{x}"] }));
   assert.notEqual(inputEpoch(input), inputEpoch({ ...input, physics: true }));

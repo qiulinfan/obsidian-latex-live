@@ -18,7 +18,7 @@ import {
 } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap } from "@codemirror/search";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Extension } from "@codemirror/state";
 import { Command, EditorView, keymap } from "@codemirror/view";
 import type { App } from "obsidian";
 import { keyArbiter } from "../../src/editor/shared/keyArbiter";
@@ -101,6 +101,8 @@ export interface SetupOptions {
   tabFallback?: Command;
   completesWord?: (state: EditorState) => boolean;
   title?: string;
+  /** After the rest of the stack (e.g. live preview): keyArbiter stays first. */
+  extensions?: Extension[];
 }
 
 /** A view wired like our editors: arbiter first, then the bridge, then the rest. */
@@ -119,6 +121,7 @@ export function setup(makeYolo: YoloFactory | null, o: SetupOptions = {}): Ctx {
       closeBrackets(),
       autocompletion({ override: [src] }),
       keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, indentWithTab]),
+      o.extensions ?? [],
     ],
   });
   const view = new EditorView({ state: freshState(), parent: document.body });
@@ -243,10 +246,15 @@ export interface Cell { handled: boolean; toDocument: boolean; outcome: string }
 export const GOLDEN = golden.expected as Record<string, Record<string, Cell>>;
 
 /** Press every key in `state` (a fresh view each) and report the cells. */
-export async function matrixRow(makeYolo: YoloFactory, state: string, check?: (c: Ctx) => void): Promise<Record<string, Cell>> {
+export async function matrixRow(
+  makeYolo: YoloFactory,
+  state: string,
+  check?: (c: Ctx) => void,
+  opts: SetupOptions = {},
+): Promise<Record<string, Cell>> {
   const row: Record<string, Cell> = {};
   for (const key of KEYS) {
-    const c = setup(makeYolo);
+    const c = setup(makeYolo, opts);
     try {
       await STATES[state](c);
       const before = snap(c);

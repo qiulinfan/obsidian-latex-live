@@ -229,13 +229,23 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
 - 默认不开 `-shell-escape`（minted 等需要在设置里打开）。
 - 只在 macOS 上测过；Windows 路径和进程树清理写了但没有验证。无进展看门狗在 Windows 上不生效（没有进程组 CPU 时间）。
 - 悬停渲染只用 MathJax 3.2.2：tikz-cd、`\intertext`、`\llbracket`、`\oiint` 等画不出来（显示 MathJax 的报错和源码，
-  等 P5 的 PDF 裁剪）；tikzpicture 里的 `$\t$` 这类 TikZ 变量同样报错。没有 `\label` 的编号行不显示编号
+  等 P5 的 PDF 裁剪）；TikZ 图（tikzpicture、tikzcd、pgfpicture、circuitikz）里的节点公式不扫描，悬停和实时
+  预览都不管，也等 P5。没有 `\label` 的编号行不显示编号
   （MathJax 的 tags 是关的）。定义体里用到带 `@` 的内部命令的宏（本地宏包里常见）和 `m o` 这类
   `\newcommand` 表达不了的 xparse 参数说明，悬停时报“MathJax cannot read the project's \set: …”
   （等 P6 的真实 TeX 片段编译），不会退回 MathJax 自带的同名命令（braket 的 `\set` 会画出 `{M}[…]`）；
-  `\makeatletter` 块里定义的命令仍然跳过。公式里的 `\cref`、`\autoref`、`\pageref`、`\nameref` 还没有替换
-  （P3 的标签连同类型名一起做）。
+  `\makeatletter` 块里定义的命令仍然跳过。公式里的 `\ref` 一族（`\cref`、`\autoref`、`\pageref`、`\nameref`）
+  和实时预览的标签一样换成文字（P3）。
   `\providecommand` 只看项目里前面有没有定义过同名命令，不看 MathJax 自带的命令。
+- 实时预览的文本构造（P3）：标题的 `{title}`、强调命令的参数、`\item[..]` 的标签都必须在同一行里闭合；
+  `\autoref`/`\cref` 的类型名只按 hyperref、cleveref 的英文默认名，加上项目里的 `\<type>autorefname`、
+  `\crefname`/`\Crefname`、`\newtheorem` 标题和 cleveref 的 `capitalise`/`noabbrev` 算：babel 的其他语言名、
+  `\creflabelformat`、cleveref 的 `nosort`/`nocompress`、hyperref 退回的 `\<type>name`（listings 之外）都不跟；
+  中文文档也是英文名（ctex 和 elegantbook 都不定义，PDF 里就是这样）。引用标签总是 “作者 年份”，不跟
+  biblatex/natbib 的数字样式；`\S`、`\term{..}` 这类命令保留源码。定义（`\newcommand` 等）一直跳到第一个
+  大括号外的换行，同一行后面的内容也不装饰。`\iffalse` 只在行首时当注释跳过（`\let\ifx\iffalse` 是代码）；
+  打到一半、还没有 `\fi` 的 `\iffalse` 一直跳到文末，和 TeX 一样。enumitem 的 `resume` 只跟列表的嵌套，
+  不跟定理之类别的环境的分组（enumitem 在那里恢复不到）。
 
 ## 下一步
 
@@ -281,7 +291,43 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
         `\text{}` 里的 `\eqref`；公式里的定义不留下；MathJax 读不了的定义报错；渲染缓存；首次悬停就有字形 CSS；
         `\text{当 $x$ 时}` 的扫描；嵌套 `\input` 的主文件；跨文件的定义别名；elegantbook 的 `chinese` 选项。
 - [ ] P2 共享实时预览核心、实时数学、模式切换。
+  - [x] 共享核心 `livePreview.ts`（`src/editor/shared/`，2026-09-29，无头部分；见下文“实时预览的共享核心”）：
+        一个 StateField（光标碰到才显示源码，两端都算，只在有焦点时；鼠标按下和输入法组字时只映射；
+        带错误诊断或渲染失败的构造不替换），显示公式展开后下方留渲染，`enterBlocks` 事务过滤器让
+        上下方向键走进块（不绑任何键），渲染缓存和调度（视口优先，同步渲染在微任务里，异步一次一个，
+        其余空闲时预取），部件高度变化后重新测量，`renderStats`；`.lsp-lp-*` 样式；渲染悬停不再出现在
+        实时部件上（`replacedAt`）。测试 T-S1–T-S12（`tests/livePreview.test.ts`，两个仓库相同），
+        浏览器冒烟 B1–B5（`scripts/browser-smoke.mjs`）。
+  - [x] LaTeX 的实时数学和模式切换（2026-09-29，无头部分；见下文“LaTeX 的实时预览”）：`latexLive.ts`
+        （构造 #1–#4：行内公式；显示公式独占整行时是块，在正文里是行内的显示部件；数学环境，`\label` 按上次
+        编译的 `.aux` 变成 `\tag{n}`；MathJax 画不了的保留源码加虚线下划线）；`TexRender.rendererFor(root)`
+        （同步，纪元是定义语句的哈希，`flush` 立刻放字形 CSS、弹出窗口也放一份）和第一次进入实时模式前的预载；
+        `TexView` 的模式（视图状态、标题栏按钮、命令 “Toggle live preview”、设置 “Default editing mode”、
+        超过 10,000 行拒绝、`HistoryCache` 按模式恢复）；隐藏命令 “Show render statistics”。测试 T-L5
+        （`tests/latexLive.test.ts`）和模式切换（`tests/texView.test.ts`，Obsidian 替身 `tests/support/obsidian.ts`）。
+  - [x] 共享核心的审查修复（2026-09-29，无头部分；见下文“实时预览的共享核心”的“审查修复”）：鼠标按着或组字时
+        调度器不再在微任务里空转（编辑器会卡死）；`enterBlocks` 只改正行移动（Cmd-A、Cmd-ArrowUp/Down、
+        Shift-Cmd-ArrowDown、Escape 不再被拉进块），行移动进入文末或文首的块时逐行经过；搜索面板的当前匹配
+        会展开公式；紧挨着构造的错误不再让它保持源码；展开的块下方的预览不再显示别的块的渲染；扫描器抛错时
+        保持源码；渲染落地后只重画等它的构造；行内替换只画视口附近的（密集文档的光标移动 1.2 ms → 0.3 ms）；
+        标签在标题行里不再跟着变大变粗；`scripts/gen-perf-fixture.mjs` 生成 B5 用的长章节。
+  - [ ] GUI 检查 L1–L9、L14–L16（scratch vault）。
 - [ ] P3 文本构造：标题、强调、列表、`\ref`/`\cite` 标签（aux、bib）。
+  - [x] LaTeX 的文本构造 #5–#11（2026-09-29，无头部分；见下文“LaTeX 的实时预览：文本构造（P3）”）：
+        `latexScan.ts` 的标题、强调、`\item`（标记按层级、enumerate 简写和 enumitem `label=`/`start=`）、列表和
+        center 的 `\begin`/`\end` 行、引用、引用文献、`\label`，定义体不再扫描；`latexRefs.ts`（标签和公式里引用的
+        文字，类型名来自锚点，elegantbook lang=cn 用中文名）；`src/tex/aux.ts` 的类型、`src/tex/bib.ts`
+        （`bibFiles`、`parseBib`、`readBib`、`citeLabel`）；`TexRender.refsOf`（编译结果、打开视图、保存和编辑
+        .bib 时重读，变了才通知视图）。测试 T-L6（`tests/aux.test.ts`，`tests/fixtures/aux/` 的静态 .aux 摘录）、
+        T-L7（`tests/bib.test.ts`）、T-L8（`tests/latexLive.test.ts`），以及扫描器、TexRender、TexView 的新用例。
+  - [x] 文本构造的审查修复（2026-09-29，无头部分；见下文“文本构造（P3）”的“审查修复”）：标签的文字就是 PDF
+        印出来的（elegantbook 条目编号的颜色参数不再漏进 “structurecolor1.”；`\autoref` 用 hyperref 的名字，
+        `\cref`/`\Cref` 按 .aux 里 cleveref 的类型分组、排序、区间、复数，跟 `capitalise`/`noabbrev`、
+        `\crefname`、`\newtheorem`；不再给中文文档换中文名）；带公式或引用的 `\item[..]` 标签原地显示、公式渲染；
+        TikZ 图不再装饰；根文档在 `\begin{document}` 前读入的文件（拆开的导言区）没有构造；enumitem 的
+        `resume`/`resume*`/`series` 和列表里的 `\setcounter`；tcblisting、fancyvrb、filecontents 和行首
+        `\iffalse` 块跳过；`\Citet`、`\citealp`、`\footcite` 等也是文献标签。
+  - [ ] GUI 检查 L11（scratch vault）。
 - [ ] P4 定理框（BlockWrapper）和图片。
 - [ ] P5 从上次编译的 PDF 裁剪（SyncTeX + pdf.js）。
 - [ ] P6 真实 TeX 片段编译兜底、光标处预览。
@@ -360,7 +406,9 @@ CoreText 发起下载请求后一直不返回，xelatex 停在 `TDownloadableFon
 - **读不了的定义**：xparse 参数说明不是“最多一个 `o`/`O{…}` 加若干 `m`”的，和定义体用到带 `@` 内部命令的，
   记在 `Definitions.unsupported`（按文档顺序，后面能读的同名定义会把它清掉）；用到它们的公式报错，
   而不是画成 MathJax 自带的同名命令。
-- **扫描**（`latexScan.ts`）：有 `\begin{document}` 时只看正文；跳过注释、`verbatim` 类环境和 `\verb|…|` 类行内原文；
+- **扫描**（`latexScan.ts`）：有 `\begin{document}` 时只看正文；跳过注释、`verbatim` 类环境（含 tcblisting、
+  fancyvrb 的 `BVerbatim` 等、filecontents）、`\verb|…|` 类行内原文、行首 `\iffalse` 到它的 `\fi`（或 `\else`）、
+  TikZ 图（等 P5）；
   每个公式都在段落（空行）处截止，打到一半的 `$`、`$$`、`\[`、`\begin{align}` 不会和很远的分隔符配对。
   行内公式跳过 `\text`/`\textrm`/…/`\mbox`/`\hbox`/`\fbox` 的参数：里面的 `$` 或 `\(` 开始嵌套公式
   （`$f = \text{当 $x>0$ 时} 1$` 是一个公式，以前被切成两半，各报一个括号错误）；参数在段落内不闭合时
@@ -396,3 +444,219 @@ CoreText 发起下载请求后一直不返回，xelatex 停在 `TDownloadableFon
   整个过程只建了一个 TeX 输入。
 - `node --expose-gc`：200 次改编号的编译（每次后悬停一次）堆涨 0.37 MB（修复前 26 MB）；
   100 次改定义的重建 0.12 MB（修复前 1.26 MB）。
+
+## 实时预览的共享核心（P2，2026-09-29）
+
+`src/editor/shared/livePreview.ts`（和 obsidian-tinymist 共用）只管两种语言共同的规则；每种语言提供
+`scan`（构造，纯函数，按 `Text` 记忆）和 `decorate`（每个构造长什么样），公式由 `renderConstruct` 按统一规则画。
+
+- **一个 StateField**：块部件和替换换行只能来自状态（从 ViewPlugin 给，CodeMirror 直接抛错）。编辑、焦点变化、
+  `refreshLive`、新的 lint 诊断、重新配置、鼠标抬起时全部重建；只移动选区时，只重画旧选区和新选区所在行上的
+  构造（嵌套的构造连带），不在构造上的移动什么也不做。鼠标按下时（Obsidian 的冻结：拖动时版面不动）和输入法
+  组字时（`input.type.compose`）只映射，`compositionend` 之后刷新。
+- **显示规则**：编辑器有焦点（或它的搜索面板开着：findNext 和替换让焦点留在面板里，当前匹配要看得见）、
+  某个选区碰到构造（两端都算，`$x$|` 也算）时显示源码；失去焦点时全部渲染。
+  块（独占整行）按行判断，展开后在最后一行下面留一份渲染（`is-below`）；新源码还在渲染或渲染失败时，
+  下面这份保留上一次的渲染，标 `is-pending` / `is-error`。带错误诊断的构造（诊断和构造重叠，或者是空的、
+  在构造里或边上；只在构造开头结束、或从结尾开始的不算）、渲染失败的构造都不替换（保留 lint 下划线，
+  或加虚线下划线 `lsp-lp-error`，悬停显示报错）。重叠的替换，先加的留下。扫描器抛错时这段文本保持源码
+  （只记一次日志），编辑器照常可用。
+- **部件**：`RenderWidget` 克隆渲染器给的节点；CodeMirror 会把一个部件的 DOM 交给同类的下一个部件
+  （块被替换的部件变成下方预览），所以 `updateDOM` 重设全部 class 和属性。新结果还在渲染或失败时，只接手
+  自己的 DOM（同一个请求，或正在编辑的块下方的预览；CodeMirror 把旧部件一起交给 `updateDOM`），别的块
+  的渲染不会出现在这里。块的高度量进按键的缓存，作 `estimatedHeight`（没量过时每行 40 px）。`TextWidget`
+  给标签、项目符号、标题用，字号和粗细跟编辑器正文，不跟标题行。
+- **只画视口附近的行内替换**：CodeMirror 每次更新都要逐个比较一个集合里所有的替换（点装饰的块从不共享），
+  每行都有构造的 5,700 行文档里约 12,500 个，光标移动要 1.2 ms。所以不跨行的替换放在一个函数形式的
+  `EditorView.decorations` 里，只给视口前后各 4,000 个字符和主选区所在的行（按字段值和视口缓存）；块替换和
+  跨行的替换只能来自状态，留在静态集合里。原子范围、`replacedAt` 和 `enterBlocks` 读全部。
+- **渲染缓存和调度**：每个渲染器一份缓存，超过 2000 个时先丢最早渲染的，但打开的视图正在用的永远不丢
+  （构造比 2000 多的文档，否则会一直丢了又渲染）。视口里的先渲染：同步渲染器（MathJax）在微任务里，
+  绘制之前，每次最多 8 ms，其余下一帧继续；异步渲染器（tinymist）每个渲染器同时只有一个请求。视口外的
+  在空闲时每批 50 个预取，离视口近的先，滚动时部件已经在了。纪元（宏、导言区）变了就丢掉缓存，旧纪元的
+  结果作废。每批一次 `refreshLive`（异步的每帧一次），带着落地的键，只重画等这些渲染的构造
+  （`refreshLive.of(null)` 全部重建）；鼠标按着或正在组字时不刷新，松开或组字结束会重建。视口里已经渲染好、
+  只是刷新被压着的键不算待渲染：否则调度器在微任务里空转，鼠标抬起和组字结束永远轮不到，编辑器卡死。
+- **方向键**：实时预览不绑任何键，Tab/Enter/Escape/方向键仍然只归 keyArbiter。`cursorLineUp/Down` 会跳过
+  被块部件盖住的行；`enterBlocks` 事务过滤器只改正行移动（userEvent 正好是 "select"，范围带目标列：
+  cursorLineUp/Down、它们的 Shift 形式、PageUp/Down；选区个数不变）里“正好越过一段隐藏行”的一步：落在紧邻的
+  可见行上，或者落在文末（文首）的块里（CodeMirror 这时把光标放到文档末尾或开头），就停到这段块的开头
+  （向上时是结尾），块随即展开。Cmd-A、Cmd-ArrowUp/Down、Shift-Cmd-ArrowDown、Mod-Home/End、代码片段字段和
+  Escape（多个光标变成一个）不带目标列或改了选区个数，都不改；中间有可见行的跳转（PageDown）、鼠标和搜索的
+  选区也不改。jsdom 没有布局，CodeMirror 的上下移动在那里不带目标列，测试给 `moveVertically` 补上一个。
+- **高度**：块部件在 CodeMirror 量过之后变了尺寸（MathJax 的字形 CSS 晚到、网页字体），ResizeObserver 经
+  rAF 合并后改第一行的一个属性，CodeMirror 于是重新测量；否则比窗格短的文档里行号和行会错开。
+- **鼠标抬起后**光标若在视口外就滚过去（Overleaf 的 scrollJumpAdjuster）。
+- **接口**：`liveInput()`（焦点、鼠标、组字，一直挂着，在 compartment 之外），`livePreview({ language, renderer })`
+  放进 `livePreviewCompartment`；`refreshLive`、`isLive`、`replacedAt`、`renderStats`（渲染次数、命中、等待数、
+  渲染和重建耗时的 p50/p95，给隐藏命令 “Show render statistics”）；超过 `LIVE_MAX_LINES`（10,000 行）的文档不装饰。
+  渲染悬停在实时部件上一律不出现（`renderHover` 直接查 `replacedAt`）。
+
+验证（2026-09-29）：
+
+- `tests/livePreview.test.ts`（两个仓库相同，假语言、假渲染器，jsdom）：T-S1–T-S12，外加选区移动的局部重画
+  和整体重建逐个比较（150 次随机移动，含嵌套的盒子）、构造多于缓存时不重复渲染、重叠替换、BlockWrapper、
+  尺寸变化后的重新测量、`replacedAt` 和渲染悬停。golden 按键矩阵在打开实时预览时全部不变，新增光标紧挨着
+  折叠的行内公式和块时 Tab、Enter、Escape 与源码模式相同，方向键停到块上。
+- `scripts/browser-smoke.mjs`（无头 Chrome，这个仓库用 `mathjax@3.2.2` 和 Obsidian 的配置渲染）：B1 方向键逐行
+  走过 `\[..\]`、`$$..$$`、align，块依次展开，Cmd-ArrowDown 到文末；B2 输入法 `c`…`ceshi` 组字时部件数不变，
+  上屏 `测试` 后文本正确；B3 拖选时文档高度不变，松开后选区保留；B4 37 行的文档行号和行的偏差 0 px
+  （去掉重新测量时最多 3 px；obsidian-tinymist 的替身渲染器晚 100 ms 长高，最多 136 px）；B5 5,700 行：
+  挂载 4.7 ms、打字 p95 4.7 ms、光标移动 p50 0.5 ms（局部重画之前约 2.5 ms）、滚 20 屏帧 p90 16.7 ms。
+
+审查修复（2026-09-29，两个仓库的共享核心和测试相同；不入库的复现脚本在 scratchpad）：
+
+- 修了什么：鼠标按着（或组字）时，视口里的渲染已经落地但刷新被压着，空闲预取又开始了，调度器就在微任务里
+  一直排自己（无头 Chrome 里页面 CPU 99%、鼠标抬起永远处理不到）；`enterBlocks` 把 Cmd-A、Cmd-ArrowUp/Down、
+  Shift-Cmd-ArrowDown、Escape（两个光标）当成一行一行的移动拉进块里（全选只选到块前、Cmd-ArrowDown 停在块上）；
+  ArrowDown 进入文末的块、ArrowUp 进入文首的块时直接跳到块的另一头；搜索面板里按 Enter 找到的匹配在渲染的公式
+  里时看不见（焦点在面板里）；紧挨着公式结束的错误（`\foo$x$` 的未定义命令）让公式保持源码；一次改两个块、
+  第一个变回源码时，第二个下方失败的预览显示第一个的渲染；扫描器抛错（极深的嵌套）会让每个事务都抛错；
+  在展开的块里打字，渲染落地后整篇重建（现在只重画这个块）；行内替换多的文档光标移动超预算；标题行里的标签
+  跟着变大变粗（Typst 的补充文字还带着 `*`）。
+- 测试：`tests/livePreview.test.ts` 新增和改写的 10 个用例（按住鼠标时异步和同步渲染器各一次，同一轮微任务里
+  排队的次数小于 100，旧代码超过上限 10,000；Select All、Mod-End/Home、Shift-Mod-End、Escape；文末和文首的块；
+  搜索面板；相邻的错误；别的块的预览 DOM；抛错的扫描器；落地的渲染只重画一个块；只画视口附近），在旧代码上
+  全部失败。全部测试：LaTeX Live 344 个通过，obsidian-tinymist 241 个通过（1 个跳过）。
+- 无头 Chrome（`scripts/browser-smoke.mjs`，MathJax 3.2.2）：21/21 通过。B1 新增的 6 项在旧代码上都失败（文末的块
+  `5 5 5 5`、文首的块 `1 1 1 1`、全选 `[0,50]`（全文 73）、Cmd-ArrowDown 停在第 2 行等），现在逐行 `2 3 4 5`、
+  `4 3 2 1`，全选 `[0,73]`。B5 换成 `scripts/gen-perf-fixture.mjs` 生成的 5,700 行章节（每节的公式都不同）：挂载
+  20–22 ms、打字 p95 3.4–3.7 ms、在展开的 equation 里打字到下方预览重画完 p50 2.8–3.1 ms、p95 4.5–5.0 ms（旧代码
+  4.4–6.6 / 6.8–9.9 ms）、光标移动 p50 0.2 ms（旧代码 0.4–0.6 ms）、滚 20 屏帧 p90 16.7 ms；3000 行、公式都不在缓存
+  里时按住鼠标滚轮，页面照常响应（旧代码卡死）。obsidian-tinymist 的 Typst 编辑器栈上每行都有构造的 5,700 行
+  章节（约 12,500 个替换）：光标移动 p50 0.2–0.3 ms（旧代码 1.1–1.3 ms），打字 p95 9.4–10.9 ms（旧代码 7.5–9.9 ms，
+  测量间波动；替换按行分开让一次重建多 0.5 ms，视图那边的比较少了）。
+
+## LaTeX 的实时预览（P2，2026-09-29）
+
+编辑器标题栏的书本图标（或命令 “Toggle live preview”，没有默认快捷键；Mod-E 仍然开关预览窗格）把一个
+LaTeX 编辑器切到实时预览：公式原地渲染，光标碰到时显示源码。每个视图记住自己的模式（写在视图状态里，
+重启后恢复；在同一个视图里打开别的文件时模式不变）；新视图的模式来自设置 “Default editing mode”（默认 Source）。
+
+- **构造**（`latexLive.ts`，只有公式，P3 之后才有标题、引用等）：`$..$`、`\(..\)` 是行内部件；`\[..\]`、`$$..$$`
+  和数学环境（equation、align、gather、multline、flalign、alignat、eqnarray、displaymath，带星号的也算）独占整行
+  （首行之前、末行之后只有空白或注释）时是块部件，在正文里是行内的显示部件。行内公式单独占一行也不是块
+  （扫描器的 `block` 以前对 `$x$` 独占一行的情况也是真）。导言区、注释、verbatim、`\verb` 不装饰；MathJax
+  画不了的（tikz-cd、`\intertext`、读不了的宏）保留源码，加虚线下划线，悬停显示 MathJax 的报错。
+- **编号**：请求里带的是 `prepareMath` 处理过的公式（`\label` 按根文档上次编译的 `.aux` 变成 `\tag{n}`，公式里的
+  `\ref`/`\eqref` 变成编号），所以渲染器的纪元只是定义语句的哈希（`ProjectMath.epoch`）。编译完成后编号变了，
+  `TexRender` 通知使用这个根文档的视图重建，只有文字变了的公式重新渲染；定义变了（保存或编辑定义行）换一个
+  MathJax 实例、换纪元，全部重新渲染。同一个根文档的视图共用一个渲染器（`rendererFor(root)`）和它的缓存。
+- **预载**：第一次进入实时模式前先载入 MathJax、渲染一次热身、`finishRenderMath`、等字体就绪（`preload`），
+  这之前视图显示源码；之后切换是一次 compartment 重新配置，撤销历史、光标、滚动位置不变。
+- **限制**：超过 10,000 行的文档不进实时模式（切换时提示；按默认设置打开时退回 Source）；`.sty`/`.cls` 没有构造。
+  texlab 的悬停和渲染悬停都不出现在实时部件上。
+
+验证（2026-09-29，不入库的脚本在 scratchpad）：
+
+- 测试：T-L5（`tests/latexLive.test.ts`，真实的编辑器栈和 Obsidian 的 MathJax）：#1–#4、块和行内的判断、`\label` 变
+  `\tag`、带星号不编号、展开后下方的渲染带编号、导言区和注释不装饰、编译错误所在行保留源码、编号变化只重画变了的
+  公式、定义变化后重画、方向键经 keyArbiter 走进块；`tests/texView.test.ts`：默认模式、标题栏按钮和命令、视图状态
+  恢复、同一视图换文件保持模式、10,000 行限制、`HistoryCache` 按模式恢复。
+- 合成项目的新拷贝，先用插件自己的 `Compiler` 编译（elegantbook XeLaTeX 10 页、latex-article pdfLaTeX 3 页、测试夹具），
+  再在 jsdom 里把每个 `.tex` 以实时模式挂到真实的编辑器栈上（`TexRender` 的渲染器）：latex-elegantbook 136 个公式
+  134 个渲染（ch2 的 tikz-cd、ch3 的 `\intertext` 保留源码），带编号的环境 14/14 显示 `.aux` 里的编号；latex-article
+  47 个中 43 个（`\set{..}[..]` 两处、tikzpicture 里的 `$\t$`、`\intertext`）；测试夹具 30 个中 28 个。多文件流程：
+  在 ch1 开头插入带 `\label` 的 equation 并重新编译，5 个编号变化（新的 1.1，后面四个各加一），只重新渲染这 4 个公式，
+  同时打开、共用渲染器的 ch2、ch3 等视图一个也不重画；在 macros.tex 里未保存地改 `\R` 的定义，500 ms 后所有打开的
+  视图里的公式换成新定义（119 次渲染）。
+- 无头 Chrome，Obsidian 的 app.css（深色）、插件的 styles.css、Obsidian 的 MathJax 包：elegantbook 三章实时模式下
+  行号和行的偏差 0 px；ch1（98 行，6 个块）从第 1 行按 ArrowDown 到末行、再按 ArrowUp 回来，每一行都按顺序经过；
+  3000 行的生成章节：挂载 6.4 ms（源码模式 2.8 ms）、在公式所在行打字 p95 4.4 ms（1.5 ms）、光标移动 p50 0.3 ms、
+  滚 20 屏帧 p90 17.3 ms（16.9 ms）、全文 1750 个公式预取完 0.9 s、切到实时 5.1 ms、切回源码 3.1 ms。
+
+## LaTeX 的实时预览：文本构造（P3，2026-09-29）
+
+实时模式下除了公式，正文里的这些构造也原地显示（design 4.4 #5–#11），光标碰到时显示源码：
+
+- **标题**：行首的 `\part` … `\subparagraph`（带星号也算），`{title}` 在同一行闭合。整行用 `lsp-lp-h1`…`h6` 的字号
+  （展开时也保留）；`\section{`、可选的 `[short]` 和结尾的 `}` 隐藏，光标碰到命令或结尾大括号时才显示。
+- **强调**：`\textbf`、`\textit`、`\emph`、`\underline`、`\texttt`、`\textsc`，参数在一行内闭合且非空。内容加样式，
+  命令和大括号隐藏；光标碰到整个构造时显示源码，样式保留。可以嵌套（`\emph{x \textbf{y}}`、标题里的公式）。
+- **列表**：itemize、enumerate、description 里的 `\item` 换成 LaTeX 排出来的标记：itemize 按层级 • ◦ ▪，enumerate
+  按层级 1. / (a) / i. / A.，`\begin{enumerate}[(a)]` 这类 enumerate 宏包简写和 enumitem 的 `label=(\roman*)`、
+  `start=3`（`nosep` 这类只有键的选项不当简写）、`resume`/`resume*`/`series=`/`resume=`（规则和 enumitem 一样：
+  `resume` 接着同一层列表里或外面最后结束的同名列表，`resume*` 的列表结束时只存编号），列表里的
+  `\setcounter`/`\addtocounter`/`\stepcounter{enumi..iv}`，`\item[x]` 显示 x 且不计数，description 的条目名加粗；
+  标记里的颜色、`\hspace` 这类不排字的参数去掉（`label=\textcolor{blue}{\arabic*}.` 是 “1.”）。标签里有公式或引用时
+  （`\item[$\sigma$-代数]`）不换成标记：只隐藏 `\item[` 和 `]`，标签原地显示（条目名加粗）、公式渲染，光标碰到
+  `\item[` 或 `]` 时两边一起显示。只有光标
+  碰到 `\item` 本身才显示源码，所以在它后面打字时标记不变；Enter 续行（`latexEnter`）后新条目立刻显示下一个编号。
+  列表和 center 独占一行的 `\begin`/`\end` 行折叠（没有部件的块替换），光标在那一行时展开；上下方向键经
+  `enterBlocks` 一行一行走进去。
+- **引用**：`\ref`、`\eqref`、`\pageref`、`\autoref`、`\cref`、`\Cref`、`\nameref` 显示为标签，文字就是 PDF 印出来的：
+  编号（`.aux` 里的编号字段经 `texText`：elegantbook 条目的 `{\color {structurecolor}1.}` 是 “1.”）、`(编号)`、页码、
+  标题。`\autoref` 用 hyperref 按锚点类型给的名字（`Equation 1.2`、`section 1`、`item 1.`，项目里的
+  `\<type>autorefname` 优先；hyperref 没有名字的类型只显示编号，比如 elegantbook 的 tcolorbox 定理
+  `tcb@cnt@theorem`、自己计数的 amsthm 定理）。`\cref`/`\Cref` 按 `.aux` 里 cleveref 孪生标签的类型（`section`、
+  `subequation`、`enumii`；没有 cleveref 时用锚点的计数器）：同类型的放一组，组按第一次出现的顺序，组内按编号
+  排序，三个以上连续编号写成区间，多个时用复数，`and` 连接（`eqs. (1) to (3) and (5)`、`section 1, theorem 1.1,
+  and fig. 1`）；名字来自 cleveref 的英文默认名、`capitalise`/`noabbrev` 选项、`\newtheorem` 的标题（只有单数）、
+  `\crefname`/`\Crefname`（只给一个时另一个跟着变大小写），`subsection` 这类没有名字的类型用上一级的。cleveref
+  叫不出名字的类型显示 `??1`（警告色，和 PDF 一样）。elegantbook `lang=cn` 时 PDF 里也是英文名（ctex 和 elegantbook
+  都不定义），所以标签不再换成 `定理 1.1`、`式 (1.1)`。上次编译里没有的标签显示 `??`（警告色）。
+  公式里的这些命令也换成同样的文字（`prepareMath` 的 `refs`，悬停和实时部件一致）。
+- **文献**：`\cite`、`\citep`、`\citet`、`\parencite`、`\textcite`、`\autocite`，natbib 和 biblatex 的大写形式
+  （`\Citet`、`\Citep`、`\Parencite`…）和 `\citealt`、`\citealp`、`\footcite`（带前后注）显示为
+  `[see Li et al. 2019, p. 3]`：第一作者的姓，两位作者 “A and B”，三位以上或 `and others` 用 “et al.”；
+  中文作者 “张三、李四”“王五等”；年份来自 `year`，否则取 `date` 的年份。.bib 里没有的键原样显示（警告色）；
+  标签的提示框写出每个键的作者、年份和标题。
+- **`\label`**（公式外）：淡色的键名标签。
+- 导言区、注释、verbatim（含 tcblisting、fancyvrb、filecontents）、行首 `\iffalse` 到 `\fi` 的块、定义（`\newcommand`
+  等，宏文件没有 `\begin{document}` 也不会被装饰）、`\footnote` 命令本身、定理框和图表环境（P4）、TikZ 图（P5）不装饰；
+  根文档在 `\begin{document}` 之前 `\input` 的文件（`preambleFiles`：拆出去的 `setup.tex` 里的 `\hypersetup`、`\tcbset`、
+  `\setlist`、`\title{$L^2$}`）整个没有构造，和 `.sty`/`.cls`/`.bib` 一样；带错误诊断的构造保留源码。
+
+**数据从哪来**（`TexRender.refsOf(root)`，不需要 MathJax）：构建目录下 `**/*.aux` 的 `\newlabel`（`\include` 的
+`chapters/*.aux` 也读，elegantbook 的 `{title}{label}` 隐式标签只有 .aux 里有）；项目源文件里 `\addbibresource`/
+`\bibliography` 指向的 .bib（按修改时间缓存，编辑器里未保存的内容优先）；项目源文件里的引用名（`refNames`：
+cleveref 的选项、`\crefname`/`\Crefname`、`\newtheorem`、`\<type>autorefname`）。
+每次编译结果后重读标签；打开这个根文档的文件时（别处编译过）、保存项目文件或 .bib（300 ms）、编辑 .bib 或书目/
+`\documentclass`/cleveref/`\crefname`/`\newtheorem`/`autorefname` 行（500 ms）时全部重读。内容没变就不换对象、不通知；变了才让用这个根文档渲染器的视图重建
+（编号不变时 `numbers` 保持同一个对象，公式不重新渲染）。
+
+验证（2026-09-29，不入库的脚本在 scratchpad）：
+
+- 测试：T-L6（`tests/aux.test.ts`：elegantbook 的 `chapters/*.aux` 和 tcolorbox 锚点、cleveref 文章的
+  `@cref` 类型、AMS 标签、Item、脚注、附录）；T-L7（`tests/bib.test.ts`：et al.、大括号保护、重音、中文名、
+  `von`、`date`、@string、引号、`#`、括号形式、重复键、坏条目、`bibFiles`、缓存）；T-L8（`tests/latexLive.test.ts`：
+  #5–#11 的显示和展开规则、中英文类型名、编译结果/保存 .bib/打开视图后标签更新、错误诊断、方向键和 Enter）；
+  扫描器（层级、简写、enumitem、定义体跳过）、TexRender（refs 的读取时机、悬停里的 `\autoref`）、TexView
+  （打开视图重读、.bib 没有构造）的新用例。全部 336 个测试通过；`npm run check`、`npm run build` 通过。
+- 合成项目的新拷贝，用插件的 `Compiler` 编译两遍后在 jsdom 里把每个 `.tex` 以实时模式挂到真实编辑器栈上
+  （`TexRender` 的 refs 和渲染器）：latex-elegantbook（42 个标签、6 条文献、中文名）、latex-article（pdfLaTeX、
+  cleveref、natbib，18 个标签、3 条文献）、测试夹具，所有文件 0 个 `??`、0 个未知文献键；macros.tex 没有构造。
+  多文件流程：在 ch1 开头插入 `\begin{theorem}{新定理}{new-first}` 并重新编译，附录视图里的 `\ref{thm:total-exp}`
+  从 1.1 变成 1.2（ch3 视图不变，`thm:new-first` 是 1.1）；ch2 引用 .bib 里还没有的 `new2025` 时标签是警告色，
+  保存 .bib 后 322 ms 变成 `[孙八等 2025, 第 3 页]`；未保存地改 .bib 的作者，520 ms 后 ch1 的标签变成
+  `[张三 2020, 第 2 章]`。
+- 无头 Chrome（Obsidian 的 app.css 深色、插件 styles.css、Obsidian 的 MathJax），两个项目的 10 个文件：行号和行的
+  偏差都是 0 px；elegantbook ch1（98 行，列表、description、折叠行）、附录（20 行）、文章 results（62 行，
+  `enumerate[label=(\roman*)]`）按 ArrowDown 到末行再按 ArrowUp 回来，每一行都按顺序经过。性能：
+  3000 行生成章节（250 个标题、250 个 `\eqref` 标签）实时模式挂载 7.2 ms、打字 p95 4.7 ms、光标 p50 0.3 ms、
+  滚动帧 p90 16.9 ms、切换 4.6 ms；elegantbook 各章重复成 3000 行（618 个标签、108 个列表标记、72 个折叠行）
+  挂载 7.1 ms、在 `\item` 行打字 p95 7.2 ms、光标 p50 0.3 ms、滚动 p90 16.8 ms；5,700 行（1175 个标签）挂载 9.2 ms、
+  打字 p95 6.3 ms、光标 p50 0.5 ms、滚动 p90 17.3 ms、切到实时 6.1 ms。共享核心的浏览器冒烟 B1–B5 13/13。
+
+审查修复（2026-09-29，无头部分；不入库的复现和比对脚本在 scratchpad）：
+
+- 标签文字和 PDF 对照：两个合成项目的新拷贝各加一段探针（elegantbook 第 3 章加小节、两层 enumerate 条目、脚注和
+  24 个 `\ref`/`\autoref`/`\pageref`/`\eqref`/`\nameref`；latex-article 附录加同样的探针和 32 个 `\cref`/`\Cref`/`\autoref`/…），
+  用插件的 `Compiler` 编译（XeLaTeX、pdfLaTeX），Ghostscript 取出 PDF 里每个引用印出的文字，和实时模式下的标签比：
+  修复前 elegantbook 16 个、latex-article 17 个不一致（`structurecolor1.`、`定理 1.1` 对 PDF 的 `1.1`、
+  `theorem 2.1` 对 `Theorem 2.1`、`figure 1, 2` 对 `Figures 1 and 2`、`appendix A` 对 `Section A`），现在引用全部一致
+  （`\nameref` 的中文标题 Ghostscript 取不出来，标签是对的；文献标签按设计是 “作者 年份”）。
+- `tests/latexRefs.test.ts`：合成探针 `tests/fixtures/aux/cleveref/probe.tex` 在四种导言区（默认、`capitalise,noabbrev`、
+  `capitalize`、`noabbrev` 加 `\crefname`/`\Crefname`/`\<type>autorefname`）下 pdfLaTeX 印出的 45 × 4 个引用文字，
+  标签全部相同（分组、排序、区间、复数、`, and`、类型名、没有名字的类型只印编号）。
+- enumitem：`resume`、`resume*`（带和不带 `start=`）、`series=`/`resume=`/`resume*=`/只写系列名、嵌套列表的 `resume`、
+  `\setcounter`/`\addtocounter`/`\stepcounter` 五组，扫描器给的标记和 pdfLaTeX 排出的 22 个编号逐个相同。
+- TikZ：elegantbook 的 `figures/tikz-projection.tex` 从 7 个构造（calc 坐标 `($(O)!(Y)!(X)$)` 被画成公式、6 个节点公式）
+  变成 0 个；latex-article `results.tex` 的 tikzpicture 里从 4 个（3 个公式，含带虚线下划线的 `$\t$`，和一个 `\eqref`）
+  变成 0 个。公式语料因此变成 latex-elegantbook 127/129、latex-article 41/44（剩下的仍是 tikz-cd、`\intertext`、
+  `\set{..}[..]`）。
+- 拆开的导言区：`preambleFiles` 在 elegantbook 上只认出 `macros.tex`，latex-article 没有；合成的 `setup/preamble.tex`
+  和它再 `\input` 的 `setup/boxes.tex` 在实时模式下没有部件和样式（修复前 3 处），章节照常渲染（`tests/texView.test.ts`）。
+- 测试：新增的 15 个用例（`tests/latexRefs.test.ts` 4 个，扫描器 6 个，高亮 2 个，T-L8 的原地 `\item` 标签，
+  `preambleFiles`，TexView 的导言区文件）在修复前的代码上都失败；全部 359 个测试通过，`npm run check`、
+  `npm run build`、`test:yolo`（18/18）通过。GUI 检查仍然待做。

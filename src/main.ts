@@ -12,6 +12,7 @@ import {
   loadMathJax,
 } from "obsidian";
 import { HistoryCache, syncDarkTheme } from "./editor/shared/editorKit";
+import { isLive, renderStats } from "./editor/shared/livePreview";
 import { YoloBridge } from "./editor/shared/yoloBridge";
 import type { MathJaxLike } from "./editor/mathjaxProject";
 import { TexRender } from "./editor/texRender";
@@ -76,6 +77,7 @@ export default class LatexLivePlugin extends Plugin {
         }
         return out;
       },
+      documents: () => new Set(this.texViews().map((v) => v.containerEl.ownerDocument)),
       mathJax: {
         load: loadMathJax,
         global: () => (window as unknown as { MathJax?: MathJaxLike }).MathJax,
@@ -115,6 +117,36 @@ export default class LatexLivePlugin extends Plugin {
         const view = this.app.workspace.getActiveViewOfType(TexView);
         if (!view?.file) return false;
         if (!checking) void this.syncPreviewToCursor(view, false);
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "toggle-live-preview",
+      name: "Toggle live preview",
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(TexView);
+        if (!view?.file) return false;
+        if (!checking) view.toggleMode();
+        return true;
+      },
+    });
+    // For measurements (design 3.8): only offered in a live editor.
+    this.addCommand({
+      id: "show-render-statistics",
+      name: "Show render statistics",
+      checkCallback: (checking) => {
+        const editor = this.app.workspace.getActiveViewOfType(TexView)?.editorView;
+        if (!editor || !isLive(editor.state)) return false;
+        if (!checking) {
+          const s = renderStats(editor);
+          new Notice(
+            `LaTeX Live render statistics: ${s.renders} renders (p50 ${s.p50} ms, p95 ${s.p95} ms), ` +
+              `${s.hits} cache hits, ${s.misses} misses, ${s.pending} pending; ` +
+              `${s.builds} decoration builds (p50 ${s.buildP50} ms, p95 ${s.buildP95} ms).`,
+            15000,
+          );
+        }
         return true;
       },
     });

@@ -10,8 +10,11 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, HoverTooltipSource, activateHover, closeHoverTooltips } from "@codemirror/view";
 import type { App } from "obsidian";
 import { latexCompletionSource } from "../src/editor/latexCompletion";
+import { latexLiveLanguage } from "../src/editor/latexLive";
+import { DEFAULT_REF_NAMES } from "../src/editor/latexRefs";
 import { LatexMath } from "../src/editor/latexScan";
 import { ProjectMath } from "../src/editor/mathjaxProject";
+import { FragmentRenderer, livePreview } from "../src/editor/shared/livePreview";
 import { hoverError } from "../src/editor/shared/renderHover";
 import { YoloBridge } from "../src/editor/shared/yoloBridge";
 import { TexEditorOptions, TexHoverOptions, showTexDiagnostics, texEditorExtensions } from "../src/editor/texExtensions";
@@ -402,23 +405,41 @@ test("render hover: a formula's section, texlab quiet inside math, texlab elsewh
   done(c);
 });
 
-test("render hover: above the lint hover of a compile error; none over a live widget", () => {
+const NO_REFS = { numbers: new Map(), labels: new Map(), cites: new Map(), names: DEFAULT_REF_NAMES };
+
+test("render hover: above the lint hover of a compile error; neither hover over a live widget", async () => {
   const rendered: LatexMath[] = [];
-  const c = make("\\[ \\frac{a}{b} \\]\n$x$ $y$\n|", [], {
+  const texlab: number[] = [];
+  let on = true;
+  const renderer: FragmentRenderer = {
+    epoch: 0,
+    render: (req) => ({ ok: true, node: Object.assign(document.createElement("span"), { textContent: req.src }) }),
+  };
+  // Live preview: "$y$" (22..25) is rendered in place; "$x$" (18..21) holds the cursor, and the
+  // display formula (line 1) has a compile error, so both show their source.
+  const c = make("\\[ \\frac{a}{b} \\]\n$x|$ $y$\n", [], {
     diagnostics: true,
-    hover: {
-      enabled: () => true,
-      render: fakeRender(rendered),
-      // "$y$" (22..25) is rendered in place by a live widget.
-      replacedAt: (_state, pos) => pos >= 22 && pos <= 25,
-    },
+    hover: { enabled: () => on, render: fakeRender(rendered), lsp: fakeTexlab(texlab) },
+    live: livePreview({ language: latexLiveLanguage({ refs: () => NO_REFS }), renderer }),
   });
   const view = c.view;
   showTexDiagnostics(view, [{ severity: "error", file: null, line: 1, message: "Missing $ inserted." }]);
+  await sleep(50);
+  assert.deepEqual(
+    [...view.contentDOM.querySelectorAll(".lsp-lp-render")].map((w) => w.textContent),
+    ["y"],
+    "only $y$ is a widget",
+  );
   assert.deepEqual(hoverAt(view, 5), ["render", "lint"]);
   assert.deepEqual(hoverAt(view, 19), ["render"]);
   assert.deepEqual(hoverAt(view, 22), [], "over the widget (its start)");
+  assert.deepEqual(hoverAt(view, 24), []);
   assert.deepEqual(rendered.map((m) => m.src), [" \\frac{a}{b} ", "x"]);
+  assert.deepEqual(texlab, [], "texlab: inside math, or over the widget");
+  on = false;
+  assert.deepEqual(hoverAt(view, 19), ["texlab"], "rendering off: texlab's hover in the revealed source");
+  assert.deepEqual(hoverAt(view, 23), [], "never over the widget");
+  assert.deepEqual(texlab, [19]);
   done(c);
 });
 

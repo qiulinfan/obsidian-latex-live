@@ -148,6 +148,211 @@
   white-space: pre-wrap;
 }
 
+/* Live preview (livePreview.ts): constructs rendered in the editor's own lines. Block
+   widgets and theorem boxes never get vertical margins: CodeMirror's height map misses
+   margins (measured: ArrowDown skipped visible lines and the gutter drifted), so their
+   spacing is padding or goes on line decorations. */
+.lsp-cm-view .lsp-lp-render {
+  font-family: var(--font-text);
+}
+/* Inline math stays inline: an inline-block with overflow would sit on the text baseline by
+   its bottom edge. Display math inside a line may scroll. */
+.lsp-cm-view .lsp-lp-render.is-display:not(.is-block) {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  vertical-align: middle;
+}
+.lsp-cm-view .lsp-lp-render.is-block {
+  display: block;
+  margin: 0;
+  padding: 0.25em 0;
+  overflow-x: auto;
+  text-align: center;
+}
+.lsp-cm-view .lsp-lp-render mjx-container[display="true"] {
+  margin: 0;
+}
+.lsp-cm-view .lsp-lp-render:empty {
+  display: none;
+}
+/* The rendering under a revealed block, while its source is edited. */
+.lsp-cm-view .lsp-lp-render.is-below {
+  position: relative;
+  border-left: 2px solid var(--interactive-accent);
+  opacity: 0.8;
+}
+/* A newer source still rendering, or failing: the last rendering stays. */
+.lsp-cm-view .lsp-lp-render.is-pending {
+  opacity: 0.5;
+}
+.lsp-cm-view .lsp-lp-render.is-below.is-error::after {
+  content: "!";
+  position: absolute;
+  top: 0.25em;
+  right: 0.5em;
+  min-width: 1.3em;
+  padding: 0 0.3em;
+  border-radius: var(--radius-s, 4px);
+  background: var(--text-error);
+  color: var(--text-on-accent, #fff);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller, 0.8em);
+  font-weight: 600;
+  line-height: 1.3em;
+  text-align: center;
+}
+.lsp-cm-view .lsp-lp-message {
+  color: var(--text-error);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+  white-space: pre-wrap;
+}
+/* Source kept because its render failed (the render hover shows the message). */
+.lsp-cm-view .lsp-lp-error {
+  text-decoration: underline dotted var(--text-error);
+  text-underline-offset: 3px;
+}
+/* Chips: \ref, \eqref, \cite, @label, <label>. */
+.lsp-cm-view .lsp-lp-chip {
+  padding: 0 0.3em;
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-modifier-hover);
+  color: var(--text-accent);
+  font-family: var(--font-text);
+  /* The editor's text size, not the line's: a label chip on a heading stays small and plain. */
+  font-size: calc(var(--font-text-size, 16px) * 0.92);
+  font-weight: var(--font-normal, 400);
+}
+.lsp-cm-view .lsp-lp-chip.is-cite {
+  color: var(--text-muted);
+}
+.lsp-cm-view .lsp-lp-chip.is-label {
+  background: none;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-faint);
+}
+.lsp-cm-view .lsp-lp-chip.is-missing {
+  color: var(--text-warning);
+}
+/* Headings (line classes). */
+.lsp-cm-view .cm-line.lsp-lp-h1,
+.lsp-cm-view .cm-line.lsp-lp-h2,
+.lsp-cm-view .cm-line.lsp-lp-h3,
+.lsp-cm-view .cm-line.lsp-lp-h4,
+.lsp-cm-view .cm-line.lsp-lp-h5,
+.lsp-cm-view .cm-line.lsp-lp-h6 {
+  font-family: var(--font-text);
+  line-height: var(--line-height-tight, 1.3);
+}
+.lsp-cm-view .cm-line.lsp-lp-h1 {
+  font-size: var(--h1-size);
+  font-weight: var(--h1-weight, 700);
+  color: var(--h1-color, inherit);
+}
+.lsp-cm-view .cm-line.lsp-lp-h2 {
+  font-size: var(--h2-size);
+  font-weight: var(--h2-weight, 600);
+  color: var(--h2-color, inherit);
+}
+.lsp-cm-view .cm-line.lsp-lp-h3 {
+  font-size: var(--h3-size);
+  font-weight: var(--h3-weight, 600);
+  color: var(--h3-color, inherit);
+}
+.lsp-cm-view .cm-line.lsp-lp-h4 {
+  font-size: var(--h4-size);
+  font-weight: var(--h4-weight, 600);
+  color: var(--h4-color, inherit);
+}
+.lsp-cm-view .cm-line.lsp-lp-h5 {
+  font-size: var(--h5-size);
+  font-weight: var(--h5-weight, 600);
+  color: var(--h5-color, inherit);
+}
+.lsp-cm-view .cm-line.lsp-lp-h6 {
+  font-size: var(--h6-size);
+  font-weight: var(--h6-weight, 600);
+  color: var(--h6-color, inherit);
+}
+/* Text styles (marks on the content; the command and braces hidden). */
+.lsp-cm-view .lsp-lp-strong {
+  font-weight: var(--bold-weight, 700);
+}
+.lsp-cm-view .lsp-lp-em {
+  font-style: italic;
+}
+.lsp-cm-view .lsp-lp-u {
+  text-decoration: underline;
+}
+.lsp-cm-view .lsp-lp-sc {
+  font-variant: small-caps;
+}
+.lsp-cm-view .lsp-lp-tt {
+  padding: 0 0.15em;
+  border-radius: var(--radius-s, 4px);
+  background: var(--code-background);
+  font-family: var(--font-monospace);
+}
+/* List markers: bullets, numbers, description terms. */
+.lsp-cm-view .lsp-lp-bullet {
+  display: inline-block;
+  min-width: 1.2em;
+  color: var(--list-marker-color, var(--text-muted));
+  font-family: var(--font-text);
+}
+.lsp-cm-view .lsp-lp-bullet.is-term {
+  color: var(--text-normal);
+  font-weight: var(--bold-weight, 700);
+}
+/* Theorem-like boxes: a BlockWrapper element around the lines. --lp-box-color defaults to
+   elegantbook's green scheme; a box may set it inline for another scheme. */
+.lsp-cm-view .lsp-lp-box {
+  --lp-box-color: var(--interactive-accent);
+  margin: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--lp-box-color) 55%, transparent);
+  border-left-width: 3px;
+  border-left-color: var(--lp-box-color);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--lp-box-color) 8%, transparent);
+}
+.lsp-cm-view .lsp-lp-box.is-main {
+  --lp-box-color: rgb(0, 120, 2);
+}
+.lsp-cm-view .lsp-lp-box.is-second {
+  --lp-box-color: rgb(230, 90, 7);
+}
+.lsp-cm-view .lsp-lp-box.is-third {
+  --lp-box-color: rgb(0, 160, 152);
+}
+.lsp-cm-view .lsp-lp-box-title {
+  color: var(--lp-box-color, var(--text-accent));
+  font-family: var(--font-text);
+  font-weight: 600;
+}
+.lsp-cm-view .lsp-lp-qed {
+  margin-left: 0.5em;
+  color: var(--text-muted);
+}
+/* Images and paper frames (PDF crops, Typst paper renders): a white card; the dark-theme
+   invert follows the plugin's preview setting (is-inverted). */
+.lsp-cm-view .lsp-lp-image img {
+  max-width: 100%;
+  max-height: 320px;
+}
+.lsp-cm-view .lsp-lp-paper {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+.lsp-cm-view .lsp-lp-paper.is-inverted {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 /* Completion list. Obsidian's app.css hides .cm-completionDetail for every editor. */
 .lsp-cm-view .cm-tooltip.cm-tooltip-autocomplete > ul {
   font-family: var(--font-monospace);

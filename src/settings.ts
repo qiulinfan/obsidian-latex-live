@@ -2,6 +2,9 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import type LatexLivePlugin from "./main";
 import type { EngineSetting } from "./tex/project";
 
+/** Source text, or live preview (编辑模式): formulas render in place, source under the cursor. */
+export type EditingMode = "source" | "live";
+
 export interface LatexLiveSettings {
   /** Directory with pdflatex, latexmk, synctex; empty means auto-detect. */
   texBinDir: string;
@@ -23,6 +26,8 @@ export interface LatexLiveSettings {
   yoloTabCompletion: boolean;
   /** Render the formula under the mouse pointer in a hover (project macros included). */
   hoverRender: boolean;
+  /** The mode of newly opened LaTeX editors; each view keeps its own in its view state. */
+  editingMode: EditingMode;
 }
 
 export const DEFAULT_SETTINGS: LatexLiveSettings = {
@@ -36,6 +41,7 @@ export const DEFAULT_SETTINGS: LatexLiveSettings = {
   texlabPath: "",
   yoloTabCompletion: false,
   hoverRender: true,
+  editingMode: "source",
 };
 
 export class LatexLiveSettingTab extends PluginSettingTab {
@@ -203,6 +209,24 @@ export class LatexLiveSettingTab extends PluginSettingTab {
           s.hoverRender = v;
           save();
         }),
+      );
+
+    new Setting(containerEl)
+      .setName("Default editing mode")
+      .setDesc(
+        "The mode of newly opened LaTeX editors. Live preview renders formulas in place with the " +
+          "project's macros and equation numbers from the last compile, and shows a formula's " +
+          "source while the cursor is on it. Each editor switches with its header icon or the " +
+          "command 'Toggle live preview' and keeps its own mode.",
+      )
+      .addDropdown((d) =>
+        d
+          .addOptions({ source: "Source", live: "Live preview" })
+          .setValue(s.editingMode)
+          .onChange((v) => {
+            s.editingMode = v === "live" ? "live" : "source";
+            save();
+          }),
       );
   }
 }

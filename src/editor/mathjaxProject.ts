@@ -219,12 +219,18 @@ export class ProjectMath {
 
   /**
    * The CHTML rendering of `src` (an `mjx-container`), its labels numbered from `labels` (label
-   * key -> number text from the last compile's .aux files); throws MathError.
+   * key -> number text from the last compile's .aux files) and its references read by `refs`
+   * (see prepareMath); throws MathError.
    */
-  render(src: string, display: boolean, labels: ReadonlyMap<string, string> = NO_LABELS): Element {
+  render(
+    src: string,
+    display: boolean,
+    labels: ReadonlyMap<string, string> = NO_LABELS,
+    refs?: (command: string, keys: readonly string[]) => string,
+  ): Element {
     const name = this.blocked?.exec(src)?.[1];
     if (name) throw new MathError(`MathJax cannot read the project's \\${name}: ${this.unsupported.get(name)}`);
-    const tex = prepareMath(src, labels, display);
+    const tex = prepareMath(src, labels, display, refs);
     if (!this.jax) {
       // Obsidian's instance would keep it for every Markdown note.
       if (DEFINES.test(tex)) throw new MathError("A definition inside a formula needs MathJax's internals");
@@ -272,10 +278,16 @@ const ROW_TOKEN = /\\(begin|end)\s*\{[^{}]*\}|\\label\s*\{([^{}]*)\}|\\(?:tag|no
  * outer environment's own `\\`, never inside a group or an inner environment, where MathJax
  * forbids \tag (`split`, `aligned`, `gathered`). `\ref{k}` / `\eqref{k}` become the number as
  * text (`??` when unknown) through \textup, which also works in text-mode arguments
- * (`\text{by \eqref{k}}`, `\tag{..}`). MathJax's tags are off, so rows without a label show no
- * number.
+ * (`\text{by \eqref{k}}`, `\tag{..}`); with `refs` (latexRefs' `formulaRefs`), every reference
+ * command (\ref, \eqref, \pageref, \autoref, \cref, \Cref, \nameref, starred too) becomes the
+ * text it returns. MathJax's tags are off, so rows without a label show no number.
  */
-export function prepareMath(src: string, labels: ReadonlyMap<string, string>, display = true): string {
+export function prepareMath(
+  src: string,
+  labels: ReadonlyMap<string, string>,
+  display = true,
+  refs?: (command: string, keys: readonly string[]) => string,
+): string {
   const outer = display ? NUMBERED.exec(src)?.[1] : undefined;
   const rows = outer !== undefined && outer !== "equation" && outer !== "multline";
   let out = "";
@@ -304,8 +316,23 @@ export function prepareMath(src: string, labels: ReadonlyMap<string, string>, di
     } else if (/^\\(?:tag|notag|nonumber)$/.test(t)) own = true;
     out += t;
   }
-  return (out + src.slice(last)).replace(/\\(eqref|ref)\s*\{([^{}]*)\}/g, (_m, cmd: string, key: string) => {
+  const tex = out + src.slice(last);
+  if (refs) {
+    return tex.replace(REF_COMMAND, (_m, cmd: string, keys: string) =>
+      `\\textup{${textArgument(refs(cmd, keys.split(",").map((k) => k.trim()).filter(Boolean)))}}`,
+    );
+  }
+  return tex.replace(/\\(eqref|ref)\s*\{([^{}]*)\}/g, (_m, cmd: string, key: string) => {
     const n = labels.get(key.trim()) ?? "??";
     return cmd === "eqref" ? `\\textup{(${n})}` : `\\textup{${n}}`;
   });
 }
+
+const REF_COMMAND = /\\(eqref|ref|pageref|autoref|cref|Cref|nameref)\*?\s*\{([^{}]*)\}/g;
+
+/**
+ * Plain text as a text-mode argument: MathJax's text mode reads `\_`, `\{`, `\}`, `\%`, `\$`,
+ * `\&`, `\#`, but has no text command for `\`, `^` or `~`: those become look-alikes.
+ */
+const textArgument = (text: string): string =>
+  text.replace(/[\\{}$&#%_^~]/g, (c) => (c === "\\" ? "∖" : c === "^" ? "ˆ" : c === "~" ? "˜" : `\\${c}`));

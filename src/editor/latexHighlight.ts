@@ -18,6 +18,8 @@ export interface TokState {
   math: string | null;
   /** Name of the open verbatim-like environment. */
   verbatim: string | null;
+  /** Inside the text an `\iffalse` skips: the conditionals open in it (see iffalseEnd); absent outside. */
+  iffalse?: number;
 }
 
 export const MATH_ENVS = new Set([
@@ -26,7 +28,14 @@ export const MATH_ENVS = new Set([
   "eqnarray", "eqnarray*", "displaymath", "math",
 ]);
 export const VERBATIM_ENVS = new Set([
-  "verbatim", "verbatim*", "Verbatim", "lstlisting", "minted", "comment",
+  "verbatim", "verbatim*", "Verbatim", "Verbatim*", "BVerbatim", "BVerbatim*", "LVerbatim",
+  "LVerbatim*", "lstlisting", "minted", "comment", "tcblisting", "tcboutputlisting",
+  "filecontents", "filecontents*",
+]);
+/** natbib's and biblatex's citation commands (the capitalized ones start a sentence). */
+export const CITE_COMMANDS = new Set([
+  "cite", "Cite", "citep", "Citep", "citet", "Citet", "citealt", "Citealt", "citealp", "Citealp",
+  "parencite", "Parencite", "textcite", "Textcite", "autocite", "Autocite", "footcite",
 ]);
 const SECTIONS = new Set([
   "part", "chapter", "section", "subsection", "subsubsection", "paragraph",
@@ -35,7 +44,7 @@ const SECTIONS = new Set([
 ]);
 const ARG_REFS = new Set([
   "label", "ref", "eqref", "pageref", "autoref", "cref", "Cref", "nameref",
-  "cite", "citep", "citet", "parencite", "textcite", "autocite", "nocite",
+  ...CITE_COMMANDS, "nocite",
   "input", "include", "includegraphics", "subfile", "bibliography",
   "addbibresource", "usepackage", "documentclass", "url",
 ]);
@@ -46,6 +55,29 @@ const REF_ARG_RE = /(\s*(?:\[[^\]]*\]\s*)*)\{([^}]*)\}/y;
 
 type Push = (from: number, to: number, cls: string) => void;
 
+/**
+ * TeX skipping the text of an `\iffalse` from s[from], `depth` conditionals already open in it:
+ * `end` is the index after the `\fi` (or top-level `\else`) that ends it, which starts at `at`;
+ * -1 when `s` ends first, with the conditionals then open. Conditionals nest (`\ifx`, `\ifdraft`);
+ * etoolbox's and ifthen's `\if..{` macros take braces and are none, nor is the math `\iff`;
+ * comments are skipped.
+ */
+export function iffalseEnd(s: string, from: number, depth = 0): { end: number; at: number; depth: number } {
+  const re = /\\(?:(if[A-Za-z@]*)(\s*\{)?|(fi|else)(?![A-Za-z@]))|%[^\n]*|\\./g;
+  re.lastIndex = from;
+  for (let m; (m = re.exec(s)); ) {
+    if (m[1] !== undefined) {
+      if (!m[2] && m[1] !== "iff") depth++;
+    } else if ((m[3] === "fi" && depth-- === 0) || (m[3] === "else" && depth === 0)) {
+      return { end: re.lastIndex, at: m.index, depth: 0 };
+    }
+  }
+  return { end: -1, at: -1, depth };
+}
+
+/** `\iffalse` at s[i] starts skipped text: the block-comment idiom, first on its line (`\let\ifx\iffalse` does not). */
+export const iffalseStarts = (s: string, i: number): boolean => !s.slice(s.lastIndexOf("\n", i - 1) + 1, i).trim();
+
 export function tokenizeLine(
   text: string,
   base: number,
@@ -55,6 +87,19 @@ export function tokenizeLine(
   const n = text.length;
   let i = 0;
   while (i < n) {
+    if (s.iffalse !== undefined) {
+      const r = iffalseEnd(text, i, s.iffalse);
+      if (r.end < 0) {
+        push(base + i, base + n, "ll-comment");
+        s.iffalse = r.depth;
+        return;
+      }
+      if (r.at > i) push(base + i, base + r.at, "ll-comment");
+      push(base + r.at, base + r.end, "ll-keyword");
+      s.iffalse = undefined;
+      i = r.end;
+      continue;
+    }
     if (s.verbatim) {
       const end = text.indexOf(`\\end{${s.verbatim}}`, i);
       if (end < 0) {
@@ -104,6 +149,9 @@ export function tokenizeLine(
           }
           continue;
         }
+      } else if (name === "iffalse" && !s.math && iffalseStarts(text, i)) {
+        push(base + i, base + end, "ll-keyword");
+        s.iffalse = 0;
       } else if (SECTIONS.has(name)) {
         push(base + i, base + end, "ll-section");
       } else if (ARG_REFS.has(name)) {

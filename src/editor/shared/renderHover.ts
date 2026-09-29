@@ -7,7 +7,8 @@
 //   Order    CodeMirror orders hover sections by extension precedence. The render hover is
 //            Prec.high, so its section sits above texlab's, tinymist's and the lint
 //            hover's wherever the view mounts it.
-//   Widgets  `replacedAt` (livePreview's) skips a position a live widget already renders.
+//   Widgets  no section over a position a live widget renders (livePreview's `replacedAt`,
+//            plus the config's own `replacedAt`, if any).
 //   Anchor   the section anchors at the start of the pointer's line within the target and
 //            stays open while the pointer is over the target from there. CodeMirror hides a
 //            tooltip whose anchor is scrolled out and places the merged hover at its lowest
@@ -26,6 +27,7 @@
 // Only type imports from "obsidian" are allowed here: tests bundle this without Obsidian.
 import { EditorState, Extension, Prec, Text } from "@codemirror/state";
 import { EditorView, Tooltip, closeHoverTooltip, hoverTooltip, logException } from "@codemirror/view";
+import { replacedAt } from "./livePreview";
 
 /** A span of visible source that renders as one piece: a formula, an environment, a call. */
 export interface HoverTarget {
@@ -44,8 +46,8 @@ export interface RenderHoverConfig<T extends HoverTarget> {
    */
   render(target: T, view: EditorView): HTMLElement | null | Promise<HTMLElement | null>;
   /**
-   * True when `pos` lies in a range a live-preview widget renders (livePreview's
-   * `replacedAt`). Over a widget, CodeMirror hovers the widget's start.
+   * More positions to skip, on top of those a live-preview widget renders (livePreview's
+   * `replacedAt`, always checked). Over a widget, CodeMirror hovers one of its ends.
    */
   replacedAt?(state: EditorState, pos: number): boolean;
   /** Rest time before the hover fires, in ms (300, as the texlab and tinymist hovers). */
@@ -72,7 +74,7 @@ export function renderHover<T extends HoverTarget>(cfg: RenderHoverConfig<T>): E
 
   const source = (view: EditorView, pos: number, side: -1 | 1): Tooltip | null | Promise<Tooltip | null> => {
     const { state } = view;
-    if (!cfg.enabled() || cfg.replacedAt?.(state, pos)) return null;
+    if (!cfg.enabled() || replacedAt(state, pos) || cfg.replacedAt?.(state, pos)) return null;
     const t = cfg.target(state, pos);
     // At `from` with side -1 (or `to` with side 1) the pointer is on the character outside.
     if (!t || (side < 0 && pos <= t.from) || (side > 0 && pos >= t.to)) return null;

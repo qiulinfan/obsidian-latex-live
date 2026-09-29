@@ -41,6 +41,7 @@ import {
   typingDiagnostics,
 } from "./shared/editorKit";
 import { InlineSuggestions, keyArbiter } from "./shared/keyArbiter";
+import { liveInput, livePreviewCompartment, replacedAt } from "./shared/livePreview";
 import { lspGlyphColumn } from "./shared/lspCompletion";
 import { renderHover } from "./shared/renderHover";
 
@@ -63,6 +64,12 @@ export interface TexEditorOptions {
   diagnostics?: boolean;
   /** The render hover and texlab's hover (texHover). */
   hover?: TexHoverOptions;
+  /**
+   * Live preview, `livePreview(...)` (latexLive), or nothing for source mode: the content of
+   * `livePreviewCompartment`, which is always mounted right after the highlighter (with
+   * `liveInput()` next to it), so the mode toggle is one reconfiguration.
+   */
+  live?: Extension;
   /** More extensions and key bindings (F12), before the default keymap. */
   extensions?: Extension[];
   keys?: KeyBinding[];
@@ -95,6 +102,8 @@ export function texEditorExtensions(o: TexEditorOptions): Extension[] {
     closeBrackets(),
     EditorView.lineWrapping,
     latexHighlightPlugin,
+    liveInput(),
+    livePreviewCompartment.of(o.live ?? []),
     o.completion
       ? autocompletion({ override: [o.completion], addToOptions: [lspGlyphColumn], activateOnCompletion: opensArgumentList })
       : [],
@@ -126,14 +135,13 @@ export interface TexHoverOptions {
   render(math: LatexMath, view: EditorView): HTMLElement | null | Promise<HTMLElement | null>;
   /** texlab's hover. */
   lsp?: HoverTooltipSource;
-  /** Positions a live-preview widget renders (no render hover there). */
-  replacedAt?(state: EditorState, pos: number): boolean;
 }
 
 /**
  * The hover sources: the render hover (Prec.high, so its section sits above texlab's) for the
  * formula under the pointer, and texlab's hover, which returns nothing inside a formula while
- * rendering is on (it would only repeat a glyph).
+ * rendering is on (it would only repeat a glyph). Neither shows over a live preview widget
+ * (renderHover skips them itself).
  */
 export function texHover(o: TexHoverOptions): Extension[] {
   const lsp = o.lsp;
@@ -142,12 +150,13 @@ export function texHover(o: TexHoverOptions): Extension[] {
       enabled: o.enabled,
       target: (state, pos) => mathAt(state.doc, pos),
       render: o.render,
-      replacedAt: o.replacedAt,
     }),
     lsp
-      ? hoverTooltip((view, pos, side) => (o.enabled() && insideMath(view.state, pos, side) ? null : lsp(view, pos, side)), {
-          hoverTime: 300,
-        })
+      ? hoverTooltip(
+          (view, pos, side) =>
+            replacedAt(view.state, pos) || (o.enabled() && insideMath(view.state, pos, side)) ? null : lsp(view, pos, side),
+          { hoverTime: 300 },
+        )
       : [],
   ];
 }

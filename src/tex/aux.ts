@@ -1,14 +1,30 @@
 import { type Dirent, readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import { groupEnd } from "./texText";
 
 /** One `\newlabel` of the last compile. */
 export interface AuxLabel {
-  /** The number as typeset: `1.2`, `A.1`. */
+  /**
+   * The number field without its outer braces (`1.2`, `A.1`, `\color {structurecolor}1.` for an
+   * elegantbook item); texText gives what it typesets.
+   */
   number: string;
   page: string;
-  /** hyperref's title and anchor (`equation.1.1.2`, `tcb@cnt@theorem.1`); empty without it. */
+  /** hyperref's title and anchor (`equation.1.1.2`, `tcb@cnt@theorem.1`); empty without it. \autoref names the anchor's type. */
   title: string;
   anchor: string;
+  /**
+   * What \cref calls the label: cleveref's type from the `k@cref` twin (`subequation`, `enumii`,
+   * `section` for an appendix section when hyperref came first), else the anchor's counter
+   * (`theorem` for elegantbook's `tcb@cnt@theorem`, `equation` for amsmath's `AMS` tags, `enumi`
+   * for `Item`, `footnote` for `Hfootnote`, `figure` for `figure.caption.2`); "" when neither says.
+   */
+  kind: string;
+  /**
+   * cleveref's sort key: the enclosing counters' values, then the label's own (`[2, 1, 3]` for
+   * equation 2.1.3 numbered within sections); null without the twin.
+   */
+  order: readonly number[] | null;
 }
 
 /** Folders below the output folder searched for .aux files (\include writes chapters/*.aux). */
@@ -17,11 +33,12 @@ const MAX_DEPTH = 3;
 /**
  * The labels of every .aux file under `outDir`: `\newlabel{k}{{num}{page}{title}{anchor}{}}`,
  * including the implicit labels of classes such as elegantbook's `{title}{label}` theorems,
- * which only the .aux knows. cleveref's `k@cref` twins are skipped. Empty when nothing
- * compiled yet.
+ * which only the .aux knows, with cleveref's `k@cref` twin (`{[type][value][enclosing]num}`)
+ * folded in. Empty when nothing compiled yet.
  */
 export function readAuxLabels(outDir: string): Map<string, AuxLabel> {
   const out = new Map<string, AuxLabel>();
+  const twins = new Map<string, { type: string; order: number[] }>();
   for (const file of auxFiles(outDir, 0)) {
     let text: string;
     try {
@@ -31,13 +48,37 @@ export function readAuxLabels(outDir: string): Map<string, AuxLabel> {
     }
     for (const m of text.matchAll(/\\newlabel\{([^{}]+)\}\{/g)) {
       const key = m[1];
-      if (key.endsWith("@cref")) continue;
       const fields = groups(text, (m.index ?? 0) + m[0].length);
+      if (key.endsWith("@cref")) {
+        const twin = /^\[([^\]]+)\]\[(-?\d+)\]\[([^\]]*)\]/.exec(fields[0] ?? "");
+        if (twin) {
+          const order = twin[3].split(",").filter((v) => v.trim()).map(Number);
+          order.push(Number(twin[2]));
+          twins.set(key.slice(0, -5), { type: twin[1], order: order.every(Number.isFinite) ? order : [] });
+        }
+        continue;
+      }
       if (fields.length < 2) continue;
-      out.set(key, { number: plain(fields[0]), page: plain(fields[1]), title: fields[2] ?? "", anchor: fields[3] ?? "" });
+      const anchor = fields[3] ?? "";
+      out.set(key, { number: plain(fields[0]), page: plain(fields[1]), title: fields[2] ?? "", anchor, kind: anchorKind(anchor), order: null });
     }
   }
+  for (const [key, label] of out) {
+    const twin = twins.get(key);
+    if (!twin) continue;
+    label.kind = twin.type;
+    label.order = twin.order.length ? twin.order : null;
+  }
   return out;
+}
+
+/** The cleveref type an anchor's counter stands for (see AuxLabel.kind). */
+function anchorKind(anchor: string): string {
+  const counter = anchor.split(".", 1)[0].replace(/^tcb@cnt@/, "");
+  if (counter === "AMS") return "equation";
+  if (counter === "Item") return "enumi";
+  if (counter === "Hfootnote") return "footnote";
+  return counter;
 }
 
 function auxFiles(dir: string, depth: number): string[] {
@@ -73,5 +114,13 @@ function groups(s: string, i: number): string[] {
   return out;
 }
 
-/** A number or page as text: `\relax`, `\ignorespaces` and braces removed. */
-const plain = (s: string): string => s.replace(/\\(?:relax|ignorespaces)(?![A-Za-z])\s*/g, "").replace(/[{}]/g, "").trim();
+/**
+ * A number or page field: `\relax` and `\ignorespaces` removed, and the groups around the whole
+ * field (`{{$\star $}}` is `$\star $`); inner groups stay, so texText sees where an argument ends
+ * (elegantbook's item `{{\color {structurecolor}1.}}` is `\color {structurecolor}1.`, `1.`).
+ */
+function plain(field: string): string {
+  let t = field.replace(/\\(?:relax|ignorespaces)(?![A-Za-z])\s*/g, "").trim();
+  while (t.startsWith("{") && groupEnd(t, 0) === t.length) t = t.slice(1, -1).trim();
+  return t;
+}

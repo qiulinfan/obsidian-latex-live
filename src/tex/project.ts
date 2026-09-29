@@ -188,20 +188,29 @@ export function detectEngine(
   return "pdflatex";
 }
 
+const DOCUMENTCLASS = /\\documentclass\s*(?:\[([^\]]*)\])?\s*\{\s*([^}\s]+)\s*\}/;
+
 /**
  * The document class loads ctex itself: the ctex classes, and the elegant*
- * classes (elegantbook, elegantnote, elegantpaper) in Chinese, which is
- * `lang=cn` (or `cn`) and elegantnote's default. elegantbook's `chinese` is
- * a heading scheme (`scheme=chinese`) and loads nothing. pdfLaTeX fails on
- * these without a PDF.
+ * classes (elegantbook, elegantnote, elegantpaper) in Chinese (see elegantLang).
+ * pdfLaTeX fails on these without a PDF.
  */
 function loadsCtex(preamble: string): boolean {
-  const m = /\\documentclass\s*(?:\[([^\]]*)\])?\s*\{\s*([^}\s]+)\s*\}/.exec(preamble);
-  if (!m) return false;
-  const cls = m[2];
-  if (/^ctex(?:art|rep|book|beamer)$/.test(cls)) return true;
-  const elegant = /^elegant(book|note|paper)$/.exec(cls);
-  if (!elegant) return false;
+  const m = DOCUMENTCLASS.exec(preamble);
+  if (m && /^ctex(?:art|rep|book|beamer)$/.test(m[2])) return true;
+  return elegantLang(preamble) === "cn";
+}
+
+/**
+ * The language of an elegant* class (elegantbook, elegantnote, elegantpaper) in the
+ * `\documentclass` of comment-free source: `lang=cn` or a bare `cn` option (`cn` is
+ * elegantnote's default, `en` the others'); null for other classes. elegantbook's
+ * `chinese` is a heading scheme (`scheme=chinese`), not a language.
+ */
+export function elegantLang(src: string): string | null {
+  const m = DOCUMENTCLASS.exec(src);
+  const elegant = m && /^elegant(book|note|paper)$/.exec(m[2]);
+  if (!m || !elegant) return null;
   let lang = elegant[1] === "note" ? "cn" : "en";
   for (const option of (m[1] ?? "").split(",")) {
     const [key, value] = option.split("=").map((s) => s.trim());
@@ -211,7 +220,7 @@ function loadsCtex(preamble: string): boolean {
       lang = key;
     }
   }
-  return lang === "cn";
+  return lang;
 }
 
 /** The preamble (up to \begin{document}), used to key the format cache. */
@@ -224,6 +233,36 @@ export function preambleOf(text: string): string | null {
     }
   }
   return null;
+}
+
+/**
+ * The files a root document reads before \begin{document} (its preamble's \input chains,
+ * followed): preamble code such as \hypersetup, \tcbset or \setlist in a `setup.tex`, never
+ * decorated in live preview (design 4.4). Empty for a document without a body.
+ */
+export function preambleFiles(root: string): Set<string> {
+  const out = new Set<string>();
+  let text: string;
+  try {
+    text = readFileSync(root, "utf8");
+  } catch {
+    return out;
+  }
+  const preamble = preambleOf(text);
+  if (preamble === null) return out;
+  const rootDir = dirname(root);
+  const queue = referencedFiles(preamble, rootDir);
+  while (queue.length && out.size < MAX_REACHED_FILES) {
+    const file = resolve(queue.shift()!);
+    if (out.has(file)) continue;
+    out.add(file);
+    try {
+      queue.push(...referencedFiles(readFileSync(file, "utf8"), rootDir));
+    } catch {
+      // a missing input
+    }
+  }
+  return out;
 }
 
 /**

@@ -73,3 +73,20 @@ test("a trailing lone backslash does not throw", () => {
     ["\\", "ll-escape"],
   ]);
 });
+
+test("\\iffalse first on its line comments out text up to its \\fi or \\else, nested conditionals counted", () => {
+  const t = tokens(["\\iffalse", "$x$ \\ifx\\a\\b $y$ \\fi \\ifdef{\\z}{}{} $A \\iff B$", "\\fi $z$", "a \\iffalse \\let\\ifx\\iffalse"]);
+  assert.deepEqual(t.slice(0, 4), [
+    ["\\iffalse", "ll-keyword"],
+    ["$x$ \\ifx\\a\\b $y$ \\fi \\ifdef{\\z}{}{} $A \\iff B$", "ll-comment"],
+    ["\\fi", "ll-keyword"],
+    ["$", "ll-math-delim"],
+  ]);
+  assert.ok(!t.slice(4).some(([, cls]) => cls === "ll-comment"), "not first on its line: code, never a comment");
+});
+
+test("tcolorbox's, fancyvrb's and filecontents' verbatim environments are not tokenized", () => {
+  for (const env of ["tcblisting", "BVerbatim", "Verbatim*", "filecontents*"]) {
+    assert.deepEqual(tokens([`\\begin{${env}}`, "$x$ \\cite{k}", `\\end{${env}}`])[2], ["$x$ \\cite{k}", "ll-verbatim"], env);
+  }
+});

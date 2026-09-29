@@ -1,6 +1,7 @@
 // Bundle each tests/*.test.ts with esbuild and run them with node:test.
 // Output goes under node_modules/.cache so externals (jsdom) resolve from
-// this repository's node_modules. Pass test file names to run a subset.
+// this repository's node_modules. "obsidian" resolves to a test stand-in
+// (tests/support/obsidian.ts). Pass test file names to run a subset.
 import { build } from "esbuild";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
@@ -21,7 +22,8 @@ await build({
   format: "cjs",
   target: "node20",
   outExtension: { ".js": ".cjs" },
-  external: ["jsdom", "obsidian"],
+  external: ["jsdom"],
+  alias: { obsidian: resolve("tests/support/obsidian.ts") },
   logLevel: "warning",
 });
 const res = spawnSync(

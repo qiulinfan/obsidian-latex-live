@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   detectEngine,
   findRoot,
+  preambleFiles,
   preambleOf,
   referencedFiles,
 } from "../src/tex/project";
@@ -152,4 +153,19 @@ test("preamble stops at \\begin{document} outside comments", () => {
     "\\documentclass{article}\n% \\begin{document}\n\\usepackage{x}",
   );
   assert.equal(preambleOf("no document"), null);
+});
+
+test("preambleFiles: what the root inputs before \\begin{document}, through nested inputs; never the chapters", () => {
+  const dir = tree({
+    "main.tex":
+      "\\documentclass{book}\n\\input{setup/preamble}\n% \\input{setup/old}\n\\begin{document}\n\\input{chapters/ch1}\n\\end{document}\n",
+    "setup/preamble.tex": "\\hypersetup{pdftitle={My $\\alpha$ notes}}\n\\input{setup/boxes}\n",
+    "setup/boxes.tex": "\\tcbset{before upper={\\emph{Note:} }}\n",
+    "setup/old.tex": "x\n",
+    "chapters/ch1.tex": "\\chapter{One} $x$\n",
+    "orphan.tex": "\\documentclass{article}\n\\input{setup/boxes}\n",
+  });
+  assert.deepEqual([...preambleFiles(join(dir, "main.tex"))], [join(dir, "setup/preamble.tex"), join(dir, "setup/boxes.tex")]);
+  assert.deepEqual([...preambleFiles(join(dir, "orphan.tex"))], [], "no \\begin{document}: no body to set up");
+  assert.deepEqual([...preambleFiles(join(dir, "missing.tex"))], []);
 });

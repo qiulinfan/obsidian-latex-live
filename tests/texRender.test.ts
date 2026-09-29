@@ -1,7 +1,8 @@
 // TexRender: one ProjectMath per root over Obsidian's MathJax (tests/support/mathjax.ts), on a
 // temporary copy of the synthetic elegantbook fixture: loading, the hover's rendering and
 // failures, the render cache, rebuilds after saves and definition edits, label numbers after
-// compiles (never a rebuild), and stylesheets in the main window and popouts.
+// compiles (never a rebuild), stylesheets in the main window and popouts, live preview's
+// renderer (preload, epochs, subscribers, flush), and the refs chips read (labels, bibliography).
 import "./support/dom";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -37,8 +38,11 @@ async function countTexInputs(): Promise<{ count: number; restore(): void }> {
   return counter;
 }
 
-/** `finish` as Obsidian's finishRenderMath: its stylesheet goes into the main head (after 100 ms when `debounced`). */
-async function setup(opts: { debounced?: boolean } = {}) {
+/**
+ * `finish` as Obsidian's finishRenderMath: its stylesheet goes into the main head (after 100 ms
+ * when `debounced`). `documents`: the windows with LaTeX editors.
+ */
+async function setup(opts: { debounced?: boolean; documents?: Document[] } = {}) {
   const { window: mw, MathJax } = await obsidianMathJax();
   const dir = mkdtempSync(join(tmpdir(), "ll-render-"));
   const book = join(dir, "book");
@@ -51,6 +55,7 @@ async function setup(opts: { debounced?: boolean } = {}) {
   const render = new TexRender({
     outDirFor: () => (calls.labels++, outDir),
     buffers: () => (calls.collect++, buffers),
+    documents: () => opts.documents ?? [],
     mathJax: {
       load: async () => {
         calls.load++;
@@ -96,7 +101,7 @@ test("TexRender: MathJax loads on first use; formulas render with the project's 
     assert.ok(!(again instanceof Promise), "synchronous once loaded");
     assert.equal(chars(again as HTMLElement), "ℕ0", "main.tex's \\renewcommand{\\N}");
     assert.equal(t.calls.load, 1);
-    assert.equal(t.calls.collect, 1, "one renderer for the root");
+    assert.equal(t.calls.collect, 2, "one renderer for the root, and its refs read once");
     assert.equal(t.calls.finish, 2, "finishRenderMath after each render");
     const err = (await t.hover("text $\\foo|{x}$")) as HTMLElement;
     assert.ok(err.classList.contains("lsp-render-hover-error"));
@@ -206,7 +211,7 @@ test("TexRender: label numbers come from the build folder and follow each compil
       assert.ok(chars(t.hover(align) as HTMLElement).endsWith(`(1.${n})`), "the cached render follows the new number");
     }
     assert.equal(inputs.count, 1, "renumbering compiles build no TeX input (MathJax keeps each one alive)");
-    assert.equal(t.calls.collect, 1, "nor re-read the definitions");
+    assert.equal(t.calls.collect, 2, "nor re-read the definitions or the bibliography (the first hover read both)");
     const reads = t.calls.labels;
     t.render.compiled(t.root);
     t.render.dispose();
@@ -238,6 +243,185 @@ test("TexRender: a popout window gets one copy of MathJax's stylesheet, refreshe
     await t.hover("$x$");
     await sleep(0);
     assert.deepEqual(styles(), before, "no copy in the main window: finishRenderMath's own sheet serves it");
+  } finally {
+    t.done();
+  }
+});
+
+test("TexRender live: preload loads MathJax once and warms it up; the renderer renders prepared sources", async () => {
+  const t = await setup();
+  try {
+    assert.equal(t.render.ready, false);
+    const a = t.render.preload(t.root);
+    assert.equal(t.render.preload(t.ch2), a, "one preload for every root");
+    assert.equal(await a, true);
+    assert.equal(t.render.ready, true);
+    assert.deepEqual([t.calls.load, t.calls.collect], [1, 1], "the warm-up built the root's instance");
+    assert.ok(t.calls.finish >= 1, "finishRenderMath before the first live mount");
+    const r = t.render.rendererFor(t.root);
+    assert.equal(t.render.rendererFor(t.root), r, "one renderer per root: its views share their renders");
+    assert.notEqual(t.render.rendererFor(t.ch2), r);
+    const req = (src: string, display = false) => ({ key: src, src, display, kind: "math", pos: 0 });
+    const ok = r.render(req("\\E[Q]{X} + \\Lip")) as { ok: true; node: Element };
+    assert.equal(ok.ok, true);
+    assert.equal(ok.node.nodeName, "MJX-CONTAINER");
+    assert.ok(chars(ok.node).includes("𝐿"));
+    assert.deepEqual(r.render(req("\\foo")), { ok: false, message: "Undefined control sequence \\foo" });
+    // latexLive prepares the numbers (`\label` -> `\tag`): the renderer draws the source as is.
+    const tagged = r.render(req("\\begin{equation}x\\tag{2.5}\\end{equation}", true)) as { ok: true; node: Element };
+    assert.ok(chars(tagged.node).endsWith("(2.5)"));
+  } finally {
+    t.done();
+  }
+});
+
+test("TexRender live: without MathJax preload fails and nothing renders", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ll-render-"));
+  const render = new TexRender({
+    outDirFor: () => dir,
+    buffers: () => new Map(),
+    mathJax: { load: async () => {}, global: () => undefined, finish: async () => {}, document },
+  });
+  try {
+    assert.equal(await render.preload(join(dir, "main.tex")), false);
+    assert.equal(render.ready, false);
+    const r = render.rendererFor(join(dir, "main.tex"));
+    assert.equal(r.epoch, 0);
+    assert.deepEqual(r.render({ key: "x", src: "x", display: false, kind: "math", pos: 0 }), {
+      ok: false,
+      message: "MathJax is not available.",
+    });
+  } finally {
+    render.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("TexRender live: the epoch is the definitions' hash; subscribers hear of new definitions and new numbers", async () => {
+  const t = await setup();
+  try {
+    await t.render.preload(t.root);
+    const r = t.render.rendererFor(t.root);
+    const heard: number[] = [];
+    const off = r.subscribe!(() => heard.push(r.epoch));
+    const first = r.epoch;
+    assert.notEqual(first, 0);
+    assert.equal(t.render.labelsOf(t.root).size, 0, "nothing compiled yet");
+
+    // New label numbers: the epoch stays (only the formulas whose numbers changed re-render).
+    const aux = join(t.outDir, "chapters", "ch1.aux");
+    writeFileSync(aux, "\\newlabel{eq:var-def}{{1.2}{1}{}{equation.1.2}{}}\n");
+    t.render.compiled(t.root);
+    await sleep(5);
+    assert.deepEqual(heard, [first]);
+    assert.equal(t.render.labelsOf(t.root).get("eq:var-def"), "1.2");
+    t.render.compiled(t.root);
+    await sleep(5);
+    assert.deepEqual(heard, [first], "the same numbers: no rebuild");
+
+    // A saved definition: a new instance and epoch.
+    writeFileSync(t.ch2, readFileSync(t.ch2, "utf8").replace("\\newcommand{\\Lip}{L}", "\\newcommand{\\Lip}{K}"));
+    t.render.fileModified(t.ch2);
+    await sleep(350);
+    assert.equal(heard.length, 2);
+    assert.notEqual(heard[1], first);
+    assert.equal(r.epoch, heard[1]);
+    off();
+    t.render.fileModified(t.ch2);
+    writeFileSync(t.ch2, readFileSync(t.ch2, "utf8").replace("\\newcommand{\\Lip}{K}", "\\newcommand{\\Lip}{M}"));
+    await sleep(350);
+    assert.equal(heard.length, 2, "unsubscribed");
+  } finally {
+    t.done();
+  }
+});
+
+test("TexRender live: flush puts the glyph CSS into the main window and copies it to popouts with editors", async () => {
+  const popout = new JSDOM("<!doctype html><html><head></head><body></body></html>").window.document;
+  const t = await setup({ documents: [popout] });
+  try {
+    await t.render.preload(t.root);
+    const r = t.render.rendererFor(t.root);
+    r.render({ key: "a", src: "\\mathfrak{Y}", display: false, kind: "math", pos: 0 });
+    r.flush!();
+    const has = (doc: Document, glyph: string) =>
+      [...doc.styleSheets].some((sheet) => [...sheet.cssRules].some((rule) => rule.cssText.includes(glyph)));
+    assert.ok(has(t.mainDocument, "mjx-c1D51C"), "\\mathfrak{Y} in the main window at once");
+    assert.equal(popout.head.querySelectorAll("style").length, 1);
+    assert.match(popout.head.textContent ?? "", /mjx-c1D51C/, "and in the popout");
+    const other = new JSDOM("<!doctype html><html><head></head><body></body></html>").window.document;
+    t.render.stylesFor(other);
+    assert.match(other.head.textContent ?? "", /mjx-c1D51C/, "a live editor mounted in another window");
+  } finally {
+    t.done();
+  }
+});
+
+test("TexRender refs: labels with kinds, the project's bibliography and reference names; re-read on the right events only", async () => {
+  const t = await setup();
+  try {
+    const r = t.render.rendererFor(t.root);
+    let heard = 0;
+    const off = r.subscribe!(() => heard++);
+    const first = t.render.refsOf(t.root);
+    assert.equal(t.render.refsOf(t.root), first, "read once");
+    assert.equal(first.labels.size, 0, "nothing compiled yet");
+    assert.deepEqual([...first.cites.keys()], ["zhang2020notes", "li2019lln"], "main.tex's \\addbibresource{refs.bib}");
+    assert.equal(first.names.autoref.get("equation"), "Equation", "hyperref's names: elegantbook with lang=cn prints English ones");
+    assert.deepEqual(first.names.cref.get("equation"), ["eq.", "eqs."], "cleveref's defaults");
+
+    cpSync(resolve("tests/fixtures/aux/book"), t.outDir, { recursive: true });
+    t.render.compiled(t.root);
+    await sleep(5);
+    const compiled = t.render.refsOf(t.root);
+    assert.equal(compiled.labels.get("thm:total-exp")?.kind, "theorem");
+    assert.equal(compiled.numbers.get("eq:var-def"), "1.2");
+    assert.equal(compiled.cites, first.cites, "a compile re-reads the labels only");
+    assert.equal(heard, 1);
+    const hovered = (await t.hover("$\\text{见 \\autoref{thm:total-exp}、\\cref{eq:var-def}}|$")) as HTMLElement;
+    assert.match(hovered.textContent ?? "", /见.*、/);
+    assert.equal(chars(hovered).trim(), "1.1eq. (1.2)", "the hover reads references as the chips do (\\autoref: hyperref names no tcolorbox theorem)");
+    t.render.compiled(t.root);
+    await sleep(5);
+    assert.equal(t.render.refsOf(t.root), compiled, "the same labels: nothing changes, nobody hears");
+    assert.equal(heard, 1);
+
+    // An unsaved .bib buffer (500 ms); the numbers keep their identity (prepared formulas stay).
+    const bib = join(t.book, "refs.bib");
+    const typed = readFileSync(bib, "utf8").replace("Li, Wei and Doe, Jane and Roe, Richard", "Zhou, Kai");
+    t.buffers.set(bib, typed);
+    const tr = EditorState.create({ doc: readFileSync(bib, "utf8") }).update({ changes: { from: 0, insert: " " } });
+    t.render.edited(bib, tr.changes, tr.startState.doc, tr.state.doc);
+    await sleep(300);
+    assert.equal(heard, 1, "debounced");
+    await sleep(300);
+    const edited = t.render.refsOf(t.root);
+    assert.deepEqual(edited.cites.get("li2019lln")?.names, ["Zhou"]);
+    assert.equal(edited.numbers, compiled.numbers);
+    assert.equal(heard, 2);
+
+    // A text edit in a project file re-reads nothing; one on the \documentclass line does.
+    const main = readFileSync(t.root, "utf8");
+    const edit = (from: string, to: string) => {
+      const at = main.indexOf(from);
+      const e = EditorState.create({ doc: main }).update({ changes: { from: at, to: at + from.length, insert: to } });
+      t.buffers.set(t.root, e.state.doc.toString());
+      t.render.edited(t.root, e.changes, e.startState.doc, e.state.doc);
+    };
+    edit("合成测试书", "合成测试书 typed");
+    await sleep(600);
+    assert.equal(heard, 2);
+    edit("lang=cn", "lang=en");
+    await sleep(600);
+    assert.equal(heard, 2, "a \\documentclass line is re-read, and its names did not change");
+    edit("\\author{测试作者}", "\\author{测试作者}\\crefname{equation}{式}{式}");
+    await sleep(600);
+    assert.deepEqual(t.render.refsOf(t.root).names.cref.get("equation"), ["式", "式"], "a \\crefname line");
+    assert.equal(heard, 3);
+    t.render.fileModified(join(t.book, "elsewhere.tex"));
+    await sleep(350);
+    assert.equal(heard, 3, "a file the project does not read");
+    off();
   } finally {
     t.done();
   }
