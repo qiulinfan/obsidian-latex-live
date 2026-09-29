@@ -7,14 +7,19 @@ import { completionStatus, currentCompletions, selectedCompletionIndex } from "@
 import { undo } from "@codemirror/commands";
 import { forEachDiagnostic } from "@codemirror/lint";
 import { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, HoverTooltipSource, activateHover, closeHoverTooltips } from "@codemirror/view";
 import type { App } from "obsidian";
 import { latexCompletionSource } from "../src/editor/latexCompletion";
+import { LatexMath } from "../src/editor/latexScan";
+import { ProjectMath } from "../src/editor/mathjaxProject";
+import { hoverError } from "../src/editor/shared/renderHover";
 import { YoloBridge } from "../src/editor/shared/yoloBridge";
-import { TexEditorOptions, showTexDiagnostics, texEditorExtensions } from "../src/editor/texExtensions";
+import { TexEditorOptions, TexHoverOptions, showTexDiagnostics, texEditorExtensions } from "../src/editor/texExtensions";
 import type { TexDiagnostic } from "../src/tex/logParser";
+import { projectDefinitions } from "../src/tex/macros";
 import { FakeYolo, fakeYolo } from "./support/fakeYolo";
 import { Ctx, diff, ghost, press, quietSettings, sleep, snap, typeText, waitFor } from "./support/keyMatrix";
+import { obsidianMathJax } from "./support/mathjax";
 
 interface TexCtx extends Ctx {
   yolo: FakeYolo;
@@ -327,5 +332,121 @@ test("compile diagnostics: a new error on the line being typed waits for a pause
   view.dispatch({ selection: { anchor: view.state.doc.line(4).from } });
   await sleep(0);
   assert.deepEqual(shown(), ["1:0:Font shape undefined.", "3:2:Missing $ inserted."], "the cursor left the line");
+  done(c);
+});
+
+// ---- T-L4: render hover and texlab's hover -----------------------------------------------------
+
+/** Hover sections top to bottom: "render", "texlab", "lint" (a diagnostic), "error" (hoverError). */
+function hoverSections(view: EditorView): string[] {
+  const host = view.dom.querySelector(".cm-tooltip-hover");
+  return host
+    ? [...host.children].map((s) =>
+        s.classList.contains("lsp-render-hover")
+          ? s.querySelector(".lsp-render-hover-error") ? "error" : "render"
+          : s.querySelector(".texlab-hover") || s.classList.contains("texlab-hover") ? "texlab" : s.querySelector(".cm-diagnostic") ? "lint" : s.className,
+      )
+    : [];
+}
+
+function hoverAt(view: EditorView, pos: number, side: -1 | 1 = 1): string[] {
+  view.dispatch({ effects: closeHoverTooltips });
+  activateHover(view, pos, side);
+  return hoverSections(view);
+}
+
+/** A texlab stand-in: a text hover at any position, recording where it was asked. */
+function fakeTexlab(calls: number[]): HoverTooltipSource {
+  return (_view, pos) => {
+    calls.push(pos);
+    return {
+      pos,
+      above: true,
+      create: () => {
+        const dom = document.createElement("div");
+        dom.className = "texlab-hover";
+        dom.textContent = "texlab";
+        return { dom };
+      },
+    };
+  };
+}
+
+const fakeRender = (rendered: LatexMath[]): TexHoverOptions["render"] => (m) => {
+  rendered.push(m);
+  const el = document.createElement("span");
+  el.className = "fake-math";
+  el.textContent = m.src;
+  return el;
+};
+
+test("render hover: a formula's section, texlab quiet inside math, texlab elsewhere", () => {
+  const lsp: number[] = [];
+  const rendered: LatexMath[] = [];
+  let on = true;
+  // "$\alpha + x$" is 4..16; "\[y\]" is 21..27.
+  const c = make("see $\\alpha + x$ and \\[y\\] \\ref{a}|", [], {
+    hover: { enabled: () => on, render: fakeRender(rendered), lsp: fakeTexlab(lsp) },
+  });
+  const view = c.view;
+  assert.deepEqual(hoverAt(view, 6), ["render"], "on \\alpha: texlab would only repeat the glyph");
+  assert.deepEqual(lsp, []);
+  assert.equal(view.dom.querySelector(".fake-math")?.textContent, "\\alpha + x");
+  assert.deepEqual(hoverAt(view, 24), ["render"]);
+  assert.deepEqual([rendered[1].display, rendered[1].src], [true, "y"]);
+  assert.deepEqual(hoverAt(view, 30), ["texlab"], "outside math: texlab alone");
+  assert.deepEqual(hoverAt(view, 4, -1), ["texlab"], "the character before the formula");
+  on = false;
+  assert.deepEqual(hoverAt(view, 6), ["texlab"], "rendering off: texlab's hover inside math too");
+  assert.equal(rendered.length, 2);
+  done(c);
+});
+
+test("render hover: above the lint hover of a compile error; none over a live widget", () => {
+  const rendered: LatexMath[] = [];
+  const c = make("\\[ \\frac{a}{b} \\]\n$x$ $y$\n|", [], {
+    diagnostics: true,
+    hover: {
+      enabled: () => true,
+      render: fakeRender(rendered),
+      // "$y$" (22..25) is rendered in place by a live widget.
+      replacedAt: (_state, pos) => pos >= 22 && pos <= 25,
+    },
+  });
+  const view = c.view;
+  showTexDiagnostics(view, [{ severity: "error", file: null, line: 1, message: "Missing $ inserted." }]);
+  assert.deepEqual(hoverAt(view, 5), ["render", "lint"]);
+  assert.deepEqual(hoverAt(view, 19), ["render"]);
+  assert.deepEqual(hoverAt(view, 22), [], "over the widget (its start)");
+  assert.deepEqual(rendered.map((m) => m.src), [" \\frac{a}{b} ", "x"]);
+  done(c);
+});
+
+test("render hover: the project's MathJax end to end, with MathJax's message on failure", async () => {
+  const { window, MathJax } = await obsidianMathJax();
+  const math = ProjectMath.create(MathJax, window.document, {
+    statements: projectDefinitions(`${process.cwd()}/tests/fixtures/elegantbook/main.tex`).statements,
+    physics: false,
+  });
+  const labels = new Map([["eq:var-def", "1.2"]]);
+  const render: TexHoverOptions["render"] = (m, view) => {
+    try {
+      return math.render(m.src, m.display, labels) as HTMLElement;
+    } catch (e) {
+      return hoverError((e as Error).message, view.state.sliceDoc(m.from, m.to));
+    }
+  };
+  const c = make("$\\E[Q]{X}$ and $\\frac{a}{$\n\\begin{align}\n  a &= b \\label{eq:var-def}\n\\end{align}\n|", [], {
+    hover: { enabled: () => true, render, lsp: fakeTexlab([]) },
+  });
+  const view = c.view;
+  assert.deepEqual(hoverAt(view, 3), ["render"]);
+  assert.ok(view.dom.querySelector(".lsp-render-hover mjx-container"));
+  assert.deepEqual(hoverAt(view, 18), ["error"]);
+  assert.equal(view.dom.querySelector(".lsp-render-hover-message")?.textContent, "Missing close brace");
+  assert.equal(view.dom.querySelector(".lsp-render-hover-source")?.textContent, "$\\frac{a}{$");
+  assert.deepEqual(hoverAt(view, 35), ["render"], "inside the align");
+  const tag = [...view.dom.querySelectorAll(".lsp-render-hover mjx-mtd mjx-c")].map((g) => g.className.split(" ")[0]);
+  assert.ok(tag.join(",").includes("mjx-c28,mjx-c31,mjx-c2E,mjx-c32,mjx-c29"), "\\label -> \\tag{1.2}");
   done(c);
 });

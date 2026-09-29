@@ -2,9 +2,10 @@ import { ChildProcess, spawn } from "child_process";
 import { createHash } from "crypto";
 import { existsSync, promises as fsp } from "fs";
 import { basename, delimiter, dirname, extname, join, resolve, sep } from "path";
-import { texEnv, texTool } from "./binaries";
+import { texEnv, texTool, workingBiber } from "./binaries";
 import { ParsedLog, parseLog } from "./logParser";
 import { Engine, logicalMapper, preambleOf } from "./project";
+import { groupCpuSeconds, stallMessage, STALL_MS, watchStall } from "./watchdog";
 
 export type BuildMode = "fast" | "full";
 
@@ -15,6 +16,8 @@ export interface CompileOptions {
   /** Precompile the preamble into a format (pdfLaTeX only). */
   preambleCache: boolean;
   shellEscape: boolean;
+  /** Stop a run with no log growth and no CPU use for this long (default 30 s). */
+  stallMs?: number;
 }
 
 export interface CompileResult {
@@ -165,6 +168,8 @@ export class Compiler {
     await this.prepareOutDir(o.outDir);
     const flag =
       o.engine === "xelatex" ? "-pdfxe" : o.engine === "lualatex" ? "-pdflua" : "-pdf";
+    // latexmk takes biber from PATH (binDir first); point it at one that runs.
+    const biber = await workingBiber(o.binDir);
     const args = [
       flag,
       "-interaction=nonstopmode",
@@ -173,12 +178,20 @@ export class Compiler {
       "-recorder",
       `-outdir=${o.outDir}`,
       ...(o.shellEscape ? ["-shell-escape"] : []),
+      ...(biber && biber !== texTool(o.binDir, "biber")
+        ? ["-e", `$biber = q{"${biber}" %O %S}`]
+        : []),
       basename(this.root),
     ];
     await this.removeLog(o.outDir);
-    const output = await this.exec(texTool(o.binDir, "latexmk"), args, o);
+    const { output, stalled } = await this.exec(
+      texTool(o.binDir, "latexmk"),
+      args,
+      o,
+      this.logPath(o.outDir, this.jobName),
+    );
     const rawLog = await this.readLog(o.outDir, this.jobName);
-    const run = { rawLog, output, log: parseLog(rawLog, this.rootDir) };
+    const run = { rawLog, output, stalled, log: parseLog(rawLog, this.rootDir) };
     return this.finish("full", o, run, started, 1, false);
   }
 
@@ -205,7 +218,14 @@ export class Compiler {
       }
     }
     await this.readDeps(o.outDir);
-    if (!run.rawLog && run.output.trim()) {
+    if (run.stalled) {
+      run.log.diagnostics.push({
+        severity: "error",
+        file: null,
+        line: null,
+        message: stallMessage(o.engine, o.stallMs ?? STALL_MS),
+      });
+    } else if (!run.rawLog && run.output.trim()) {
       // No log at all (engine missing, bad option): surface what it printed.
       run.log.diagnostics.push({
         severity: "error",
@@ -245,14 +265,15 @@ export class Compiler {
       basename(this.root),
     ];
     await this.removeLog(o.outDir);
-    const output = await this.exec(
+    const { output, stalled } = await this.exec(
       texTool(o.binDir, o.engine),
       args,
       o,
+      this.logPath(o.outDir, this.jobName),
       fmtBase ? { TEXFORMATS: dirname(fmtBase) + delimiter } : {},
     );
     const rawLog = await this.readLog(o.outDir, this.jobName);
-    return { rawLog, output, log: parseLog(rawLog, this.rootDir) };
+    return { rawLog, output, stalled, log: parseLog(rawLog, this.rootDir) };
   }
 
   /** Format path when a current preamble format exists; else build one. */
@@ -299,6 +320,7 @@ export class Compiler {
           basename(this.root),
         ],
         o,
+        this.logPath(o.outDir, fmtJob),
       );
       if (this.format !== cache) return;
       if (!existsSync(`${fmtBase}.fmt`)) {
@@ -339,14 +361,18 @@ export class Compiler {
     }
   }
 
+  private logPath(outDir: string, job: string): string {
+    return join(outDir, `${job}.log`);
+  }
+
   /** A run that dies before writing its log must not report the old one. */
   private async removeLog(outDir: string): Promise<void> {
-    await fsp.rm(join(outDir, `${this.jobName}.log`), { force: true });
+    await fsp.rm(this.logPath(outDir, this.jobName), { force: true });
   }
 
   private async readLog(outDir: string, job: string): Promise<string> {
     try {
-      return await fsp.readFile(join(outDir, `${job}.log`), "utf8");
+      return await fsp.readFile(this.logPath(outDir, job), "utf8");
     } catch {
       return "";
     }
@@ -362,15 +388,30 @@ export class Compiler {
     for (const p of inputs) {
       if (!isInside(p, outDir)) deps.add(resolve(p));
     }
+    // What the .fls misses: files only the cached preamble format read (a
+    // local .sty), and the bibliography, which TeX itself never opens.
+    if (this.format?.state === "ready") {
+      for (const p of this.format.inputs.keys()) deps.add(p);
+    }
+    for (const p of await readBibFiles(outDir, this.jobName, this.rootDir)) {
+      deps.add(p);
+    }
     this.deps = deps;
   }
 
+  /**
+   * Run a TeX tool in its own process group and resolve with its output.
+   * The stall watchdog kills a run whose `log` and output stop growing while
+   * it uses no CPU (XeLaTeX waiting for a macOS font download never returns)
+   * instead of waiting for the 5-minute timeout; `finish` reports it.
+   */
   private exec(
     cmd: string,
     args: string[],
     o: CompileOptions,
+    log: string,
     extraEnv: NodeJS.ProcessEnv = {},
-  ): Promise<string> {
+  ): Promise<{ output: string; stalled: boolean }> {
     return new Promise((resolvePromise, reject) => {
       if (this.disposed) {
         reject(new Error("compiler disposed"));
@@ -385,22 +426,43 @@ export class Compiler {
       });
       this.children.add(child);
       let output = "";
+      let outputBytes = 0;
       const collect = (chunk: Buffer) => {
+        outputBytes += chunk.length;
         output = (output + chunk.toString("utf8")).slice(-OUTPUT_TAIL);
       };
       child.stdout?.on("data", collect);
       child.stderr?.on("data", collect);
       const timer = setTimeout(() => killTree(child), RUN_TIMEOUT_MS);
+      let stalled = false;
+      const stopWatch = watchStall(
+        {
+          progress: () =>
+            fsp.stat(log).then(
+              (st) => outputBytes + st.size,
+              () => outputBytes,
+            ),
+          cpu: () =>
+            child.pid ? groupCpuSeconds(child.pid) : Promise.resolve(null),
+        },
+        () => {
+          stalled = true;
+          killTree(child);
+        },
+        o.stallMs ?? STALL_MS,
+      );
       child.on("error", (err) => {
         clearTimeout(timer);
+        stopWatch();
         this.children.delete(child);
         reject(err);
       });
       child.on("close", () => {
         clearTimeout(timer);
+        stopWatch();
         this.children.delete(child);
         if (this.disposed) reject(new Error("compiler disposed"));
-        else resolvePromise(output);
+        else resolvePromise({ output, stalled });
       });
     });
   }
@@ -410,6 +472,38 @@ interface EngineRun {
   rawLog: string;
   output: string;
   log: ParsedLog;
+  /** The stall watchdog stopped the run. */
+  stalled: boolean;
+}
+
+/**
+ * Existing .bib files a compile asked for: biblatex's datasources (`.bcf`)
+ * and BibTeX's `\bibdata` (`.aux`), relative to the root's folder.
+ */
+export async function readBibFiles(
+  outDir: string,
+  job: string,
+  rootDir: string,
+): Promise<string[]> {
+  const read = (ext: string) =>
+    fsp.readFile(join(outDir, `${job}.${ext}`), "utf8").catch(() => "");
+  const [bcf, aux] = await Promise.all([read("bcf"), read("aux")]);
+  const names: string[] = [];
+  for (const m of bcf.matchAll(/<bcf:datasource\b[^>]*>([^<]+)<\/bcf:datasource>/g)) {
+    names.push(m[1].trim());
+  }
+  for (const m of aux.matchAll(/\\bibdata\{([^}]*)\}/g)) {
+    for (const name of m[1].split(",")) {
+      const n = name.trim();
+      if (n) names.push(extname(n) ? n : `${n}.bib`);
+    }
+  }
+  const out = new Set<string>();
+  for (const n of names) {
+    const p = resolve(rootDir, n);
+    if (existsSync(p)) out.add(p);
+  }
+  return [...out];
 }
 
 /** INPUT paths recorded in a TeX `.fls` file, absolute. */

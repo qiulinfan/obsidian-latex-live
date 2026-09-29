@@ -8,13 +8,17 @@ import {
   TAbstractFile,
   TFile,
   WorkspaceLeaf,
+  finishRenderMath,
+  loadMathJax,
 } from "obsidian";
 import { HistoryCache, syncDarkTheme } from "./editor/shared/editorKit";
 import { YoloBridge } from "./editor/shared/yoloBridge";
+import type { MathJaxLike } from "./editor/mathjaxProject";
+import { TexRender } from "./editor/texRender";
 import { TexView, VIEW_TYPE_TEX } from "./editor/texView";
 import { TexlabServer, resolveTexlab, texlabSettings } from "./lsp/texlab";
 import { LatexPreviewView, VIEW_TYPE_PREVIEW } from "./preview/previewView";
-import { LatexSession, outDirFor } from "./session";
+import { LatexSession, SessionEvent, outDirFor } from "./session";
 import {
   DEFAULT_SETTINGS,
   LatexLiveSettings,
@@ -33,6 +37,8 @@ export default class LatexLivePlugin extends Plugin {
   readonly histories = new HistoryCache();
   yolo!: YoloBridge;
   texlab!: TexlabServer;
+  /** Project math for hover rendering (one private MathJax instance per root). */
+  texRender!: TexRender;
   private sessions = new Map<string, LatexSession>();
   private binDir: string | null | undefined;
   private texlabBin: string | null | undefined;
@@ -58,6 +64,24 @@ export default class LatexLivePlugin extends Plugin {
         return bin ? texEnv(bin) : process.env;
       },
       settings: () => texlabSettings(this.activeRoot ? outDirFor(this.activeRoot) : null),
+    });
+
+    this.texRender = new TexRender({
+      outDirFor,
+      buffers: () => {
+        const out = new Map<string, string>();
+        for (const v of this.texViews()) {
+          const abs = v.absolutePath();
+          if (abs && v.editorView) out.set(abs, v.editorView.state.doc.toString());
+        }
+        return out;
+      },
+      mathJax: {
+        load: loadMathJax,
+        global: () => (window as unknown as { MathJax?: MathJaxLike }).MathJax,
+        finish: finishRenderMath,
+        document,
+      },
     });
 
     this.registerView(VIEW_TYPE_TEX, (leaf) => new TexView(leaf, this));
@@ -137,6 +161,7 @@ export default class LatexLivePlugin extends Plugin {
     for (const s of this.sessions.values()) s.dispose();
     this.sessions.clear();
     this.yolo.destroy();
+    this.texRender.dispose();
     window.clearTimeout(this.restartTimer);
     void this.texlab.dispose();
   }
@@ -222,9 +247,10 @@ export default class LatexLivePlugin extends Plugin {
     this.refreshDiagnostics();
   }
 
-  /** Called by sessions after every event: update editor diagnostics. */
-  sessionChanged(s: LatexSession): void {
+  /** Called by sessions after every event: update editor diagnostics and label numbers. */
+  sessionChanged(s: LatexSession, e: SessionEvent): void {
     if (s.last) this.refreshDiagnostics();
+    if (e === "result") this.texRender.compiled(s.root);
   }
 
   diagnosticsFor(file: string): TexDiagnostic[] {
@@ -375,11 +401,13 @@ export default class LatexLivePlugin extends Plugin {
   private onModified(f: TAbstractFile): void {
     if (!(f instanceof TFile)) return;
     const abs = this.absolutePath(f.path);
+    this.texRender.fileModified(abs);
     for (const s of this.sessions.values()) {
       const deps = s.compiler.deps;
       const fresh = deps.size === 0 && abs.startsWith(s.compiler.rootDir + sep);
       if (abs === s.root || deps.has(abs) || fresh) {
-        s.request("fast");
+        // Only a full build reruns BibTeX/Biber on a changed bibliography.
+        s.request(f.extension === "bib" ? "full" : "fast");
       }
     }
   }

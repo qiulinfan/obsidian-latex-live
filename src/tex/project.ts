@@ -5,6 +5,8 @@ export type Engine = "pdflatex" | "xelatex" | "lualatex";
 export type EngineSetting = "auto" | Engine;
 
 const MAX_CANDIDATES_PER_DIR = 60;
+/** Files read while following one candidate root's \input chain. */
+const MAX_REACHED_FILES = 80;
 
 /** Remove `%` comments (not `\%`) so commented-out code is ignored. */
 export function stripComments(text: string): string {
@@ -43,31 +45,40 @@ function head(text: string): string {
 
 /** Files a document pulls in with \input, \include, \subfile, \import. */
 export function referencedFiles(text: string, rootDir: string): string[] {
-  const src = stripComments(text);
-  const out: string[] = [];
-  const add = (p: string) => {
+  return fileReferences(stripComments(text), rootDir).map((r) => r.path);
+}
+
+/**
+ * The \input-like references of comment-free source with their offsets, in document order.
+ * Paths resolve against `rootDir` (TeX reads them from the root document's folder); a name
+ * without an extension is a `.tex` file.
+ */
+export function fileReferences(src: string, rootDir: string): { at: number; path: string }[] {
+  const out: { at: number; path: string }[] = [];
+  const add = (at: number, p: string) => {
     const trimmed = p.trim();
     if (!trimmed) return;
     const withExt = extname(trimmed) ? trimmed : `${trimmed}.tex`;
-    out.push(isAbsolute(withExt) ? withExt : resolve(rootDir, withExt));
+    out.push({ at, path: isAbsolute(withExt) ? withExt : resolve(rootDir, withExt) });
   };
   for (const m of src.matchAll(
     /\\(?:input|include|subfile|subfileinclude)\s*\{([^}]+)\}/g,
   )) {
-    add(m[1]);
+    add(m.index ?? 0, m[1]);
   }
   for (const m of src.matchAll(
     /\\(?:sub)?(?:import|includefrom|inputfrom)\*?\s*\{([^}]*)\}\s*\{([^}]+)\}/g,
   )) {
-    add(join(m[1], m[2]));
+    add(m.index ?? 0, join(m[1], m[2]));
   }
-  return out;
+  return out.sort((a, b) => a.at - b.at);
 }
 
 /**
  * Pick the document root that compiles `file`: the magic comment, the file
  * itself when it has \documentclass, or the nearest .tex with \documentclass
- * in the same directory or an ancestor (up to `stopDir`) that includes it.
+ * in the same directory or an ancestor (up to `stopDir`) that includes it,
+ * directly (preferred) or through other inputs (main -> appendix -> notation).
  * Falls back to the file itself.
  */
 export function findRoot(file: string, stopDir: string): string {
@@ -91,6 +102,7 @@ export function findRoot(file: string, stopDir: string): string {
     } catch {
       entries = [];
     }
+    const roots: { path: string; refs: string[] }[] = [];
     for (const name of entries.slice(0, MAX_CANDIDATES_PER_DIR)) {
       const candidate = join(dir, name);
       if (candidate === target) continue;
@@ -101,16 +113,38 @@ export function findRoot(file: string, stopDir: string): string {
         continue;
       }
       if (!hasDocumentclass(t)) continue;
-      if (referencedFiles(t, dir).some((p) => resolve(p) === target)) {
-        return candidate;
-      }
+      const refs = referencedFiles(t, dir).map((p) => resolve(p));
+      if (refs.includes(target)) return candidate;
+      roots.push({ path: candidate, refs });
     }
+    for (const r of roots) if (reaches(r.refs, dir, target)) return r.path;
     if (dir === stop || !dir.startsWith(stop)) break;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   return file;
+}
+
+/**
+ * Whether the files a root document inputs (`refs`) pull in `target` through their own
+ * inputs, breadth first. Nested paths resolve against the root's folder, as TeX reads them.
+ */
+function reaches(refs: string[], rootDir: string, target: string): boolean {
+  const queue = [...refs];
+  const seen = new Set<string>();
+  while (queue.length && seen.size < MAX_REACHED_FILES) {
+    const file = queue.shift()!;
+    if (file === target) return true;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    try {
+      queue.push(...referencedFiles(readFileSync(file, "utf8"), rootDir).map((p) => resolve(p)));
+    } catch {
+      // a missing input
+    }
+  }
+  return false;
 }
 
 /**
@@ -147,11 +181,37 @@ export function detectEngine(
   }
   if (
     /\\(?:usepackage|RequirePackage)\s*(\[[^\]]*\])?\s*\{[^}]*\b(fontspec|xeCJK|unicode-math|polyglossia|ctex)\b/.test(preamble) ||
-    /\\documentclass\s*(\[[^\]]*\])?\s*\{ctex(art|rep|book|beamer)\}/.test(preamble)
+    loadsCtex(preamble)
   ) {
     return "xelatex";
   }
   return "pdflatex";
+}
+
+/**
+ * The document class loads ctex itself: the ctex classes, and the elegant*
+ * classes (elegantbook, elegantnote, elegantpaper) in Chinese, which is
+ * `lang=cn` (or `cn`) and elegantnote's default. elegantbook's `chinese` is
+ * a heading scheme (`scheme=chinese`) and loads nothing. pdfLaTeX fails on
+ * these without a PDF.
+ */
+function loadsCtex(preamble: string): boolean {
+  const m = /\\documentclass\s*(?:\[([^\]]*)\])?\s*\{\s*([^}\s]+)\s*\}/.exec(preamble);
+  if (!m) return false;
+  const cls = m[2];
+  if (/^ctex(?:art|rep|book|beamer)$/.test(cls)) return true;
+  const elegant = /^elegant(book|note|paper)$/.exec(cls);
+  if (!elegant) return false;
+  let lang = elegant[1] === "note" ? "cn" : "en";
+  for (const option of (m[1] ?? "").split(",")) {
+    const [key, value] = option.split("=").map((s) => s.trim());
+    if (value !== undefined) {
+      if (key === "lang") lang = value;
+    } else if (/^(?:cn|en|it|fr|nl|hu|de|es|mn|pt|jp)$/.test(key)) {
+      lang = key;
+    }
+  }
+  return lang === "cn";
 }
 
 /** The preamble (up to \begin{document}), used to key the format cache. */

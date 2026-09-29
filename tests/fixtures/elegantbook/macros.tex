@@ -1,0 +1,33 @@
+% Project macros, read through \input{macros}: one of each definition kind the math
+% renderer feeds MathJax (LaTeX Live design 4.2).
+\newcommand{\R}{\mathbb{R}}
+\newcommand\N{\mathbb{N}}
+\newcommand*{\Z}{\mathbb{Z}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\left\langle #1, #2 \right\rangle}
+\newcommand{\E}[2][]{\mathbb{E}_{#1}\left[ #2 \right]}
+\newcommand{\loss}[1][\theta]{\mathcal{L}(#1)}
+\providecommand{\Q}{\mathbb{Q}}
+\providecommand{\R}{\mathrm{R}}
+\DeclareRobustCommand{\half}{\tfrac{1}{2}}
+\NewDocumentCommand{\abs}{m}{\left\lvert #1 \right\rvert}
+\NewDocumentCommand{\dd}{O{}m}{\mathrm{d}^{#1}#2}
+\NewDocumentCommand{\set}{m o}{\left\{ #1 \IfValueT{#2}{\;\middle|\; #2} \right\}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclarePairedDelimiter{\ceil}{\lceil}{\rceil}
+\DeclarePairedDelimiterX{\braces}[1]{\{}{\}}{#1}
+\def\eps{\varepsilon}
+\def\pair#1,#2.{(#1;#2)}
+\let\oldphi\phi
+\renewcommand{\phi}{\varphi}
+\newenvironment{mat}{\begin{pmatrix}}{\end{pmatrix}}
+\definecolor{accent}{RGB}{0,120,2}
+\newcommand{\nc}{\newcommand}
+\nc{\Prob}{\mathbb{P}}
+% \newcommand{\hidden}{commented out}
+
+\makeatletter
+\newcommand{\bk@pair}[2]{(#1,#2)}
+\newcommand{\bkPair}{\bk@pair}
+\makeatother

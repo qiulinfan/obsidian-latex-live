@@ -1,0 +1,47 @@
+\chapter{概率与期望}\label{chap:prob}
+
+\begin{definition}{概率空间 Probability space}{prob-space}
+  三元组 $(\Omega, \mathcal{F}, \Prob)$ 满足 $\Prob(\Omega) = 1$，其中 $\Omega$ 是样本空间。
+\end{definition}
+
+随机变量 $X\colon \Omega \to \R$ 的期望写作 $\E{X}$，换一个测度 $Q$ 时写作 $\E[Q]{X}$；
+样本均值 \(\bar X_n = \frac{1}{n}\sum_{i=1}^n X_i\)。
+
+\begin{theorem}{全期望公式}{total-exp}
+  若 $\E{\abs{X}} < \infty$，则
+  \begin{equation}\label{eq:total-exp}
+    \E{X} = \E{\E{X \mid Y}}.
+  \end{equation}
+\end{theorem}
+
+方差有两种写法：
+\begin{align}
+  \Var(X) &= \E{(X - \E{X})^2} \label{eq:var-def} \\
+          &= \E{X^2} - \E{X}^2. \label{eq:var-short}
+\end{align}
+由 \eqref{eq:var-short} 与定理~\ref{thm:total-exp}，见~\cite[第 2 章]{zhang2020notes}。
+
+\[
+  \norm{x}^2 = \inner{x}{x}, \qquad x \in \R^n.
+\]
+
+价格 \$5 与 \verb|$x$| 都不是数学。
+% 注释里的 $\alpha$ 与 \[ \beta \] 不是数学。
+
+\begin{enumerate}
+  \item Markov：对 $a > 0$，$\Prob(\abs{X} \ge a) \le \E{\abs{X}} / a$；
+  \item Chebyshev：
+    \begin{itemize}
+      \item $\Prob(\abs{X - \E{X}} \ge \eps) \le \Var(X) / \eps^2$。
+    \end{itemize}
+\end{enumerate}
+
+Plain \TeX{} display math, and a starred environment:
+$$
+  \KL{P}{Q} \ge 0, \quad \Tr(AB) = \Tr(BA)
+$$
+\begin{align*}
+  \loss &= \loss[\theta] \\
+  \half + \half &= 1
+\end{align*}
+脚注里的数学。\footnote{见~\cite{li2019lln}：$\KL{P}{P} = 0$。}

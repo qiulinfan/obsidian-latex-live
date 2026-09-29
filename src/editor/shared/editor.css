@@ -84,6 +84,69 @@
   font-family: var(--font-interface);
   font-size: var(--font-ui-small);
 }
+/* Hover sections (render, lint, language server): CM separates them only in its light
+   theme, in a fixed grey. */
+.lsp-cm-view .cm-tooltip-hover > .cm-tooltip-section:not(:first-child) {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Render hover (renderHover.ts): the rendering under the pointer, the first hover section,
+   on Obsidian's popover background. Rendered ink follows --text-normal (currentColor). */
+.lsp-cm-view .cm-tooltip-hover:has(> .lsp-render-hover) {
+  overflow: hidden;
+  box-shadow: var(--shadow-s);
+}
+.lsp-cm-view .lsp-render-hover {
+  max-width: min(640px, 80vw);
+  max-height: 50vh;
+  overflow: auto;
+  padding: 6px 10px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-text);
+}
+/* MathJax's display margin (1em above and below) is for paragraphs. */
+.lsp-cm-view .lsp-render-hover mjx-container[display="true"] {
+  margin: 0;
+}
+.lsp-cm-view .lsp-render-hover.is-pending {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+}
+.lsp-cm-view .lsp-render-hover-spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: lsp-render-hover-spin 0.8s linear infinite;
+}
+@keyframes lsp-render-hover-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* hoverError: the renderer's message, then the source it failed on. */
+.lsp-cm-view .lsp-render-hover-message {
+  color: var(--text-error);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+  white-space: pre-wrap;
+}
+.lsp-cm-view .lsp-render-hover-source {
+  margin: 4px 0 0;
+  padding: 0;
+  background: none;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  white-space: pre-wrap;
+}
 
 /* Completion list. Obsidian's app.css hides .cm-completionDetail for every editor. */
 .lsp-cm-view .cm-tooltip.cm-tooltip-autocomplete > ul {

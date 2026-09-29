@@ -21,6 +21,8 @@ export interface LatexLiveSettings {
   texlabPath: string;
   /** Show the YOLO plugin's AI ghost-text completion in LaTeX files. */
   yoloTabCompletion: boolean;
+  /** Render the formula under the mouse pointer in a hover (project macros included). */
+  hoverRender: boolean;
 }
 
 export const DEFAULT_SETTINGS: LatexLiveSettings = {
@@ -33,6 +35,7 @@ export const DEFAULT_SETTINGS: LatexLiveSettings = {
   invertPreview: "never",
   texlabPath: "",
   yoloTabCompletion: false,
+  hoverRender: true,
 };
 
 export class LatexLiveSettingTab extends PluginSettingTab {
@@ -181,6 +184,23 @@ export class LatexLiveSettingTab extends PluginSettingTab {
       .addToggle((t) =>
         t.setValue(s.shellEscape).onChange((v) => {
           s.shellEscape = v;
+          save();
+        }),
+      );
+
+    new Setting(containerEl).setName("Rendering").setHeading();
+
+    new Setting(containerEl)
+      .setName("Render formulas on hover")
+      .setDesc(
+        "Hovering a formula in the editor shows it rendered with MathJax, using the macros " +
+          "the project defines (\\newcommand, \\DeclareMathOperator, ... in the root, its " +
+          "inputs and local packages). Errors show MathJax's message. texlab's hover then " +
+          "stays quiet inside formulas.",
+      )
+      .addToggle((t) =>
+        t.setValue(s.hoverRender).onChange((v) => {
+          s.hoverRender = v;
           save();
         }),
       );

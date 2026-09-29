@@ -1,5 +1,5 @@
 import { EditorState } from "@codemirror/state";
-import { EditorView, Tooltip, hoverTooltip } from "@codemirror/view";
+import { EditorView, Tooltip } from "@codemirror/view";
 import { statSync } from "fs";
 import { dirname, resolve } from "path";
 import { Component, MarkdownRenderer, Scope, TFile, TextFileView, WorkspaceLeaf } from "obsidian";
@@ -20,6 +20,7 @@ import { showTexDiagnostics, texEditorExtensions } from "./texExtensions";
 export const VIEW_TYPE_TEX = "latex-live-editor";
 
 const PROJECT_TTL_MS = 5000;
+const PACKAGE_EXTENSIONS = new Set(["sty", "cls"]);
 
 export class TexView extends TextFileView {
   private editor: EditorView | null = null;
@@ -85,6 +86,7 @@ export class TexView extends TextFileView {
     if (!this.editor) {
       this.contentEl.addClass("ll-editor-content", "lsp-cm-view");
       this.editor = new EditorView({ state: this.stateFor(data), parent: this.contentEl });
+      if (this.plugin.settings.hoverRender) void this.plugin.texRender.load();
       this.openOnServer();
       if (this.pendingEState) applyEphemeralState(this.editor, this.pendingEState);
       this.pendingEState = null;
@@ -232,13 +234,24 @@ export class TexView extends TextFileView {
       }),
       onEdit: (view, changes, startDoc) => {
         const abs = this.absolutePath();
-        if (abs) plugin.texlab.change(abs, view.state.doc, changes, startDoc);
+        if (abs) {
+          plugin.texlab.change(abs, view.state.doc, changes, startDoc);
+          plugin.texRender.edited(abs, changes, startDoc, view.state.doc);
+        }
         if (!this.applyingExternal) this.onEdited();
       },
       onCursor: () => this.onCursorMoved(),
       diagnostics: true,
+      hover: {
+        // Documents only: package and class files are code, their `$` rarely pair as math.
+        enabled: () => plugin.settings.hoverRender && !PACKAGE_EXTENSIONS.has(this.file?.extension ?? ""),
+        render: (math, view) => {
+          const root = this.projectInfo()?.root;
+          return root ? plugin.texRender.hover(math, view, root) : null;
+        },
+        lsp: (view, pos) => this.lspHover(view, pos),
+      },
       extensions: [
-        this.hover(),
         EditorView.domEventHandlers({
           compositionend: () => {
             if (this.saveAfterComposition) this.scheduleSave();
@@ -349,30 +362,25 @@ export class TexView extends TextFileView {
   }
 
   /** texlab hover: symbols (as glyphs), packages, citations, labels. */
-  private hover() {
-    return hoverTooltip(
-      async (view, pos): Promise<Tooltip | null> => {
-        const abs = this.absolutePath();
-        if (!abs || this.plugin.texlab.status !== "running") return null;
-        let hv: LspHover | null;
-        try {
-          hv = (await this.plugin.texlab.hover(abs, view.state.doc, offsetToLspPos(view.state.doc, pos))) as LspHover | null;
-        } catch {
-          return null;
-        }
-        const md = hoverText(hv?.contents);
-        if (!md) return null;
-        const from = hv?.range ? lspPosToOffset(view.state.doc, hv.range.start) : pos;
-        const to = hv?.range ? lspPosToOffset(view.state.doc, hv.range.end) : pos;
-        return {
-          pos: from,
-          end: to,
-          above: true,
-          create: () => this.renderMarkdown(md.value, md.plain),
-        };
-      },
-      { hoverTime: 300 },
-    );
+  private async lspHover(view: EditorView, pos: number): Promise<Tooltip | null> {
+    const abs = this.absolutePath();
+    if (!abs || this.plugin.texlab.status !== "running") return null;
+    let hv: LspHover | null;
+    try {
+      hv = (await this.plugin.texlab.hover(abs, view.state.doc, offsetToLspPos(view.state.doc, pos))) as LspHover | null;
+    } catch {
+      return null;
+    }
+    const md = hoverText(hv?.contents);
+    if (!md) return null;
+    const from = hv?.range ? lspPosToOffset(view.state.doc, hv.range.start) : pos;
+    const to = hv?.range ? lspPosToOffset(view.state.doc, hv.range.end) : pos;
+    return {
+      pos: from,
+      end: to,
+      above: true,
+      create: () => this.renderMarkdown(md.value, md.plain),
+    };
   }
 
   /** F12: open the definition of the command, label or citation under the cursor. */

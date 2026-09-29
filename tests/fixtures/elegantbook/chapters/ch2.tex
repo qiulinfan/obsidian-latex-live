@@ -1,0 +1,43 @@
+\chapter{线性代数}\label{chap:linalg}
+
+% A macro defined inside a chapter: the renderer reads this file too.
+\newcommand{\Lip}{L}
+
+\begin{proposition}{半正定 Positive semidefinite}{psd}
+  若所有 $\lambda_i \ge 0$，则 $x^\top A x \ge 0$，且 $\Lip = \ceil{\lambda_{\max}}$。
+\end{proposition}
+
+\begin{gather}
+  \Tr(AB) = \Tr(BA), \label{eq:trace} \\
+  \begin{mat} 1 & 0 \\ 0 & 1 \end{mat} = I.
+\end{gather}
+
+交换图（MathJax 画不出来）：
+\begin{equation*}
+  \begin{tikzcd}
+    V \arrow[r, "A"] \arrow[d] & W \arrow[d] \\
+    V' \arrow[r] & W'
+  \end{tikzcd}
+\end{equation*}
+
+\begin{table}[htbp]
+  \centering
+  \begin{tabular}{ll}
+    分解 & 形式 \\
+    谱分解 & $A = Q \Lambda Q^\top$ \\
+  \end{tabular}
+  \caption{矩阵分解}\label{tab:decomp}
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.3\linewidth]{figures/grid.png}
+  \caption{合成图片}\label{fig:grid}
+\end{figure}
+
+\begin{verbatim}
+$not math$ \[ neither \]
+\end{verbatim}
+
+回顾 \eqref{eq:var-def}：$\pair a,b.$、$\braces{x}$、$\dd[2]{x}$、$\argmin_{x} \loss[x]$、
+$\oldphi \ne \phi$ 与 $\sym{S} \subset \Z \subset \Q$。

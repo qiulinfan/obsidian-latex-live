@@ -24,10 +24,31 @@ interface PdfDoc {
   destroy(): Promise<void>;
 }
 interface PdfJs {
-  getDocument(src: { data: Uint8Array; isEvalSupported?: boolean }): {
+  getDocument(src: {
+    data: Uint8Array;
+    isEvalSupported?: boolean;
+    cMapUrl?: string;
+    cMapPacked?: boolean;
+    standardFontDataUrl?: string;
+    wasmUrl?: string;
+    iccUrl?: string;
+  }): {
     promise: Promise<PdfDoc>;
   };
 }
+
+/**
+ * Where Obsidian serves its pdf.js assets, as its own PDF viewer passes them
+ * (app.js; the folders are in obsidian.asar under lib/pdfjs). Without the
+ * CMaps, the Chinese glyphs of XeLaTeX PDFs (ctex, Fandol) are not drawn.
+ */
+export const PDFJS_ASSETS = {
+  cMapUrl: "/lib/pdfjs/cmaps/",
+  cMapPacked: true,
+  standardFontDataUrl: "/lib/pdfjs/standard_fonts/",
+  wasmUrl: "/lib/pdfjs/wasm/",
+  iccUrl: "/lib/pdfjs/iccs/",
+};
 
 interface Slot {
   el: HTMLDivElement;
@@ -115,8 +136,11 @@ export class PdfRenderer {
   async load(data: Uint8Array): Promise<void> {
     const seq = ++this.loadSeq;
     const pdfjs = (await loadPdfJs()) as PdfJs;
-    const doc = await pdfjs.getDocument({ data, isEvalSupported: false })
-      .promise;
+    const doc = await pdfjs.getDocument({
+      data,
+      isEvalSupported: false,
+      ...PDFJS_ASSETS,
+    }).promise;
     const first = await doc.getPage(1);
     if (seq !== this.loadSeq) {
       void doc.destroy();

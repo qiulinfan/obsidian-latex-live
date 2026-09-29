@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { resolveTexBinDir } from "../src/tex/binaries";
+import { resolveTexBinDir, workingBiber } from "../src/tex/binaries";
 import {
   BuildMode,
   CompileOptions,
   CompileResult,
   Compiler,
+  readBibFiles,
 } from "../src/tex/compiler";
 import { Engine } from "../src/tex/project";
 import { forwardSearch, inverseSearch } from "../src/tex/synctex";
@@ -172,6 +173,8 @@ test("preamble cache: built in background, used, and invalidated", { skip }, asy
       const err = r.log.diagnostics.find((d) => d.severity === "error");
       assert.equal(err?.line, 6, "line numbers survive the skipped preamble");
       assert.equal(r.pdfWritten, true);
+      // Only the format read defs.tex, yet editing it must still recompile.
+      assert.ok(h.compiler.deps.has(join(dir, "defs.tex")));
       assert.ok(
         r.durationMs < first.durationMs,
         `cached ${r.durationMs}ms vs cold ${first.durationMs}ms`,
@@ -250,4 +253,35 @@ test("dispose kills a running compile", { skip }, async () => {
   h.compiler.dispose();
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(h.compiler.compiling, false);
+});
+
+test("the bibliography files of a compile come from the .bcf and the .aux", async () => {
+  const dir = project({ "refs.bib": "", "more.bib": "", "old.bib": "" });
+  const out = project({
+    "main.bcf":
+      '<bcf:datasource type="file" datatype="bibtex" glob="false">refs.bib</bcf:datasource>\n' +
+      '<bcf:datasource type="file" datatype="bibtex" glob="false">gone.bib</bcf:datasource>\n',
+    "main.aux": "\\relax\n\\bibdata{more, refs}\n",
+  });
+  assert.deepEqual(
+    (await readBibFiles(out, "main", dir)).sort(),
+    [join(dir, "more.bib"), join(dir, "refs.bib")],
+  );
+  assert.deepEqual(await readBibFiles(dir, "none", dir), []);
+});
+
+test("a broken biber in the TeX bin dir is replaced by one that runs", { skip: process.platform === "win32" }, async () => {
+  const bin = (script: string) => {
+    const d = mkdtempSync(join(tmpdir(), "latex-live-biber-"));
+    writeFileSync(join(d, "biber"), `#!/bin/sh\n${script}\n`);
+    chmodSync(join(d, "biber"), 0o755);
+    return d;
+  };
+  // MacTeX 2026's universal biber on some Macs: lipo's usage, exit 255.
+  const broken = bin('echo "usage: lipo <input_file> <command>" >&2; exit 255');
+  const good = bin('echo "biber version: 2.21"');
+  const empty = mkdtempSync(join(tmpdir(), "latex-live-biber-"));
+  assert.equal(await workingBiber(broken, [empty, good]), join(good, "biber"));
+  assert.equal(await workingBiber(good, [broken]), join(good, "biber"));
+  assert.equal(await workingBiber(broken, [empty]), null);
 });

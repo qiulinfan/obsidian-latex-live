@@ -1,0 +1,29 @@
+% !TEX program = xelatex
+% Synthetic test book for LaTeX Live's tests: elegantbook + ctex over several files.
+% All content is invented.
+
+% ctex's default macOS fontset can hang XeLaTeX in a CoreText font download; Fandol
+% ships with TeX Live and loads by file name.
+\PassOptionsToPackage{fontset=fandol}{ctex}
+\documentclass[lang=cn,11pt,chinese]{elegantbook}
+
+\usepackage{mathtools}
+\usepackage{tikz-cd}
+\usepackage{booknotes}
+\input{macros}
+% After the \input: it overrides macros.tex's \N (definitions follow document order).
+\renewcommand{\N}{\mathbb{N}_0}
+\addbibresource{refs.bib}
+
+\title{合成测试书}
+\author{测试作者}
+
+\begin{document}
+
+\mainmatter
+\include{chapters/ch1}
+\include{chapters/ch2}
+
+\printbibliography
+
+\end{document}

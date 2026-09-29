@@ -1,4 +1,4 @@
-import { spawnSync } from "child_process";
+import { execFile, spawnSync } from "child_process";
 import { existsSync } from "fs";
 import { homedir } from "os";
 import { delimiter, dirname, join } from "path";
@@ -66,4 +66,41 @@ export function texEnv(binDir: string): NodeJS.ProcessEnv {
 
 export function texTool(binDir: string, name: string): string {
   return join(binDir, name + EXE);
+}
+
+const biberChecks = new Map<string, Promise<string | null>>();
+
+/**
+ * A biber that runs, for latexmk's full builds: the one in `binDir`, else the
+ * first working one in another candidate directory (MacTeX 2026's universal
+ * biber only prints lipo's usage on some Macs, and latexmk would take it from
+ * PATH). Null when none runs. Checked once per bin dir.
+ */
+export function workingBiber(
+  binDir: string,
+  others: string[] = candidateDirs(),
+): Promise<string | null> {
+  const dirs = [binDir, ...others.filter((d) => d !== binDir)];
+  const key = dirs.join(delimiter);
+  let found = biberChecks.get(key);
+  if (!found) {
+    found = (async () => {
+      for (const dir of dirs) {
+        const bin = texTool(dir, "biber");
+        if (existsSync(bin) && (await biberRuns(bin))) return bin;
+      }
+      return null;
+    })();
+    biberChecks.set(key, found);
+  }
+  return found;
+}
+
+function biberRuns(bin: string): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    // The first run of a packed biber unpacks itself, which takes a while.
+    execFile(bin, ["--version"], { timeout: 30_000 }, (err, stdout) =>
+      resolvePromise(!err && /biber version/i.test(stdout)),
+    );
+  });
 }

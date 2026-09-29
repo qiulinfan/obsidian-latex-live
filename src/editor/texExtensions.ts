@@ -11,11 +11,13 @@ import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { ChangeSet, EditorState, Extension, Text } from "@codemirror/state";
 import {
   EditorView,
+  HoverTooltipSource,
   KeyBinding,
   crosshairCursor,
   drawSelection,
   dropCursor,
   highlightActiveLine,
+  hoverTooltip,
   keymap,
   lineNumbers,
   rectangularSelection,
@@ -24,6 +26,7 @@ import type { TexDiagnostic } from "../tex/logParser";
 import { opensArgumentList, typingCommand } from "./latexCompletion";
 import { latexEnterHooks, latexIndent } from "./latexEnter";
 import { latexHighlightPlugin } from "./latexHighlight";
+import { LatexMath, mathAt } from "./latexScan";
 import {
   CLOSE_BEFORE,
   darkThemeExtension,
@@ -39,6 +42,7 @@ import {
 } from "./shared/editorKit";
 import { InlineSuggestions, keyArbiter } from "./shared/keyArbiter";
 import { lspGlyphColumn } from "./shared/lspCompletion";
+import { renderHover } from "./shared/renderHover";
 
 export interface TexEditorOptions {
   /** The file's text, to detect its indent unit. */
@@ -57,7 +61,9 @@ export interface TexEditorOptions {
    * showTexDiagnostics only: a new problem on the line being typed waits for a pause.
    */
   diagnostics?: boolean;
-  /** More extensions (hover) and key bindings (F12), before the default keymap. */
+  /** The render hover and texlab's hover (texHover). */
+  hover?: TexHoverOptions;
+  /** More extensions and key bindings (F12), before the default keymap. */
   extensions?: Extension[];
   keys?: KeyBinding[];
 }
@@ -93,6 +99,7 @@ export function texEditorExtensions(o: TexEditorOptions): Extension[] {
       ? autocompletion({ override: [o.completion], addToOptions: [lspGlyphColumn], activateOnCompletion: opensArgumentList })
       : [],
     o.diagnostics ? [lintGutter(), typingDiagnostics()] : [],
+    o.hover ? texHover(o.hover) : [],
     o.extensions ?? [],
     o.onEdit ? editNotifier(o.onEdit) : [],
     o.onCursor
@@ -110,6 +117,45 @@ export function texEditorExtensions(o: TexEditorOptions): Extension[] {
       indentTabBinding,
     ]),
   ];
+}
+
+export interface TexHoverOptions {
+  /** The `hoverRender` setting, read on every hover. */
+  enabled(): boolean;
+  /** The formula's rendering (MathJax), a failure (`hoverError`), or null. */
+  render(math: LatexMath, view: EditorView): HTMLElement | null | Promise<HTMLElement | null>;
+  /** texlab's hover. */
+  lsp?: HoverTooltipSource;
+  /** Positions a live-preview widget renders (no render hover there). */
+  replacedAt?(state: EditorState, pos: number): boolean;
+}
+
+/**
+ * The hover sources: the render hover (Prec.high, so its section sits above texlab's) for the
+ * formula under the pointer, and texlab's hover, which returns nothing inside a formula while
+ * rendering is on (it would only repeat a glyph).
+ */
+export function texHover(o: TexHoverOptions): Extension[] {
+  const lsp = o.lsp;
+  return [
+    renderHover<LatexMath>({
+      enabled: o.enabled,
+      target: (state, pos) => mathAt(state.doc, pos),
+      render: o.render,
+      replacedAt: o.replacedAt,
+    }),
+    lsp
+      ? hoverTooltip((view, pos, side) => (o.enabled() && insideMath(view.state, pos, side) ? null : lsp(view, pos, side)), {
+          hoverTime: 300,
+        })
+      : [],
+  ];
+}
+
+/** The pointer (at `pos`, on the character before it when side < 0) is on a formula. */
+function insideMath(state: EditorState, pos: number, side: -1 | 1): boolean {
+  const m = mathAt(state.doc, pos);
+  return !!m && !(side < 0 && pos <= m.from) && !(side > 0 && pos >= m.to);
 }
 
 /**

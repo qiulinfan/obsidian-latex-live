@@ -1,0 +1,11 @@
+% A project-local package: its macros reach the renderer through \usepackage{booknotes}.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{booknotes}[2026/09/29 synthetic test package]
+\RequirePackage{amssymb}
+
+\newcommand{\bn@style}{\mathsf}
+\newcommand{\sym}[1]{\bn@style{#1}}
+\newcommand{\Tr}{\operatorname{Tr}}
+\newcommand{\KL}[2]{D_{\mathrm{KL}}\left( #1 \,\middle\|\, #2 \right)}
+
+\endinput

@@ -118,6 +118,6 @@ export class LatexSession {
 
   private emit(e: SessionEvent): void {
     for (const cb of this.listeners) cb(e);
-    this.plugin.sessionChanged(this);
+    this.plugin.sessionChanged(this, e);
   }
 }

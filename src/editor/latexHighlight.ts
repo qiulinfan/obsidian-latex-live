@@ -20,12 +20,12 @@ export interface TokState {
   verbatim: string | null;
 }
 
-const MATH_ENVS = new Set([
+export const MATH_ENVS = new Set([
   "equation", "equation*", "align", "align*", "gather", "gather*",
   "multline", "multline*", "flalign", "flalign*", "alignat", "alignat*",
   "eqnarray", "eqnarray*", "displaymath", "math",
 ]);
-const VERBATIM_ENVS = new Set([
+export const VERBATIM_ENVS = new Set([
   "verbatim", "verbatim*", "Verbatim", "lstlisting", "minted", "comment",
 ]);
 const SECTIONS = new Set([
