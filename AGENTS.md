@@ -60,7 +60,7 @@
     It is killed on plugin unload and exits by itself when Obsidian dies.
   - Every document goes out with a trailing `\n` when it lacks one: texlab 5.26
     returns no command completions when the command touches the very end of the
-    document (33 of the user's 60 .tex files end without a newline). Edits are
+    document (many real files end without one). Edits are
     sent incrementally while that state is unchanged, else as full text.
   - Settings are answered from `workspace/configuration` (`texlabSettings`);
     `didChangeConfiguration {settings: null}` makes texlab pull them again, e.g.

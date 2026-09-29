@@ -261,7 +261,7 @@ test("user macros get argument snippets from their [n]", async () => {
 });
 
 test("frequent commands missing from texlab's page are added (\\al without alpha)", async () => {
-  // eecs559's `\al` page: 50 algorithmicx commands, no alpha (TL-02).
+  // With algorithmicx loaded, texlab's `\al` page is 50 algorithmicx commands, no alpha (TL-02).
   const { backend: b } = backend((_s, pos) => ({
     isIncomplete: true,
     items: ["aleph:ℵ, built-in", "algblock:algpseudocode.sty", "algorithmicend:algpseudocode.sty"].map((e) => {

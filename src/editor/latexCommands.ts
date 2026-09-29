@@ -1,6 +1,6 @@
 // Built-in LaTeX knowledge that texlab does not provide (TL-02, TL-03, UX-05, UX-06):
-// argument snippets, which commands belong in math, a popularity prior from the user's
-// own corpus (60 .tex files, 39k command tokens), and common environments.
+// argument snippets, which commands belong in math, a popularity prior for common
+// commands, and common environments.
 // Snippet notation: #1, #2 ... are tab stops in order, #0 is the final cursor position.
 
 /** Argument snippets, written after the command name. */
@@ -165,7 +165,7 @@ export const TEXT_COMMANDS: Set<string> = new Set(
 );
 
 /**
- * The user's most used commands, most frequent first (courses vault, 2026-09). Gives a
+ * Commonly used commands, most frequent first. Gives a
  * small boost, capped so that a better textual match still wins.
  */
 export const POPULAR: string[] = (

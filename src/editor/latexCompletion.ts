@@ -1,11 +1,11 @@
 // LaTeX completion: texlab through the shared LSP source, plus a built-in layer for what
-// texlab lacks (measured on the user's projects, see docs/design.md):
+// texlab lacks (see docs/design.md):
 //   - argument snippets (\frac{|}{}, \textbf{|}, user macros with [n] arguments) and
 //     \begin/\end pairs for environments (TL-03, UX-05, UX-06);
 //   - frequent commands, environments and project colors that texlab's 50-item page or
 //     database misses are added before ranking (TL-02, TL-06);
 //   - ranking: math commands first inside math, text commands first outside, commands
-//     already used in the document, the user's popularity prior (UX-08);
+//     already used in the document, a popularity prior for common commands (UX-08);
 //   - implicit requests only after `\` + a letter or inside argument braces such as
 //     \ref{ \cite{ \begin{ \usepackage{ (D5), never in a `%` comment or verbatim, where
 //     texlab has nothing and the built-in layer alone would turn Enter into a snippet;
@@ -292,7 +292,7 @@ export function latexCompletionOptions(env: LatexCompletionEnv = {}, analysis = 
         } else if (c.arg === "file" && !edit.snippet) {
           // texlab 5.26 sends files and folders as kind 1 (text): files by their extension.
           if (/\.[A-Za-z0-9]+$/.test(name)) option.type = "file";
-          if (/^(input|include|subfile)$/.test(c.command)) edit.text = edit.text.replace(/\.tex$/, ""); // the user's style (TL-06)
+          if (/^(input|include|subfile)$/.test(c.command)) edit.text = edit.text.replace(/\.tex$/, ""); // \input{name} without the extension (TL-06)
         }
         return;
       }
