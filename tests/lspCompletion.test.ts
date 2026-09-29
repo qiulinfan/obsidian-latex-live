@@ -25,6 +25,8 @@ import {
   LspCompletionOptions,
   LspPosition,
   defaultGlyph,
+  labelDescription,
+  labelEvidence,
   lspCompletionSource,
   lspGlyphColumn,
   lspQueryEmpty,
@@ -254,6 +256,103 @@ test("tinymist: labels after @ and <, cursor after the insertion", async () => {
     assert.equal(lineAtCursor(view), expected);
     view.destroy();
   }
+});
+
+test("tinymist: figure labels read 'Figure · A box', not the run-together ': A boxFigure'", async () => {
+  const c = TINYMIST.cases.labels_figure;
+  const raw = (c.response as { items: LspCompletionItem[] }).items;
+  const box = raw.find((i) => i.label === "fig:box")!;
+  // What tinymist 0.15.2 sends: the caption's plain text is separator + caption + supplement.
+  assert.equal(box.labelDetails?.description, ": A boxFigure");
+  assert.equal(box.detail, ": A boxFigure");
+  assert.equal(box.documentation, undefined);
+
+  const { doc, cursor } = before(c, "@");
+  const { backend } = fixtureBackend(TINYMIST);
+  const view = makeView(doc, cursor, lspCompletionSource(backend));
+  type(view, "@");
+  await settle(view);
+  const details = Object.fromEntries(currentCompletions(view.state).map((o) => [o.label, o.detail]));
+  assert.deepEqual(details, {
+    "sec:measure": "Measure theory",
+    "fig:box": "Figure · A box",
+    "tab:vals": "Table · Values: raw",
+    "fig:plain": "No supplement", // supplement: none
+    "thm:all": "Theorem · Every set is measurable.", // no caption: "figure(..)" + detail
+    "fig:fr": "Fig. · Une boîte", // French separator ". – "
+    "fig:zh": "图 · 一个盒子", // em-space separator; the document writes [一个盒子]
+    "eq:sum": "x + y",
+  });
+  for (const o of currentCompletions(view.state)) assert.equal(lspGlyphColumn.render(o), null, o.label);
+  view.destroy();
+
+  const label = (description: string, detail?: string) =>
+    labelDescription({ label: "x", kind: 18, detail: detail ?? description, labelDetails: { description } });
+  assert.equal(label(": Results for GPTFigure"), "Figure · Results for GPT");
+  assert.equal(label(": Fig."), "Fig.", "empty caption");
+  assert.equal(label("figure(..)", "Figure"), "Figure", "no caption, no body text");
+  assert.equal(label(".NET internals"), null, "a heading");
+  assert.equal(label("text(..)", "Text"), null);
+  // texlab labels (kind 9/21, detail "Equation", no labelDetails) keep their detail.
+  const { items: refs } = TEXLAB.cases.ref.response as { items: LspCompletionItem[] };
+  for (const item of refs) assert.equal(labelDescription(item), null, item.label);
+});
+
+test("tinymist: a label's text is cut into caption and supplement only where that is certain", async () => {
+  // Recorded with chap.typ (#include'd: Chapter box, Performance of JavaScript with
+  // supplement: none, a Theorem-supplement figure) and refs.bib (knuth84, a title
+  // starting with ": ").
+  const c = TINYMIST.cases.labels_edge;
+  const { doc, cursor } = before(c, "@");
+  const { backend } = fixtureBackend(TINYMIST);
+  const view = makeView(doc, cursor, lspCompletionSource(backend));
+  type(view, "@");
+  await settle(view);
+  const details = Object.fromEntries(currentCompletions(view.state).map((o) => [o.label, o.detail]));
+  assert.deepEqual(details, {
+    // From chap.typ: only Typst's own supplement is certain.
+    "c:box": "Figure · Chapter box",
+    "c:js": "Performance of JavaScript", // not "Script · Performance of Java"
+    "c:thm": "Every set is measurable.Theorem", // a custom supplement, caption not in this document
+    // Written in this document.
+    "fig:js": "Performance of JavaScript", // supplement: none
+    "fig:td": "Top-Down", // supplement: none
+    "fig:multi": "Supplementary Figure · A box",
+    "tab:cells": "Table · NameAge", // no caption; the cells [Name][Age] are no caption
+    "fig:markup": "Figure · Sales of iPhone", // [Sales of *iPhone*]
+    "blk:colon": ": starts with colon", // #block[: starts with colon]
+    "fig:flow": "流程图", // supplement: none, not "图 · 流程"
+    "thm:zh": "定理 · 每个集合都可测。",
+    // Bibliography: the key keeps its title (a title starting with ": " too), the title its key.
+    knuth84: "Literate Programming",
+    colon: ": A Document Preparation SystemManual",
+    "Literate Programming": "knuth84",
+    ": A Document Preparation SystemManual": "colon",
+  });
+  view.destroy();
+
+  // Without the document (a label from another file): Typst's own supplements only.
+  const label = (description: string) =>
+    labelDescription({ label: "x", kind: 18, detail: description, labelDetails: { description } });
+  assert.equal(label(": Map of ParisFigure"), "Figure · Map of Paris");
+  assert.equal(label(": ÜberblickAbbildung"), "Abbildung · Überblick");
+  assert.equal(label("\u2003一个盒子图"), "图 · 一个盒子");
+  assert.equal(label(": Performance of JavaScript"), "Performance of JavaScript");
+  assert.equal(label(": Scores/Accuracy"), "Scores/Accuracy");
+  assert.equal(label(": Sales of iPhone"), "Sales of iPhone");
+  assert.equal(label(": Ends in Table"), "Ends in Table", "not glued to the caption");
+  assert.equal(label(": Sistemi stabili"), "Sistemi stabili", "Hausa's 'tabili' inside a word");
+  assert.equal(label(": A boxSupplementary Figure"), "A boxSupplementary Figure");
+  // With it: the written caption settles a custom or lowercase supplement.
+  const items = [
+    { label: "x", kind: 18, detail: ": QQQtabili", labelDetails: { description: ": QQQtabili" } },
+    { label: "y", kind: 18, detail: ": Map of ParisDiagram", labelDetails: { description: ": Map of ParisDiagram" } },
+  ];
+  const evidence = labelEvidence(items, '#figure(rect(), caption: [QQQ])\n#figure(rect(), caption: "Map of Paris")\n');
+  assert.deepEqual(
+    items.map((i) => labelDescription(i, evidence)),
+    ["tabili · QQQ", "Diagram · Map of Paris"],
+  );
 });
 
 test("tinymist: import paths (empty filterText is ignored) and member lists after '.'", async () => {

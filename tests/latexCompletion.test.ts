@@ -1,6 +1,6 @@
 import "./support/dom";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,6 +12,7 @@ import {
   setSelectedCompletion,
   startCompletion,
 } from "@codemirror/autocomplete";
+import { undo } from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { latexBackend, latexCompletionSource, latexContext, typingCommand } from "../src/editor/latexCompletion";
@@ -314,7 +315,7 @@ test("typing activates only after \\ + a letter or inside argument braces", asyn
   view.destroy();
 });
 
-test("accepting \\ref opens the label list inside the braces", async () => {
+test("accepting \\ref opens the label list inside the braces; taking a label ends the snippet after `}`", async () => {
   const c = CASE.ref;
   const { backend: b, calls } = backend((state, pos) => {
     const line = state.doc.line(pos.line + 1).text.slice(0, pos.character);
@@ -334,7 +335,8 @@ test("accepting \\ref opens the label list inside the braces", async () => {
   assert.deepEqual(calls.at(-1)!.context, { triggerKind: 2, triggerCharacter: "{" }, "opened as if `{` was typed");
   press(view, "ArrowDown");
   press(view, "Tab");
-  assert.match(lineAtCursor(view), /^\\ref\{[^}]+\|\}$/);
+  assert.equal(lineAtCursor(view), "\\ref{eq:cdf}|", "the `\\ref{#1}#0` snippet's last stop, after the brace");
+  assert.equal(hasNextSnippetField(view.state), false, "the snippet is over");
   view.destroy();
   // Nothing typed or selected in that list yet: Enter is a newline, as after `\ref{` typed.
   const enter = editor(start, latexCompletionSource(b));
@@ -423,8 +425,16 @@ test("\\input{ drops .tex from texlab's file items (sent as kind 1) and shows th
   await settle(view);
   assert.deepEqual(currentCompletions(view.state).map((c) => `${c.label}:${c.type}`), ["02-random-variables.tex:file", "0sub:text"]);
   press(view, "Tab");
-  assert.equal(lineAtCursor(view), "\\input{chapters/02-random-variables|}");
+  assert.equal(lineAtCursor(view), "\\input{chapters/02-random-variables}|", "a file is the whole argument");
   view.destroy();
+  // A folder (no extension): the path goes on inside the braces.
+  const folder = editor("\\input{chapters/|}", latexCompletionSource(b));
+  type(folder, "0");
+  await settle(folder);
+  press(folder, "ArrowDown");
+  press(folder, "Enter");
+  assert.equal(lineAtCursor(folder), "\\input{chapters/0sub|}");
+  folder.destroy();
 });
 
 test("accepting a name after \\end{ lands after closeBrackets' brace; Enter then starts a line", async () => {
@@ -438,6 +448,141 @@ test("accepting a name after \\end{ lands after closeBrackets' brace; Enter then
   assert.equal(lineAtCursor(view), "\\end{align}|");
   press(view, "Enter");
   assert.equal(view.state.doc.toString(), "\\begin{align}\n  a\n\\end{align}\n");
+  view.destroy();
+});
+
+test("a single value lands after its brace (Enter or Tab); a list keeps the cursor inside for `, key`", async () => {
+  const { backend: b } = backend(recorded);
+  // The recorded `\ref{|}` / `\cite{|}` documents with `{` typed through closeBrackets.
+  const typedBrace = (c: FixtureCase) => c.doc.slice(0, c.offset - 1) + "|" + c.doc.slice(c.offset + 1);
+  const cases: [FixtureCase, string[], string][] = [
+    [CASE.ref, ["ArrowDown", "Enter"], "\\ref{eq:cdf}|"],
+    [CASE.ref, ["ArrowDown", "Tab"], "\\ref{eq:cdf}|"],
+    [CASE.ref, ["Tab"], "\\ref{distribution function 的性质}|"],
+    [CASE.cite, ["ArrowDown", "Enter"], "\\cite{he2022mae|}"],
+    [CASE.cite, ["Tab"], "\\cite{durrett2019probability|}"],
+  ];
+  for (const [c, keys, want] of cases) {
+    const view = editor(typedBrace(c), latexCompletionSource(b));
+    typeKeys(view, "{");
+    assert.match(lineAtCursor(view), /\{\|\}$/);
+    await settle(view);
+    for (const key of keys) press(view, key);
+    assert.equal(lineAtCursor(view), want, keys.join(" + "));
+    assert.equal(completionStatus(view.state), null);
+    undo(view);
+    assert.match(lineAtCursor(view), /\{\|\}$/, "one undo step");
+    view.destroy();
+  }
+  // \usepackage takes a list too.
+  const pkg = editor(before(CASE.pkg, "amsm"), latexCompletionSource(b));
+  type(pkg, "amsm");
+  await settle(pkg);
+  assert.equal(labels(pkg)[0], "amsmath");
+  press(pkg, "Tab");
+  assert.equal(lineAtCursor(pkg), "\\usepackage{amsmath|}");
+  pkg.destroy();
+});
+
+test("a single value without its `}` gets one, unless a `}` later on the line closes the group", async () => {
+  const { backend: b } = backend((state, pos) => {
+    const query = /\{([^{},]*)$/.exec(state.doc.line(pos.line + 1).text.slice(0, pos.character))?.[1] ?? "";
+    const r = range(pos.line, pos.character - query.length, pos.character);
+    return { items: ["eq:main", "sec:intro"].map((l) => ({ label: l, kind: 1, textEdit: { range: r, newText: l } })) };
+  });
+  for (const [start, want] of [
+    ["See \\ref|", "See \\ref{sec:intro}|"],
+    ["See \\ref| % why", "See \\ref{sec:intro}| % why"],
+    ["\\textbf{see \\ref|, then} more", "\\textbf{see \\ref{sec:intro|, then} more"],
+  ]) {
+    const view = editor(start, latexCompletionSource(b));
+    type(view, "{"); // no closeBrackets
+    await settle(view);
+    press(view, "ArrowDown");
+    press(view, "Enter");
+    assert.equal(lineAtCursor(view), want);
+    undo(view);
+    assert.equal(lineAtCursor(view), start.replace("|", "{|"), "one undo step");
+    view.destroy();
+  }
+});
+
+test("\\include: texlab's extensionless file leaves the braces once isFolder tells it from a folder", async () => {
+  const { backend: b } = backend((_s, pos) => ({
+    items: ["chapters", "main"].map((l) => ({ label: l, kind: 1, textEdit: { range: range(pos.line, pos.character, pos.character), newText: l } })),
+  }));
+  const isFolder = (path: string) => path === "chapters";
+  const cases: [Parameters<typeof latexCompletionSource>[1], number, string, string][] = [
+    [{ isFolder }, 1, "\\include{main}|", "main:file"],
+    [{ isFolder }, 0, "\\include{chapters|}", "chapters:text"],
+    [{}, 1, "\\include{main|}", "main:text"], // without the file system it could be a folder
+  ];
+  for (const [env, pick, want, typed] of cases) {
+    const view = editor("\\include|", latexCompletionSource(b, env));
+    typeKeys(view, "{");
+    await settle(view);
+    const option = currentCompletions(view.state)[pick];
+    assert.equal(`${option.label}:${option.type}`, typed);
+    view.dispatch({ effects: setSelectedCompletion(pick) });
+    press(view, "Tab");
+    assert.equal(lineAtCursor(view), want);
+    view.destroy();
+  }
+});
+
+test("built-in items leave the braces too: \\begin{ of a closed environment, colors, a color field", async () => {
+  const colors = "\\definecolor{mageblue}{RGB}{0,0,255}\n";
+  const env = editor("|\n  \\item a\n\\end{itemize}", latexCompletionSource(null));
+  typeKeys(env, "\\begin{ite");
+  await settle(env);
+  assert.equal(labels(env)[0], "itemize");
+  press(env, "Enter");
+  assert.equal(lineAtCursor(env), "\\begin{itemize}|", "already closed: no second \\end");
+  env.destroy();
+
+  const color = editor(colors + "|", latexCompletionSource(null));
+  typeKeys(color, "\\textcolor{mag");
+  await settle(color);
+  press(color, "Tab");
+  assert.equal(lineAtCursor(color), "\\textcolor{mageblue}|");
+  color.destroy();
+
+  // \textc + Tab: the color list opens in the first field; taking a color goes on to the second.
+  const field = editor(colors + "|", latexCompletionSource(null));
+  type(field, "\\textco");
+  await settle(field);
+  assert.equal(labels(field)[0], "textcolor");
+  press(field, "Tab");
+  assert.equal(lineAtCursor(field), "\\textcolor{|}{}");
+  await settle(field);
+  assert.deepEqual(labels(field), ["mageblue"]);
+  type(field, "ma"); // Enter takes from an untouched list only after something is typed
+  await settle(field);
+  press(field, "Enter");
+  assert.equal(lineAtCursor(field), "\\textcolor{mageblue}{|}");
+  type(field, "blue text");
+  press(field, "Tab");
+  assert.equal(lineAtCursor(field), "\\textcolor{mageblue}{blue text}|");
+  field.destroy();
+});
+
+test("a label taken inside another snippet's field stays in that field", async () => {
+  const { backend: b } = backend((state, pos) => {
+    if (!state.doc.line(pos.line + 1).text.slice(0, pos.character).endsWith("\\ref{")) return null;
+    const r = range(pos.line, pos.character, pos.character);
+    return { items: ["eq:main", "sec:intro"].map((l) => ({ label: l, kind: 1, textEdit: { range: r, newText: l } })) };
+  });
+  const view = editor("$|$", latexCompletionSource(b));
+  applySnippet(view, "\\frac{${1}}{${2}}");
+  typeKeys(view, "\\ref{");
+  await settle(view);
+  assert.equal(lineAtCursor(view), "$\\frac{\\ref{|}}{}$");
+  press(view, "ArrowDown");
+  press(view, "Tab");
+  assert.equal(lineAtCursor(view), "$\\frac{\\ref{sec:intro}|}{}$");
+  assert.ok(hasNextSnippetField(view.state), "still in \\frac's first field");
+  press(view, "Tab");
+  assert.equal(lineAtCursor(view), "$\\frac{\\ref{sec:intro}}{|}$");
   view.destroy();
 });
 
@@ -620,7 +765,7 @@ test("live texlab on a copied project", { skip: !TEXLAB_BIN && "texlab not found
       await settle(view);
       assert.deepEqual(labels(view), ["one.tex"]);
       press(view, "Tab");
-      assert.equal(lineAtCursor(view), "\\input{chapters/one|}");
+      assert.equal(lineAtCursor(view), "\\input{chapters/one}|");
       done(view);
     });
 
@@ -687,6 +832,15 @@ test("live texlab on a copied project", { skip: !TEXLAB_BIN && "texlab not found
 test("live texlab: smart Enter on untouched argument lists; no stale re-query after a snippet", { skip: !TEXLAB_BIN && "texlab not found (set TEXLAB_BIN)" }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "ll-texlab-keys-"));
   cpSync("tests/fixtures/texproj", dir, { recursive: true });
+  mkdirSync(join(dir, "chapters", "parts"));
+  writeFileSync(join(dir, "chapters", "parts", "two.tex"), "Two.\n");
+  const isFolder = (path: string) => {
+    try {
+      return statSync(join(dir, path)).isDirectory();
+    } catch {
+      return false;
+    }
+  };
   const main = join(dir, "main.tex");
   const original = readFileSync(main, "utf8");
   const server = new TexlabServer({
@@ -706,7 +860,7 @@ test("live texlab: smart Enter on untouched argument lists; no stale re-query af
   };
   const open = (line: string) => {
     const doc = original.replace("\\begin{document}\n", () => `\\begin{document}\n${line}\n`); // a function keeps `$$` in `line`
-    const view = editor(doc, latexCompletionSource(texlab), (v, changes, startDoc) =>
+    const view = editor(doc, latexCompletionSource(texlab, { isFolder }), (v, changes, startDoc) =>
       server.change(main, v.state.doc, changes, startDoc),
     );
     server.open(main, view.state.doc);
@@ -734,7 +888,7 @@ test("live texlab: smart Enter on untouched argument lists; no stale re-query af
       const second = labels(nav)[1];
       press(nav, "ArrowDown");
       press(nav, "Enter");
-      assert.equal(lineAtCursor(nav), `See \\ref{${second}|}`);
+      assert.equal(lineAtCursor(nav), `See \\ref{${second}}|`, "the label is the whole argument: the cursor leaves the braces");
       done(nav);
     });
 
@@ -746,6 +900,36 @@ test("live texlab: smart Enter on untouched argument lists; no stale re-query af
       press(view, "Enter");
       assert.equal(lineAtCursor(view), "\\end{align}|");
       done(view);
+    });
+
+    await t.test("a single value (label, file, class) lands after its brace; \\cite and \\usepackage keep the cursor inside", async () => {
+      const cases: [string, (view: EditorView) => void, string[], RegExp | string][] = [
+        ["See |", (v) => typeKeys(v, "\\ref{"), ["ArrowDown", "Tab"], /^See \\ref\{[^}]+\}\|$/],
+        ["See |", (v) => typeKeys(v, "\\eqref{"), ["ArrowDown", "Enter"], "See \\eqref{eq:main}|"],
+        ["See |", (v) => type(v, "\\ref{"), ["ArrowDown", "Enter"], /^See \\ref\{[^}]+\}\|$/], // no closeBrackets: `}` added
+        ["See |", (v) => typeKeys(v, "\\cite{"), ["ArrowDown", "Enter"], /^See \\cite\{[^}]+\|\}$/],
+        ["See |", (v) => typeKeys(v, "\\cite{he"), ["Tab"], "See \\cite{he2022mae|}"],
+        ["|", (v) => typeKeys(v, "\\input{chapters/o"), ["Enter"], "\\input{chapters/one}|"],
+        ["|", (v) => typeKeys(v, "\\input{chap"), ["Tab"], "\\input{chapters|}"], // a folder
+        ["|", (v) => typeKeys(v, "\\include{chapters/o"), ["Tab"], "\\include{chapters/one}|"], // texlab drops .tex: isFolder
+        ["|", (v) => typeKeys(v, "\\include{chapters/p"), ["Tab"], "\\include{chapters/parts|}"],
+        ["|", (v) => typeKeys(v, "\\documentclass{artic"), ["Tab"], "\\documentclass{article}|"],
+        ["|", (v) => typeKeys(v, "\\usepackage{amsm"), ["Tab"], "\\usepackage{amsmath|}"],
+        // Names the built-in layer adds or handles: an environment already closed below, a project color.
+        ["|\n  \\item a\n\\end{itemize}", (v) => typeKeys(v, "\\begin{itemi"), ["Tab"], "\\begin{itemize}|"],
+        ["\\definecolor{mageblue}{RGB}{0,0,255}\nSee |", (v) => typeKeys(v, "\\textcolor{mageb"), ["Enter"], "See \\textcolor{mageblue}|"],
+      ];
+      for (const [line, typing, keys, want] of cases) {
+        const view = open(line);
+        typing(view);
+        await settle(view);
+        assert.ok(labels(view).length, `${lineAtCursor(view)}: no list`);
+        const before = lineAtCursor(view);
+        for (const key of keys) press(view, key);
+        if (typeof want === "string") assert.equal(lineAtCursor(view), want, `${before} ${keys.join(" + ")}`);
+        else assert.match(lineAtCursor(view), want, `${before} ${keys.join(" + ")}`);
+        done(view);
+      }
     });
 
     await t.test("\\fr + Tab, then \\ in \\frac{|}{}: nothing is asked until a letter follows", async () => {
@@ -786,7 +970,8 @@ test("live texlab: smart Enter on untouched argument lists; no stale re-query af
       await settle(tab);
       const first = labels(tab)[0];
       press(tab, "Tab");
-      assert.equal(lineAtCursor(tab), `See \\ref{${first}|}`);
+      assert.equal(lineAtCursor(tab), `See \\ref{${first}}|`);
+      assert.equal(hasNextSnippetField(tab.state), false, "the \\ref{#1}#0 snippet ended");
       done(tab);
     });
 

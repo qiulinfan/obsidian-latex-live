@@ -7,6 +7,7 @@
 //   getEphemeralState / applyEphemeralState   cursor + scroll round trip, focus on activation
 //   darkThemeExtension / syncDarkTheme        EditorView.darkTheme following Obsidian's theme
 //   editNotifier          committed edits only: nothing while an IME composition is open
+//   typingDiagnostics / setTypingDiagnostics  new diagnostics on the line being typed wait for a pause
 //   languageData / detectIndentUnit           closeBrackets, commentTokens, indent unit
 //   mathInput / mathEnter / deleteMathPair    $, \( \[ and escapes, which closeBrackets cannot express
 //   CLOSE_BEFORE          what brackets and math pair before, CJK closing punctuation included
@@ -22,6 +23,7 @@ import {
   toggleComment,
 } from "@codemirror/commands";
 import { getIndentUnit, indentUnit } from "@codemirror/language";
+import { Diagnostic, setDiagnostics } from "@codemirror/lint";
 import { findNext, findPrevious, openSearchPanel, selectNextOccurrence } from "@codemirror/search";
 import {
   ChangeSet,
@@ -30,12 +32,14 @@ import {
   EditorState,
   EditorStateConfig,
   Extension,
+  Facet,
+  Line,
   Prec,
   StateEffect,
   Text,
   TransactionSpec,
 } from "@codemirror/state";
-import { Command, EditorView, KeyBinding } from "@codemirror/view";
+import { Command, EditorView, KeyBinding, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import type { Modifier, Scope } from "obsidian";
 
 // ---- External text ----------------------------------------------------------------
@@ -241,6 +245,162 @@ export function editNotifier(
       },
     }),
   ];
+}
+
+// ---- Diagnostics while typing ---------------------------------------------------------
+
+export interface TypingDiagnosticsOptions {
+  /** Pause (ms) after the last edit on the cursor line before its new diagnostics show (default 1500). */
+  delay?: number;
+}
+
+const typingDelay = Facet.define<number, number>({ combine: (values) => values[0] ?? 1500 });
+
+/** A diagnostic as the host set it, at its position in the current document. */
+interface HeldDiagnostic {
+  diagnostic: Diagnostic;
+  from: number;
+  to: number;
+  shown: boolean;
+}
+
+const onLine = (e: HeldDiagnostic, line: Line | null) => !!line && e.from <= line.to && e.to >= line.from;
+
+const sameProblem = (a: HeldDiagnostic, b: HeldDiagnostic) =>
+  a.diagnostic.severity === b.diagnostic.severity &&
+  a.diagnostic.message === b.diagnostic.message &&
+  a.from <= b.to &&
+  b.from <= a.to;
+
+class TypingDiagnostics {
+  private entries: HeldDiagnostic[] = [];
+  /** The line typed on last (its start, mapped) and when; null once the cursor left it. */
+  private typing: { line: number; at: number } | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
+
+  constructor(private readonly view: EditorView) {}
+
+  private get delay(): number {
+    return this.view.state.facet(typingDelay);
+  }
+
+  /** The line the user is typing on: edited less than `delay` ago, the cursor still on it. */
+  private typingLine(): Line | null {
+    if (!this.typing) return null;
+    if (Date.now() - this.typing.at >= this.delay) {
+      this.typing = null;
+      return null;
+    }
+    return this.view.state.doc.lineAt(this.typing.line);
+  }
+
+  set(diagnostics: readonly Diagnostic[]): void {
+    const line = this.typingLine();
+    const shown = this.entries.filter((e) => e.shown);
+    const len = this.view.state.doc.length;
+    this.entries = diagnostics.map((diagnostic) => {
+      const from = Math.min(Math.max(0, diagnostic.from), len);
+      const e = { diagnostic, from, to: Math.min(Math.max(from, diagnostic.to), len), shown: true };
+      // A problem already on screen stays; a new one on the typing line waits.
+      e.shown = !onLine(e, line) || shown.some((s) => sameProblem(s, e));
+      return e;
+    });
+    this.dispatch();
+    if (this.typing && this.entries.some((e) => !e.shown)) this.schedule(this.typing.at + this.delay - Date.now());
+    else this.clearTimer();
+  }
+
+  update(u: ViewUpdate): void {
+    if (u.docChanged) {
+      // Like lint's marks: text typed at either end stays outside the range.
+      for (const e of this.entries) {
+        e.from = u.changes.mapPos(e.from, 1);
+        e.to = Math.max(e.from, u.changes.mapPos(e.to, -1));
+      }
+      if (this.typing) this.typing.line = u.changes.mapPos(this.typing.line, -1);
+    }
+    const line = u.state.doc.lineAt(u.state.selection.main.head);
+    let typed = false;
+    if (u.docChanged && u.transactions.some((tr) => tr.docChanged && !tr.isUserEvent("set"))) {
+      u.changes.iterChangedRanges((_fA, _tA, from, to) => {
+        if (from <= line.to && to >= line.from) typed = true;
+      });
+    }
+    if (typed) this.typing = { line: line.from, at: Date.now() };
+    else if (this.typing && u.state.doc.lineAt(this.typing.line).number !== line.number) this.typing = null;
+    if (!this.entries.some((e) => !e.shown)) return;
+    if (typed) this.schedule(this.delay);
+    // Held diagnostics off the typing line (the cursor left it) show right after this update.
+    const current = this.typing ? u.state.doc.lineAt(this.typing.line) : null;
+    if (this.entries.some((e) => !e.shown && !onLine(e, current))) queueMicrotask(() => this.reveal());
+  }
+
+  private reveal(): void {
+    if (this.destroyed) return;
+    const line = this.typingLine();
+    let changed = false;
+    for (const e of this.entries) {
+      if (e.shown || onLine(e, line)) continue;
+      e.shown = changed = true;
+    }
+    if (!this.entries.some((e) => !e.shown)) this.clearTimer();
+    if (changed) this.dispatch();
+  }
+
+  private dispatch(): void {
+    const visible = this.entries
+      .filter((e) => e.shown)
+      .map(({ diagnostic: d, from, to }) => (d.from === from && d.to === to ? d : { ...d, from, to }));
+    this.view.dispatch(setDiagnostics(this.view.state, visible));
+  }
+
+  private schedule(ms: number): void {
+    this.clearTimer();
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.typing = null; // a pause: every later edit reschedules
+      this.reveal();
+    }, Math.max(0, ms));
+  }
+
+  private clearTimer(): void {
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.clearTimer();
+  }
+}
+
+const typingDiagnosticsPlugin = ViewPlugin.fromClass(TypingDiagnostics);
+
+/**
+ * Keeps diagnostics from flashing on the line being typed (a half-typed `\fr`, tinymist's
+ * per-keystroke publishes). Mount next to lintGutter() and set diagnostics with
+ * setTypingDiagnostics. A new diagnostic on the cursor's line waits while the user types
+ * there: it shows once edits on that line pause for `delay` ms, or as soon as the cursor
+ * leaves the line (Enter, arrows, a click). Diagnostics elsewhere, and ones already shown
+ * that the next set still reports (same severity and message, overlapping range), show
+ * immediately; one the next set drops disappears immediately. Typing is any document change
+ * touching the main cursor's line, except setDocText's external "set" changes.
+ */
+export function typingDiagnostics(opts: TypingDiagnosticsOptions = {}): Extension {
+  return [typingDelay.of(opts.delay ?? 1500), typingDiagnosticsPlugin];
+}
+
+/**
+ * Replaces `view.dispatch(setDiagnostics(view.state, diagnostics))` for the editor's lint
+ * layer: the full current set (positions in the current document), held back on the typing
+ * line by typingDiagnostics. Without that extension the set is shown as is. Never call it
+ * during a view update (like any dispatch).
+ */
+export function setTypingDiagnostics(view: EditorView, diagnostics: readonly Diagnostic[]): void {
+  const plugin = view.plugin(typingDiagnosticsPlugin);
+  if (plugin) plugin.set(diagnostics);
+  else view.dispatch(setDiagnostics(view.state, diagnostics));
 }
 
 // ---- Language data ------------------------------------------------------------------

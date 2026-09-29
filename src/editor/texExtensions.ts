@@ -6,6 +6,7 @@ import {
 } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { bracketMatching } from "@codemirror/language";
+import { Diagnostic, lintGutter } from "@codemirror/lint";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { ChangeSet, EditorState, Extension, Text } from "@codemirror/state";
 import {
@@ -19,6 +20,7 @@ import {
   lineNumbers,
   rectangularSelection,
 } from "@codemirror/view";
+import type { TexDiagnostic } from "../tex/logParser";
 import { opensArgumentList, typingCommand } from "./latexCompletion";
 import { latexEnterHooks, latexIndent } from "./latexEnter";
 import { latexHighlightPlugin } from "./latexHighlight";
@@ -32,6 +34,8 @@ import {
   indentUnitFor,
   languageData,
   mathInput,
+  setTypingDiagnostics,
+  typingDiagnostics,
 } from "./shared/editorKit";
 import { InlineSuggestions, keyArbiter } from "./shared/keyArbiter";
 import { lspGlyphColumn } from "./shared/lspCompletion";
@@ -48,7 +52,12 @@ export interface TexEditorOptions {
   onEdit?: (view: EditorView, changes: ChangeSet, startDoc: Text) => void;
   /** The cursor moved without an edit (outside a composition). */
   onCursor?: (view: EditorView) => void;
-  /** More extensions (lint gutter, hover) and key bindings (F12), before the default keymap. */
+  /**
+   * The lint layer for compile diagnostics (gutter and underlines), set with
+   * showTexDiagnostics only: a new problem on the line being typed waits for a pause.
+   */
+  diagnostics?: boolean;
+  /** More extensions (hover) and key bindings (F12), before the default keymap. */
   extensions?: Extension[];
   keys?: KeyBinding[];
 }
@@ -83,6 +92,7 @@ export function texEditorExtensions(o: TexEditorOptions): Extension[] {
     o.completion
       ? autocompletion({ override: [o.completion], addToOptions: [lspGlyphColumn], activateOnCompletion: opensArgumentList })
       : [],
+    o.diagnostics ? [lintGutter(), typingDiagnostics()] : [],
     o.extensions ?? [],
     o.onEdit ? editNotifier(o.onEdit) : [],
     o.onCursor
@@ -100,4 +110,34 @@ export function texEditorExtensions(o: TexEditorOptions): Extension[] {
       indentTabBinding,
     ]),
   ];
+}
+
+/**
+ * Compile diagnostics into the editor's lint layer, each from the first non-blank character
+ * to the end of its reported line (TeX reports lines only). The only way diagnostics reach
+ * the editor: through typingDiagnostics, an error on the line being typed (a half-typed `\fr`
+ * compiled after the save debounce) waits until typing there pauses or the cursor leaves the
+ * line, while errors elsewhere show and fixed ones go at once. The preview's status and
+ * problem list are not affected.
+ */
+export function showTexDiagnostics(view: EditorView, diags: readonly TexDiagnostic[]): void {
+  setTypingDiagnostics(view, texDiagnosticsToCm(view.state, diags));
+}
+
+function texDiagnosticsToCm(state: EditorState, diags: readonly TexDiagnostic[]): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  for (const d of diags) {
+    if (d.line === null || d.line < 1 || d.line > state.doc.lines) continue;
+    const line = state.doc.line(d.line);
+    const indent = /^\s*/.exec(line.text)?.[0].length ?? 0;
+    const from = line.from + Math.min(indent, line.length);
+    out.push({
+      from,
+      to: Math.max(from, line.to),
+      severity: d.severity,
+      message: d.message,
+      source: "LaTeX",
+    });
+  }
+  return out;
 }

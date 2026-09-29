@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { closeBrackets, insertBracket } from "@codemirror/autocomplete";
 import { history, toggleComment, undo, undoDepth } from "@codemirror/commands";
 import { indentUnit } from "@codemirror/language";
+import { Diagnostic, forEachDiagnostic } from "@codemirror/lint";
 import { search } from "@codemirror/search";
 import { ChangeSet, EditorState, Extension, Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
@@ -25,8 +26,10 @@ import {
   minimalChange,
   registerEditorScope,
   setDocText,
+  setTypingDiagnostics,
   showSearch,
   syncDarkTheme,
+  typingDiagnostics,
   wrapSelection,
 } from "../src/editor/shared/editorKit";
 
@@ -194,6 +197,110 @@ test("editNotifier: committed edits only; a composition is reported once after c
   assert.equal(seen[1].startDoc.toString(), "abc");
   assert.equal(seen[1].changes.apply(seen[1].startDoc).toString(), "abc你");
   view.destroy();
+});
+
+// ---- diagnostics while typing ---------------------------------------------------------------
+
+/** An error covering line `n` of the view's current document. */
+function lineError(view: EditorView, n: number, message: string): Diagnostic {
+  const line = view.state.doc.line(n);
+  return { from: line.from, to: line.to, severity: "error", message };
+}
+
+/** The lint layer's diagnostics as "message@line:from-to", sorted. */
+function shownDiagnostics(view: EditorView): string[] {
+  const out: string[] = [];
+  forEachDiagnostic(view.state, (d, from, to) => {
+    out.push(`${d.message}@${view.state.doc.lineAt(from).number}:${from}-${to}`);
+  });
+  return out.sort();
+}
+const messages = (view: EditorView) => shownDiagnostics(view).map((s) => s.slice(0, s.indexOf(":")));
+
+const TEX = "\\section{A}\n$\\alpha$\n\\end{document}";
+
+test("typingDiagnostics: a new diagnostic on the typed line waits for a pause; other lines show at once", async () => {
+  const view = makeView(TEX, TEX.indexOf("$\n"), [typingDiagnostics({ delay: 120 })]);
+  setTypingDiagnostics(view, [lineError(view, 1, "old A"), lineError(view, 2, "old B")]);
+  assert.deepEqual(messages(view), ["old A@1", "old B@2"], "nothing typed yet: all show");
+
+  typeInput(view, "\\fr"); // line 2 becomes `$\alpha\fr$`
+  setTypingDiagnostics(view, [lineError(view, 1, "on line 1"), lineError(view, 2, "Undefined control sequence")]);
+  assert.deepEqual(messages(view), ["on line 1@1"], "line 2's new error waits; its old one is gone at once");
+  await sleep(70);
+  typeInput(view, "a"); // still typing: the pause starts over
+  await sleep(70);
+  assert.deepEqual(messages(view), ["on line 1@1"]);
+  typeInput(view, "c"); // the held error maps with the edits
+  await sleep(200);
+  const line2 = view.state.doc.line(2);
+  assert.equal(line2.text, "$\\alpha\\frac$");
+  assert.deepEqual(shownDiagnostics(view), [
+    `Undefined control sequence@2:${line2.from}-${line2.to}`,
+    `on line 1@1:0-${view.state.doc.line(1).to}`,
+  ]);
+
+  // After the pause a later set (a compile that ends late) shows at once, also on this line.
+  setTypingDiagnostics(view, [lineError(view, 2, "Missing $ inserted")]);
+  assert.deepEqual(messages(view), ["Missing $ inserted@2"]);
+  view.destroy();
+});
+
+test("typingDiagnostics: the cursor leaving the line (a move, Enter) shows its held diagnostics at once", async () => {
+  const view = makeView(TEX, TEX.indexOf("$\n"), [typingDiagnostics({ delay: 60000 })]);
+  typeInput(view, "\\fr");
+  setTypingDiagnostics(view, [lineError(view, 2, "Undefined control sequence")]);
+  assert.deepEqual(messages(view), []);
+  view.dispatch({ selection: { anchor: 3 } }); // a click on line 1
+  await Promise.resolve();
+  assert.deepEqual(messages(view), ["Undefined control sequence@2"]);
+
+  // Back on line 2 without typing: nothing is held.
+  view.dispatch({ selection: { anchor: view.state.doc.line(2).to } });
+  setTypingDiagnostics(view, [lineError(view, 2, "Undefined control sequence \\fr")]);
+  assert.deepEqual(messages(view), ["Undefined control sequence \\fr@2"]);
+
+  typeInput(view, "x");
+  setTypingDiagnostics(view, [lineError(view, 2, "Undefined control sequence \\frx")]);
+  assert.deepEqual(messages(view), []);
+  const end = view.state.doc.line(2).to;
+  view.dispatch({ changes: { from: end, insert: "\n" }, selection: { anchor: end + 1 }, userEvent: "input" });
+  await Promise.resolve();
+  assert.deepEqual(messages(view), ["Undefined control sequence \\frx@2"], "Enter moved the typing to line 3");
+
+  // Typing on the new line holds its own diagnostics; the timer dies with the view.
+  typeInput(view, "\\");
+  setTypingDiagnostics(view, [lineError(view, 3, "Missing control sequence")]);
+  assert.deepEqual(messages(view), []);
+  view.destroy();
+});
+
+test("typingDiagnostics: a shown error the next set still reports stays; one it drops goes at once", async () => {
+  const doc = "#let x = foo\n#x";
+  const view = makeView(doc, doc.indexOf("\n"), [typingDiagnostics({ delay: 60000 })]);
+  const foo = doc.indexOf("foo");
+  const unknown: Diagnostic = { from: foo, to: foo + 3, severity: "error", message: "unknown variable: foo" };
+  setTypingDiagnostics(view, [unknown]);
+  typeInput(view, " + 1"); // typing on the line after the error
+  setTypingDiagnostics(view, [{ ...unknown }, { from: foo + 6, to: foo + 7, severity: "warning", message: "new" }]);
+  assert.deepEqual(shownDiagnostics(view), [`unknown variable: foo@1:${foo}-${foo + 3}`], "kept without a flash");
+  setTypingDiagnostics(view, []);
+  assert.deepEqual(shownDiagnostics(view), [], "fixed: removed immediately");
+  view.destroy();
+});
+
+test("typingDiagnostics: external text is not typing; without the extension the set shows as is", () => {
+  const view = makeView(TEX, TEX.indexOf("$\n"), [typingDiagnostics()]);
+  setDocText(view, TEX.replace("\\alpha", "\\fr"));
+  setTypingDiagnostics(view, [lineError(view, 2, "Undefined control sequence")]);
+  assert.deepEqual(messages(view), ["Undefined control sequence@2"]);
+  view.destroy();
+
+  const plain = makeView(TEX, TEX.indexOf("$\n"));
+  typeInput(plain, "\\fr");
+  setTypingDiagnostics(plain, [lineError(plain, 2, "Undefined control sequence")]);
+  assert.deepEqual(messages(plain), ["Undefined control sequence@2"]);
+  plain.destroy();
 });
 
 // ---- language data -------------------------------------------------------------------------

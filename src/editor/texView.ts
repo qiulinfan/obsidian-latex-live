@@ -1,9 +1,9 @@
-import { Diagnostic, lintGutter, setDiagnostics } from "@codemirror/lint";
 import { EditorState } from "@codemirror/state";
 import { EditorView, Tooltip, hoverTooltip } from "@codemirror/view";
+import { statSync } from "fs";
+import { dirname, resolve } from "path";
 import { Component, MarkdownRenderer, Scope, TFile, TextFileView, WorkspaceLeaf } from "obsidian";
 import type LatexLivePlugin from "../main";
-import type { TexDiagnostic } from "../tex/logParser";
 import { Definitions, emptyDefinitions, projectDefinitions } from "../tex/macros";
 import { latexCompletionSource } from "./latexCompletion";
 import {
@@ -15,7 +15,7 @@ import {
   showSearch,
 } from "./shared/editorKit";
 import { LspCompletionBackend, LspRange, lspPosToOffset, offsetToLspPos } from "./shared/lspCompletion";
-import { texEditorExtensions } from "./texExtensions";
+import { showTexDiagnostics, texEditorExtensions } from "./texExtensions";
 
 export const VIEW_TYPE_TEX = "latex-live-editor";
 
@@ -35,7 +35,7 @@ export class TexView extends TextFileView {
   private saveAfterComposition = false;
   /** The file uses CRLF line breaks (CodeMirror keeps LF); saves write them back. */
   private crlf = false;
-  private project: { abs: string; at: number; defs: Definitions } | null = null;
+  private project: { abs: string; at: number; root: string; defs: Definitions } | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -193,13 +193,11 @@ export class TexView extends TextFileView {
     await this.save();
   }
 
+  /** The last compile's diagnostics for this file into the editor (the full set, every time). */
   refreshDiagnostics(): void {
     const path = this.absolutePath();
     if (!path || !this.editor) return;
-    const diags = this.plugin.diagnosticsFor(path);
-    this.editor.dispatch(
-      setDiagnostics(this.editor.state, toCmDiagnostics(this.editor.state, diags)),
-    );
+    showTexDiagnostics(this.editor, this.plugin.diagnosticsFor(path));
   }
 
   /** The editor state for `data`: the cached one (with undo history) if the text matches. */
@@ -230,6 +228,7 @@ export class TexView extends TextFileView {
         definitions: () => this.definitions(),
         renderInfo: (doc) => this.renderMarkdown(doc.value, doc.kind === "plaintext"),
         bib: this.file?.extension === "bib",
+        isFolder: (path) => this.isFolder(path),
       }),
       onEdit: (view, changes, startDoc) => {
         const abs = this.absolutePath();
@@ -237,8 +236,8 @@ export class TexView extends TextFileView {
         if (!this.applyingExternal) this.onEdited();
       },
       onCursor: () => this.onCursorMoved(),
+      diagnostics: true,
       extensions: [
-        lintGutter(),
         this.hover(),
         EditorView.domEventHandlers({
           compositionend: () => {
@@ -301,15 +300,37 @@ export class TexView extends TextFileView {
     this.lspPath = null;
   }
 
-  /** Macros, colors and environments defined across the project (re-read every few seconds). */
-  private definitions(): Definitions {
+  /** The root document and the project's definitions (re-read every few seconds). */
+  private projectInfo(): { abs: string; root: string; defs: Definitions } | null {
     const abs = this.absolutePath();
-    if (!abs) return emptyDefinitions();
+    if (!abs) return null;
     const now = Date.now();
     if (!this.project || this.project.abs !== abs || now - this.project.at > PROJECT_TTL_MS) {
-      this.project = { abs, at: now, defs: projectDefinitions(this.plugin.rootFor(abs)) };
+      const root = this.plugin.rootFor(abs);
+      this.project = { abs, at: now, root, defs: projectDefinitions(root) };
     }
-    return this.project.defs;
+    return this.project;
+  }
+
+  /** Macros, colors and environments defined across the project. */
+  private definitions(): Definitions {
+    return this.projectInfo()?.defs ?? emptyDefinitions();
+  }
+
+  /**
+   * Whether a file argument's path names a folder. texlab lists paths from the root
+   * document's folder; this file's own folder is checked too.
+   */
+  private isFolder(path: string): boolean {
+    const p = this.projectInfo();
+    if (!p) return false;
+    return [p.root, p.abs].some((file) => {
+      try {
+        return statSync(resolve(dirname(file), path)).isDirectory();
+      } catch {
+        return false;
+      }
+    });
   }
 
   /** Completion docs and hovers through Obsidian's Markdown renderer. */
@@ -379,22 +400,4 @@ function hoverText(contents: unknown): { value: string; plain: boolean } | null 
   if (!value) return null;
   const plain = !!contents && typeof contents === "object" && (contents as { kind?: string }).kind === "plaintext";
   return { value, plain };
-}
-
-function toCmDiagnostics(state: EditorState, diags: TexDiagnostic[]): Diagnostic[] {
-  const out: Diagnostic[] = [];
-  for (const d of diags) {
-    if (d.line === null || d.line < 1 || d.line > state.doc.lines) continue;
-    const line = state.doc.line(d.line);
-    const indent = /^\s*/.exec(line.text)?.[0].length ?? 0;
-    const from = line.from + Math.min(indent, line.length);
-    out.push({
-      from,
-      to: Math.max(from, line.to),
-      severity: d.severity,
-      message: d.message,
-      source: "LaTeX",
-    });
-  }
-  return out;
 }

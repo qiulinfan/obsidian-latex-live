@@ -17,6 +17,9 @@
 //     re-queried (triggerKind 3) only while the new query continues the previous one.
 //   - lspQueryEmpty tells keyArbiter's smart Enter that the selected option comes from a
 //     list a trigger character opened and nothing has been typed since.
+//   - The detail column shows labelDetails / detail; labelDescription untangles tinymist's
+//     figure-label text (": A boxFigure" -> "Figure · A box"), cutting off a supplement
+//     only when it is one of Typst's own or the document writes the caption before it.
 // Only type imports from "obsidian" are allowed here: tests bundle this without Obsidian.
 import {
   Completion,
@@ -215,6 +218,125 @@ export function defaultGlyph(item: LspCompletionItem): string | null {
   if (desc && isGlyph(desc)) return desc;
   const m = item.detail ? /^(\S{1,4}), /u.exec(item.detail) : null;
   return m && isGlyph(m[1]) ? m[1] : null;
+}
+
+/**
+ * The separator a Typst figure caption's text starts with: ": " (English, Japanese),
+ * ". – " (French), ". " (Russian), an em space (Chinese), " – " (a `--` separator).
+ */
+const CAPTION_SEPARATOR = /^(?:[.:]\s+(?:[–—]\s+)?|[：．]\s*|\s+(?:[–—]\s+)?)/u;
+/**
+ * Typst's own supplements for figures of kind image, table and raw in every language it
+ * translates, as tinymist 0.15.2 renders them: what a caption ends with unless the figure
+ * sets its own supplement.
+ */
+const TYPST_SUPPLEMENTS = new Set(
+  (
+    "Abbildung|Ábra|Addadi|Amhábhar|Attēls|Bảng|Bild|Cədvəl|Chương trình|Clàr|Codice|" +
+    "Dealbh|Descriptio|Dimenê|Exemplum|Ffigur|Fig.|Figiúr|Figur|Figura|Figure|Figurë|" +
+    "Figurenn|Figuro|Figuur|Gambar|Govus|Hình|Irudia|Jadual|Joonis|Kevala|Kôd|Kode|Kodea|" +
+    "Kodlistning|Kodo fragmentas|Kuva|Lent.|List|Listă|Listado|Listagem|Listahan|Listaus|" +
+    "Listaxe|Liste|Listing|Llistat|Mynd|Obrázek|Obrázok|Opplisting|Pav.|Pigura|Program|" +
+    "Rysunek|Sampl cod|Saraksts|Şekil|Şəkil|Slika|Surat|Sýnishorn|Tabealla|Tabel|Tabela|" +
+    "Tabell|Tabella|Tabelle|Tabelo|Tabelul|tabili|Tabl|Tabla|Tábla|Táblázat|Table|Tableau|" +
+    "Tablèu|Tablica|Tablisa|Tablo|Táboa|Tabula|Tabulka|Tabuľka|Tafla|Talaan|Taolenn|Taula|" +
+    "Taulukko|Utskrift|Výpis|Παράθεση|Πίνακας|Σχήμα|Листинг|Лістинг|Приложение|Програм|" +
+    "Рис.|Рисунок|Рыс.|Слика|Табела|Таблица|Таблиця|Табліца|Фиг.|სურ.|ცხრ.|Աղյուսակ|Նկար|" +
+    "איור|טבלה|קטע מקור|جدول|جەدۋەل|رەسىم|شكل|قائمة|ሥዕል|ሰንጠረዥ|आकृती|कोष्टक|चित्र|तालिका|" +
+    "চিত্ৰ|ছবি/নকশা|তালিকা|সারনী|ਸ਼ਕਲ|ਲੇਖਾ|ટેબલ|ଟେବୁଲ୍|ପ୍ରତିଛବି|அட்டவணை|படம்|ఆకృతి|పట్టిక|" +
+    "ಕೋಷ್ಟಕ|ಚಿತ್ರ|ചിത്രം|പട്ടിക|වගුව|සටහන|ตารางที่|รูปที่|ຕາຕະລາງທີ|ຮູບທີ|པར་རིས་|" +
+    "རེའུ་མིག་|តារាង|រូប|그림|표|リスト|代码|図|图|圖|程式|表"
+  ).split("|"),
+);
+/** The longest supplement looked for at the end of a caption. */
+const MAX_SUPPLEMENT = 32;
+
+const squash = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/**
+ * What labelDescription checks tinymist's label text against, gathered once per list:
+ * `written`, the texts the document writes as `[...]` or `"..."` (whitespace collapsed),
+ * where a caption or theorem body of this document appears as it was typed; `bib`,
+ * "key\0title" of every bibliography entry in the list, which tinymist sends twice, as its
+ * key (Reference, the title as description) and as its title (Constant, the key as
+ * description).
+ */
+export interface LabelEvidence {
+  written: ReadonlySet<string>;
+  bib: ReadonlySet<string>;
+}
+
+export function labelEvidence(items: readonly LspCompletionItem[], source: string): LabelEvidence {
+  const written = new Set<string>();
+  for (const m of source.matchAll(/\[([^[\]]*)\]|"([^"\n]*)"/g)) written.add(squash(m[1] ?? m[2]));
+  const bib = new Set<string>();
+  for (const i of items) {
+    if (i.kind === 21 && i.labelDetails?.description) bib.add(`${i.labelDetails.description}\0${i.label}`);
+  }
+  return { written, bib };
+}
+
+/** Whether `i` of `text` directly follows the caption's last character: no space on either side. */
+function gluedAt(text: string, i: number): boolean {
+  return i > 0 && !/\s/.test(text.charAt(i - 1)) && !/\s/.test(text.charAt(i));
+}
+
+/**
+ * Where the supplement starts in a caption's text (caption and supplement run together), or
+ * null when it has none. A text the document writes whole has none ("Performance of
+ * JavaScript" with `supplement: none`). Then one of Typst's own supplements right after the
+ * caption's last character counts, a lowercase one not inside a word ("Instabili" does not
+ * end in Hausa's "tabili"). A figure's own supplement cannot be told apart from the end of
+ * its caption ("JavaScript") unless the document writes the caption: a written beginning
+ * leaves the rest as supplement ("A box" + "Supplementary Figure", "每个集合都可测。" +
+ * "定理"), a rest without a word glued inside it ("Name" + "AgeDataset" from table cells
+ * is not one).
+ */
+function supplementStart(text: string, written?: ReadonlySet<string>): number | null {
+  if (written?.has(text)) return null;
+  const min = Math.max(0, text.length - MAX_SUPPLEMENT);
+  for (let i = min; i < text.length; i++) {
+    if (!TYPST_SUPPLEMENTS.has(text.slice(i))) continue;
+    if (i === 0) return i;
+    const midWord = /\p{Ll}/u.test(text.charAt(i)) && /\p{L}/u.test(text.charAt(i - 1));
+    if (gluedAt(text, i) && !midWord) return i;
+  }
+  if (!written) return null;
+  for (let i = text.length - 1; i >= min; i--) {
+    if (gluedAt(text, i) && !/\p{Ll}\p{Lu}/u.test(text.slice(i)) && written.has(text.slice(0, i))) return i;
+  }
+  return null;
+}
+
+/**
+ * Description of a label item (kind Reference) that tinymist runs together: it describes
+ * a label by the plain text of the element's caption or body, and a figure caption's text
+ * is separator, caption and supplement in one string (": A boxFigure", ". – Une
+ * boîteFig."); a figure without caption is "figure(..)" with its body and supplement in
+ * `detail` ("Every set is measurable.Theorem"). Returns "Figure · A box" / "Theorem ·
+ * Every set is measurable.", the supplement first so a long caption cannot cut it off;
+ * `evidence` (labelEvidence) tells where the caption ends (supplementStart) and which text
+ * only looks like a caption: an element that writes it (`#block[: note]`) or a bibliography
+ * title keeps its description. Null for other items (headings, equations, texlab).
+ */
+export function labelDescription(item: LspCompletionItem, evidence?: LabelEvidence): string | null {
+  const desc = item.labelDetails?.description;
+  if (item.kind !== 18 || !desc) return null;
+  let text: string;
+  if (desc === "figure(..)" && item.detail) {
+    text = item.detail;
+  } else {
+    const sep = CAPTION_SEPARATOR.exec(desc);
+    if (!sep) return null;
+    // What only looks like a separator: the element's own text, a bibliography title.
+    if (sep[0].trim() && evidence?.written.has(squash(desc))) return null;
+    if (evidence?.bib.has(`${item.label}\0${item.detail}`)) return null;
+    text = desc.slice(sep[0].length);
+  }
+  text = squash(text);
+  const at = supplementStart(text, evidence?.written);
+  if (at == null) return text || null;
+  return at ? `${text.slice(at)} · ${text.slice(0, at)}` : text.slice(at);
 }
 
 function markup(doc: LspMarkup | undefined): { kind: "markdown" | "plaintext"; value: string } | null {
@@ -447,10 +569,14 @@ export function lspCompletionSource(
 
     const built: { option: Completion; edit: CompletionEdit }[] = [];
     const preselected = new Set<Completion>();
+    // tinymist's labels: the document and the list tell a caption from its supplement.
+    const labels = items.some((i) => i.kind === 18 && i.labelDetails?.description)
+      ? labelEvidence(items, doc.toString())
+      : undefined;
     for (const { item, edit } of byKey.values()) {
       const glyph = glyphOf(item);
       const single = item.detail && !item.detail.includes("\n") ? item.detail : undefined;
-      let detail = item.labelDetails?.description ?? item.labelDetails?.detail ?? single;
+      let detail = labelDescription(item, labels) ?? item.labelDetails?.description ?? item.labelDetails?.detail ?? single;
       if (glyph && detail === glyph) detail = undefined;
       else if (glyph && detail?.startsWith(glyph + ", ")) detail = detail.slice(glyph.length + 2);
       const deprecated = item.deprecated || item.tags?.includes(1);

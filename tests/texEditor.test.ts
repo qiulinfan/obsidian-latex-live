@@ -5,12 +5,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { completionStatus, currentCompletions, selectedCompletionIndex } from "@codemirror/autocomplete";
 import { undo } from "@codemirror/commands";
+import { forEachDiagnostic } from "@codemirror/lint";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import type { App } from "obsidian";
 import { latexCompletionSource } from "../src/editor/latexCompletion";
 import { YoloBridge } from "../src/editor/shared/yoloBridge";
-import { texEditorExtensions } from "../src/editor/texExtensions";
+import { TexEditorOptions, showTexDiagnostics, texEditorExtensions } from "../src/editor/texExtensions";
+import type { TexDiagnostic } from "../src/tex/logParser";
 import { FakeYolo, fakeYolo } from "./support/fakeYolo";
 import { Ctx, diff, ghost, press, quietSettings, sleep, snap, typeText, waitFor } from "./support/keyMatrix";
 
@@ -19,7 +21,7 @@ interface TexCtx extends Ctx {
 }
 
 /** A LaTeX editor as TexView builds it; `|` marks the cursor. */
-function make(text: string, edits: string[] = []): TexCtx {
+function make(text: string, edits: string[] = [], more: Partial<TexEditorOptions> = {}): TexCtx {
   const cursor = text.indexOf("|");
   const doc = text.replace("|", "");
   const yolo = fakeYolo({ settings: quietSettings() });
@@ -36,6 +38,7 @@ function make(text: string, edits: string[] = []): TexCtx {
         yolo: bridge.extension(() => "notes.tex"),
         completion: latexCompletionSource(null),
         onEdit: (view) => edits.push(view.state.doc.toString()),
+        ...more,
       }),
     });
   const view = new EditorView({ state: freshState(), parent: document.body });
@@ -281,5 +284,48 @@ test("no completion popup in % comments or verbatim; Enter stays a newline", asy
   typeKeys(c.view, "\\fr");
   await settle(c.view);
   assert.equal(currentCompletions(c.view.state)[0]?.label, "frac");
+  done(c);
+});
+
+test("compile diagnostics: a new error on the line being typed waits for a pause or for the cursor to leave", async () => {
+  const c = make("\\documentclass{article}\n\\begin{document}\n  See |\n\\end{document}", [], { diagnostics: true });
+  const view = c.view;
+  /** What the lint layer shows, as "line:message" (and the underline's start column). */
+  const shown = () => {
+    const out: string[] = [];
+    forEachDiagnostic(view.state, (d, from) => {
+      const l = view.state.doc.lineAt(from);
+      out.push(`${l.number}:${from - l.from}:${d.message}`);
+    });
+    return out.sort();
+  };
+  const diag = (line: number, message: string, severity: TexDiagnostic["severity"] = "error"): TexDiagnostic => ({ severity, file: null, line, message });
+  const warning = diag(1, "Font shape undefined.", "warning");
+  const undefinedCs = diag(3, "Undefined control sequence.");
+
+  // A compile after the save debounce reports the half-typed `\fr` on the line being typed.
+  typeKeys(view, "\\fr");
+  press(view, "Escape");
+  showTexDiagnostics(view, [undefinedCs, warning]);
+  assert.deepEqual(shown(), ["1:0:Font shape undefined."], "held on the typing line; other lines show at once");
+  await sleep(1000);
+  assert.deepEqual(shown(), ["1:0:Font shape undefined."], "still inside the pause");
+  await sleep(700);
+  assert.deepEqual(shown(), ["1:0:Font shape undefined.", "3:2:Undefined control sequence."], "shown after a 1.5 s pause");
+
+  // Typing on: the error the next compile still reports stays; once fixed it goes at once.
+  typeKeys(view, "a");
+  showTexDiagnostics(view, [undefinedCs, warning]);
+  assert.deepEqual(shown(), ["1:0:Font shape undefined.", "3:2:Undefined control sequence."]);
+  showTexDiagnostics(view, [warning]);
+  assert.deepEqual(shown(), ["1:0:Font shape undefined."], "a fixed error disappears immediately");
+
+  // A new error while typing waits; leaving the line shows it.
+  typeKeys(view, "c");
+  showTexDiagnostics(view, [diag(3, "Missing $ inserted."), warning]);
+  assert.deepEqual(shown(), ["1:0:Font shape undefined."]);
+  view.dispatch({ selection: { anchor: view.state.doc.line(4).from } });
+  await sleep(0);
+  assert.deepEqual(shown(), ["1:0:Font shape undefined.", "3:2:Missing $ inserted."], "the cursor left the line");
   done(c);
 });

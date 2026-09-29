@@ -141,8 +141,14 @@ LatexSession(root) -> Compiler: 串行队列，最多一个在跑、一个在等
   `\input{`、`\includegraphics{`、`\textcolor{` 等参数里；空格、单独的 `\`、`\\` 换行都不请求，
   `%` 注释和 verbatim 类环境里也不请求（texlab 在那里什么都不给，只剩内置层的话 Enter 会插入片段）。
   接受 `\ref`、`\begin` 这类命令后直接弹出参数列表，和手打 `{` 一样算隐式弹出（CodeMirror 的
-  `activateOnCompletion`），所以 `\re` Tab 之后直接回车也是换行；`\end{` 接受环境名后光标落在右括号之后。
-  `\input{`/`\include{` 的文件去掉 `.tex`（texlab 5.26 把文件和目录都当 kind 1 发，按上下文判断，不看 kind）。
+  `activateOnCompletion`），所以 `\re` Tab 之后直接回车也是换行。接受单值参数（`\ref` 一类的 label、`\begin`/`\end` 的环境名、
+  `\input`/`\include`/`\subfile`/`\includegraphics`/`\addbibresource` 的文件、`\documentclass`、`\bibliographystyle`、
+  颜色）后光标落在右括号之后，回车和 Tab 一样：越过 closeBrackets 的 `}`，这一行上没有东西闭合这个括号时补一个
+  （后面还有 `}` 闭合它时光标不动）；片段里右括号后面紧跟下一个字段时跳到那个字段（`\re` Tab 的 `\ref{#1}#0`
+  直接结束，`\textcolor{色}{|}` 进入第二个参数）。`\cite`、`\nocite`、`\usepackage`、`\bibliography` 这类逗号列表
+  和目录留在括号里，接着打 `, key` 或 `/`。
+  `\input{`/`\include{` 的文件去掉 `.tex`（texlab 5.26 把文件和目录都当 kind 1 发，按上下文判断，不看 kind；
+  文件带扩展名，只有 `\include{` 的文件本来就不带，这时按根文档目录查文件系统区分文件和目录）。
   内置层用 texlab 的替换范围，但范围超出当前词时不用：`\frac{\|}{}` 里 texlab 把 `\}` 读成命令，范围盖住右括号
   （`$\|$` 里是 `\$`，盖住收尾的 `$`）。光标前只有一个 `\`、后面紧跟 `}` 或收尾的 `$`（光标在数学里）时
   （只有按 Ctrl-Space 才会请求），texlab 条目的范围也截到光标，选 `}` 得到 `\}` 而右括号保留；后面是别的符号、
@@ -175,6 +181,10 @@ LatexSession(root) -> Compiler: 串行队列，最多一个在跑、一个在等
   Mod-E 开关预览、Mod-F 搜索；外部修改按最小差异合并（光标、滚动、撤销历史都保留）；
   重新打开文件恢复撤销历史、光标和滚动位置；输入法组字期间不保存、不编译、不同步 texlab
   （Obsidian 自己的延时保存也在 `TexView.save` 里推迟到 compositionend 之后）。
+- 编辑器里的编译错误不在正在打字的那一行闪：保存防抖（400 ms）后的编译会给打到一半的 `\fr` 报
+  Undefined control sequence，这一行新出现的错误先压住，停手 1.5 s 或光标离开这一行才显示；
+  别的行的错误立即显示，已经显示、下一次编译还报的错误保留，修好的错误立即消失
+  （共享的 `typingDiagnostics`，只经 `showTexDiagnostics` 设置）。状态栏和问题面板照常显示全部。
 
 **YOLO**：设置里的 “YOLO AI tab completion”（默认关）把 YOLO 的灰字补全接到 .tex 里：
 YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己的防抖和开关；接受时插入原文（不做 Markdown 转义），

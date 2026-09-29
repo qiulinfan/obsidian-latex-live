@@ -76,6 +76,11 @@
   - texlab's diagnostics are ignored: compile diagnostics from the log stay
     authoritative. Its PATH starts with the resolved TeX bin directory, so
     texlab and the compiler see the same distribution.
+  - Compile diagnostics reach the editor only through `showTexDiagnostics`
+    (`texExtensions.ts`, the full set every time; `diagnostics: true` mounts the lint
+    gutter with editorKit's `typingDiagnostics`): a new error on the line being typed
+    waits for a 1.5 s pause or for the cursor to leave the line. Never dispatch
+    `setDiagnostics` on the editor. The preview's status and problem list are unaffected.
   - texlab has no argument snippets, no `\end` insertion, no math awareness and a
     50-item cap; `src/editor/latexCompletion.ts` adds those on top. Snippets from
     that layer are applied with CodeMirror's `snippet()` directly from their
@@ -83,12 +88,21 @@
     `#`/`$`/`\` and `}` after `\`, but @codemirror/autocomplete 6.20.3 still
     misplaces a field after three or more escapes right before it).
   - texlab 5.26 sends files and folders as kind 1 (never 17): file-argument rules
-    key on the argument context. At `\frac{\|}{}` it reads the control symbol `\}`
+    key on the argument context (a file has its extension, except after `\include`,
+    where `TexView.isFolder` asks the file system from the root document's folder).
+    At `\frac{\|}{}` it reads the control symbol `\}`
     and its range covers the `}` (`$\|$`: `\$` and the closing `$`); built-ins never
     take a texlab range that reaches past the word, after a bare `\` in front of a `}`
     or of a `$` closing math every item's range stops at the cursor (a `$` opening math
     keeps texlab's range), and a bare-`\` list counts as incomplete (the next letter
     asks again).
+  - Accepting a single value (`\ref`-family labels, `\begin`/`\end` names, files of
+    `\input`/`\include`/`\subfile`/`\includegraphics`/`\addbibresource`, `\documentclass`,
+    `\bibliographystyle`, colors) leaves the braces (`SINGLE_VALUE`, `leaveArgument`): a
+    second transaction after the accept steps over the `}`, adds one when nothing closes the
+    group on the line, or moves to a snippet field right there (`\ref{#1}#0`,
+    `\textcolor{#1}{#2}`). Lists (`\cite`, `\usepackage`, `\bibliography`) and folders keep
+    the cursor inside.
   - A complete list is reused only while the query extends the one it was asked for
     (shared `lspCompletion`); backspacing into it asks texlab again, explicit lists too.
 - Build output goes to `$TMPDIR/obsidian-latex-live/<hash of root>/`, never

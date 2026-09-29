@@ -10,11 +10,22 @@
 //     \ref{ \cite{ \begin{ \usepackage{ (D5), never in a `%` comment or verbatim, where
 //     texlab has nothing and the built-in layer alone would turn Enter into a snippet;
 //   - accepting `\ref` (etc.) opens the argument's list right away, as if `{` was typed;
+//   - accepting a single value (`\ref{sec:intro}|`, `\end{align}|`, a file after `\input{`)
+//     leaves the braces; lists (`\cite{a|}`, `\usepackage{`) keep the cursor inside;
 //   - a citation query texlab cannot match (title or author words) asks for the whole
 //     list, which the shared source filters on author and title (TL-05).
 // No obsidian imports: tests run this against recorded and live texlab responses.
-import { Completion, CompletionSource, snippet } from "@codemirror/autocomplete";
-import { EditorState, Text } from "@codemirror/state";
+import {
+  Completion,
+  CompletionSource,
+  hasNextSnippetField,
+  insertCompletionText,
+  nextSnippetField,
+  pickedCompletion,
+  snippet,
+} from "@codemirror/autocomplete";
+import { EditorState, Text, Transaction } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { Definitions, emptyDefinitions, mergeDefinitions, scanDefinitions } from "../tex/macros";
 import {
   ARGUMENT_COMMANDS,
@@ -59,6 +70,20 @@ export type LatexContext =
 const COMMAND_BEFORE = /\\((?:[A-Za-z@]+\*?)?)$/;
 const ARGUMENT_BEFORE = /\\([A-Za-z]+)\*?\s*(?:\[[^\]\n]*\]\s*)*\{([^{}\n]*)$/;
 const MULTI_VALUE = new Set<ArgumentKind>(["label", "cite", "package"]);
+/**
+ * Commands whose argument holds one value (a label, an environment, a file, a class, a
+ * color): accepting it leaves the braces (`\ref{sec:intro}|`). Lists (\cite, \nocite,
+ * \usepackage, \bibliography, \includeonly, \labelcref...) keep the cursor inside for `, key`.
+ */
+const SINGLE_VALUE = new Set([
+  "begin", "end",
+  "ref", "eqref", "pageref", "autoref", "nameref", "cref", "Cref", "vref",
+  "input", "include", "subfile", "includegraphics", "addbibresource",
+  "documentclass", "bibliographystyle",
+  "textcolor", "color", "colorbox", "fcolorbox", "pagecolor",
+]);
+/** File arguments whose files texlab 5.26 lists without their extension (`\include{main}`). */
+const BARE_FILES = new Set(["include"]);
 
 /** An odd run of backslashes before `i` escapes the character at `i`. */
 function escaped(text: string, i: number): boolean {
@@ -178,6 +203,13 @@ export interface LatexCompletionEnv {
   renderInfo?: InfoRenderer;
   /** A .bib file: texlab's entry types and fields. */
   bib?: boolean;
+  /**
+   * Whether a file argument's path (`chapters`, `figs/plots`) names a folder, resolved as
+   * texlab lists it (from the root document's folder). Tells a folder from a file that
+   * texlab sends without its extension (`\include{main}`); without it such items count as
+   * folders and keep the cursor inside the braces.
+   */
+  isFolder?: (path: string) => boolean;
 }
 
 interface Meta {
@@ -232,6 +264,59 @@ function templateApply(template: string, tail: number): Completion["apply"] {
   return (view, completion, from, to) => run(view, completion, from, Math.min(view.state.doc.length, to + tail));
 }
 
+/** `apply` (CM's string insert or a function), then leaveArgument. */
+function thenLeave(apply: NonNullable<Completion["apply"]>): Completion["apply"] {
+  return (view, completion, from, to) => {
+    if (typeof apply === "string") {
+      view.dispatch({ ...insertCompletionText(view.state, apply, from, to), annotations: pickedCompletion.of(completion) });
+    } else {
+      apply(view, completion, from, to);
+    }
+    leaveArgument(view);
+  };
+}
+
+/**
+ * After a single value is accepted in front of its `}` (`\ref{sec:intro|}`: closeBrackets'
+ * brace or one already there), leave the braces. A snippet whose next field comes right
+ * after the `}` (`\ref{#1}#0` from `\re` + Tab) or in the command's next argument
+ * (`\textcolor{#1}{#2}`) moves on to that field, as Tab would; otherwise the cursor steps
+ * over the `}`. A transaction of its own after the accept, so the snippet's field survives
+ * the accept (it moves the selection only: still one undo step); only
+ * view.state/view.dispatch are used, as keyArbiter's dry run requires.
+ */
+function leaveArgument(view: EditorView): void {
+  const { state } = view;
+  const sel = state.selection;
+  const head = sel.main.head;
+  if (sel.ranges.length > 1 || !sel.main.empty || state.sliceDoc(head, head + 1) !== "}") return;
+  if (hasNextSnippetField(state)) {
+    let moved: Transaction | null = null;
+    nextSnippetField({ state, dispatch: (tr) => (moved = tr) });
+    const tr = moved as Transaction | null;
+    const at = tr?.selection?.main.from;
+    if (tr && (at === head + 1 || (at === head + 2 && /[{[]/.test(state.sliceDoc(head + 1, head + 2))))) {
+      view.dispatch(tr);
+      return;
+    }
+  }
+  view.dispatch({ selection: { anchor: head + 1 } });
+}
+
+/** Whether a `}` later on the line closes the group open at `pos` (`\ref{a| b}`); a `%` comment ends the line. */
+function closedOnLine(state: EditorState, pos: number): boolean {
+  const rest = state.sliceDoc(pos, state.doc.lineAt(pos).to);
+  let depth = 0;
+  for (let i = 0; i < rest.length; i++) {
+    const ch = rest[i];
+    if (ch === "\\") i++;
+    else if (ch === "%") break;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && depth-- === 0) return true;
+  }
+  return false;
+}
+
 const VARIANTS = new Map(COMMAND_VARIANTS.map(([label, template]) => [label, template]));
 /** Options whose snippet leaves the cursor in an empty list argument (`\ref{|}`, `\begin{|}`). */
 const opensArgument = new WeakSet<Completion>();
@@ -239,6 +324,8 @@ const opensArgument = new WeakSet<Completion>();
 export function latexCompletionOptions(env: LatexCompletionEnv = {}, analysis = analyses(env)): LspCompletionOptions {
   const meta = new WeakMap<Completion, Meta>();
   const templates = new WeakMap<Completion, { template: string; tail: number }>();
+  /** Options that complete a single-value argument: accepting them leaves the braces. */
+  const leaving = new WeakSet<Completion>();
   return {
     activate(ctx) {
       const before = ctx.state.sliceDoc(ctx.state.doc.lineAt(ctx.pos).from, ctx.pos);
@@ -284,19 +371,27 @@ export function latexCompletionOptions(env: LatexCompletionEnv = {}, analysis = 
           // or an unclaimed \end{name} follows (the environment is already closed).
           const brace = next === "}" ? 1 : 0;
           const rest = ctx.state.sliceDoc(edit.to + brace, ctx.state.doc.lineAt(edit.to).to);
-          if (rest.trim() || a.closedAfter.has(name)) return;
-          const args = ENVIRONMENT_ARGS[name] ?? "";
-          const body = LIST_ENVIRONMENTS.has(name) ? "\t\\item #0" : "\t#0";
-          edit.to += brace;
-          useTemplate(`${name}}${args}\n${body}\n\\end{${name}}`);
-        } else if (c.arg === "env" && c.command === "end" && next === "}" && !edit.snippet) {
-          // The name completes the environment: land after closeBrackets' `}`.
-          edit.to += 1;
-          edit.text += "}";
+          if (!rest.trim() && !a.closedAfter.has(name)) {
+            const args = ENVIRONMENT_ARGS[name] ?? "";
+            const body = LIST_ENVIRONMENTS.has(name) ? "\t\\item #0" : "\t#0";
+            edit.to += brace;
+            return useTemplate(`${name}}${args}\n${body}\n\\end{${name}}`);
+          }
         } else if (c.arg === "file" && !edit.snippet) {
-          // texlab 5.26 sends files and folders as kind 1 (text): files by their extension.
-          if (/\.[A-Za-z0-9]+$/.test(name)) option.type = "file";
+          // texlab 5.26 sends files and folders as kind 1 (text). A file has its extension,
+          // except after \include, where only the file system tells `main` from `chapters`.
+          const path = ctx.state.sliceDoc(c.from, Math.max(c.from, edit.from)) + name;
+          const file = /\.[A-Za-z0-9]+$/.test(name) || (BARE_FILES.has(c.command) && env.isFolder?.(path) === false);
+          if (file) option.type = "file";
           if (/^(input|include|subfile)$/.test(c.command)) edit.text = edit.text.replace(/\.tex$/, ""); // \input{name} without the extension (TL-06)
+          if (!file && c.command !== "bibliographystyle") return; // a folder: the path goes on inside the braces
+        }
+        // One value: accepting it leaves the braces, `\end{align}|`. leaveArgument steps over
+        // the `}`; without one, a `}` comes with the value unless a `}` later on the line
+        // closes the group (`\ref{a| b}`: the cursor stays).
+        if (SINGLE_VALUE.has(c.command) && !edit.snippet) {
+          if (next === "}") leaving.add(option);
+          else if (!closedOnLine(ctx.state, edit.to)) edit.text += "}";
         }
         return;
       }
@@ -345,6 +440,7 @@ export function latexCompletionOptions(env: LatexCompletionEnv = {}, analysis = 
       for (const o of options) {
         const t = templates.get(o);
         if (t) o.apply = templateApply(t.template, t.tail);
+        else if (leaving.has(o)) o.apply = thenLeave(o.apply ?? o.label);
       }
       return options;
     },
