@@ -190,6 +190,24 @@
   white-space: pre-wrap;
 }
 
+/* Cursor preview (renderHover.ts `cursorPreview`): the rendering of the formula at the
+   cursor, below it while it is typed. Clicks go through to the text under it; hidden while
+   the completion list (below the line too) is open. */
+.lsp-cm-view .cm-tooltip.lsp-cursor-preview {
+  overflow: hidden;
+  box-shadow: var(--shadow-s);
+  pointer-events: none;
+}
+.lsp-cm-view .cm-tooltip.lsp-cursor-preview.is-empty,
+.lsp-cm-view .cm-tooltip.lsp-cursor-preview.is-covered {
+  display: none;
+}
+/* The source being typed fails: its last rendering stays, marked. */
+.lsp-cm-view .lsp-cursor-preview.is-error > .lsp-render-hover {
+  border-left: 2px solid var(--text-error);
+  opacity: 0.7;
+}
+
 /* Live preview (livePreview.ts): constructs rendered in the editor's own lines. Block
    widgets and theorem boxes never get vertical margins: CodeMirror's height map misses
    margins (measured: ArrowDown skipped visible lines and the gutter drifted), so their
@@ -347,8 +365,8 @@
   color: var(--text-normal);
   font-weight: var(--bold-weight, 700);
 }
-/* Theorem-like boxes: a BlockWrapper element around the lines. --lp-box-color defaults to
-   elegantbook's green scheme; a box may set it inline for another scheme. */
+/* Theorem-like boxes: a BlockWrapper element around the lines. The role classes carry
+   elegantbook's default (blue) scheme; a box sets --lp-box-color inline for its document's. */
 .lsp-cm-view .lsp-lp-box {
   --lp-box-color: var(--interactive-accent);
   margin: 0;
@@ -360,18 +378,23 @@
   background: color-mix(in srgb, var(--lp-box-color) 8%, transparent);
 }
 .lsp-cm-view .lsp-lp-box.is-main {
-  --lp-box-color: rgb(0, 120, 2);
+  --lp-box-color: rgb(0, 166, 82);
 }
 .lsp-cm-view .lsp-lp-box.is-second {
-  --lp-box-color: rgb(230, 90, 7);
+  --lp-box-color: rgb(255, 134, 24);
 }
 .lsp-cm-view .lsp-lp-box.is-third {
-  --lp-box-color: rgb(0, 160, 152);
+  --lp-box-color: rgb(0, 174, 247);
 }
 .lsp-cm-view .lsp-lp-box-title {
   color: var(--lp-box-color, var(--text-accent));
   font-family: var(--font-text);
   font-weight: 600;
+}
+/* A dark scheme colour (elegantbook's color=black) would be unreadable on a dark background:
+   the head keeps its hue, lightened; the border and background keep the colour itself. */
+.theme-dark .lsp-cm-view .lsp-lp-box-title {
+  color: oklch(from var(--lp-box-color, var(--text-accent)) max(l, 0.72) c h);
 }
 .lsp-cm-view .lsp-lp-qed {
   margin-left: 0.5em;
@@ -491,6 +514,44 @@
   opacity: 0.85;
 }
 /* shared:editor.css end */
+
+/* Live preview, LaTeX's own (latexLive.ts): a proof's \end line shows its mark at the right. */
+.ll-editor-content .cm-line.ll-qed-line {
+  text-align: right;
+}
+/* PDF crops (blockCrop.ts): a paper card around the crop, scaled down in a narrow pane. */
+.ll-editor-content .lsp-lp-paper.ll-crop {
+  vertical-align: top;
+}
+.ll-editor-content .ll-crop > img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+/* The block goes on over a page break; only its first page is cropped. */
+.ll-editor-content .ll-crop-continues {
+  padding: 2px 6px;
+  border-top: 1px dashed #bbb;
+  color: #666;
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller);
+  text-align: center;
+}
+/* A fragment compile in the render hover (fragments.ts): TeX's own output on paper. */
+.ll-editor-content .lsp-lp-paper.ll-fragment {
+  vertical-align: top;
+}
+.ll-editor-content .ll-fragment > img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+/* The render hover without a rendering: why (a block changed since the last compile). */
+.ll-editor-content .ll-render-note {
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+}
 
 /* LaTeX syntax colors, theme-variable driven */
 .ll-comment {

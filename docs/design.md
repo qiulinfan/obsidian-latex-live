@@ -58,6 +58,8 @@ LatexSession(root) -> Compiler: 串行队列，最多一个在跑、一个在等
     （规范化，按文档顺序：`\input` 的文件、本地宏包的语句排在它们被读入的位置；一个文件里定义的
     `\nc` 这类别名在之后读入的文件里也认），和 MathJax 读不了的定义（`unsupported`）。
   - `aux.ts`：输出目录下所有 `.aux`（`\include` 的在 `chapters/*.aux`）里的 `\newlabel`：编号、页码、hyperref 锚点。
+  - `fragment.ts`：悬停的真实 TeX 片段编译（P6）：用根文档的引擎和导言区（pdfLaTeX 用编译留下的导言区格式）在
+    构建目录的 `snippets/` 里编译一个 preview 环境，按内容哈希缓存，每个主文件一个队列。
 - `src/session.ts`：每个主文件一个会话，由预览视图引用计数，最后一个预览关闭或切走时销毁并杀掉进程。
 - `src/preview/pdfRenderer.ts`：用 Obsidian 自带的 pdf.js，按需渲染可见页；
   新 PDF 渲染完成后才替换旧画布，重新编译不闪烁、保持滚动位置；离屏页面的画布会回收。
@@ -228,24 +230,51 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
 - 所有预览面板都跟随当前激活的 LaTeX 编辑器，暂时没有"固定"某个文档。
 - 默认不开 `-shell-escape`（minted 等需要在设置里打开）。
 - 只在 macOS 上测过；Windows 路径和进程树清理写了但没有验证。无进展看门狗在 Windows 上不生效（没有进程组 CPU 时间）。
-- 悬停渲染只用 MathJax 3.2.2：tikz-cd、`\intertext`、`\llbracket`、`\oiint` 等画不出来（显示 MathJax 的报错和源码，
-  等 P5 的 PDF 裁剪）；TikZ 图（tikzpicture、tikzcd、pgfpicture、circuitikz）里的节点公式不扫描，悬停和实时
-  预览都不管，也等 P5。没有 `\label` 的编号行不显示编号
-  （MathJax 的 tags 是关的）。定义体里用到带 `@` 的内部命令的宏（本地宏包里常见）和 `m o` 这类
-  `\newcommand` 表达不了的 xparse 参数说明，悬停时报“MathJax cannot read the project's \set: …”
-  （等 P6 的真实 TeX 片段编译），不会退回 MathJax 自带的同名命令（braket 的 `\set` 会画出 `{M}[…]`）；
+- 悬停渲染先用 MathJax 3.2.2；tikz-cd、`\intertext`、`\llbracket`、`\oiint` 这类它画不出来的，预览开着、公式和上次编译时
+  一样时是 PDF 裁剪（见下面 P5 一条），否则是真实 TeX 的片段编译（P6，见下文；关掉设置时显示 MathJax 的报错和源码）。
+  TikZ 图（tikzpicture、tikzcd、pgfpicture、circuitikz）里的节点公式不扫描，整个图是一个裁剪。没有 `\label` 的编号行不显示编号
+  （MathJax 的 tags 是关的；片段编译也一样，用带星号的环境加 `\tag`）。定义体里用到带 `@` 的内部命令的宏（本地宏包里常见）和
+  `m o` 这类 `\newcommand` 表达不了的 xparse 参数说明，MathJax 报“MathJax cannot read the project's \set: …”，然后由片段编译
+  画出来，不会退回 MathJax 自带的同名命令（braket 的 `\set` 会画出 `{M}[…]`）；
   `\makeatletter` 块里定义的命令仍然跳过。公式里的 `\ref` 一族（`\cref`、`\autoref`、`\pageref`、`\nameref`）
   和实时预览的标签一样换成文字（P3）。
   `\providecommand` 只看项目里前面有没有定义过同名命令，不看 MathJax 自带的命令。
 - 实时预览的文本构造（P3）：标题的 `{title}`、强调命令的参数、`\item[..]` 的标签都必须在同一行里闭合；
   `\autoref`/`\cref` 的类型名只按 hyperref、cleveref 的英文默认名，加上项目里的 `\<type>autorefname`、
   `\crefname`/`\Crefname`、`\newtheorem` 标题和 cleveref 的 `capitalise`/`noabbrev` 算：babel 的其他语言名、
-  `\creflabelformat`、cleveref 的 `nosort`/`nocompress`、hyperref 退回的 `\<type>name`（listings 之外）都不跟；
+  `\creflabelformat`、cleveref 的 `nosort`/`nocompress`、hyperref 退回的 `\<type>name`（listings 和定理表里有名字的
+  环境之外）都不跟；
   中文文档也是英文名（ctex 和 elegantbook 都不定义，PDF 里就是这样）。引用标签总是 “作者 年份”，不跟
   biblatex/natbib 的数字样式；`\S`、`\term{..}` 这类命令保留源码。定义（`\newcommand` 等）一直跳到第一个
   大括号外的换行，同一行后面的内容也不装饰。`\iffalse` 只在行首时当注释跳过（`\let\ifx\iffalse` 是代码）；
   打到一半、还没有 `\fi` 的 `\iffalse` 一直跳到文末，和 TeX 一样。enumitem 的 `resume` 只跟列表的嵌套，
   不跟定理之类别的环境的分组（enumitem 在那里恢复不到）。
+- 实时预览的定理框和图片（P4）：定理框的 `\begin`（参数和紧跟的 `\label` 可以在同一行）和 `\end` 必须各自独占一行、
+  在 200 行内闭合；编号来自 .aux 里这个框的标签（elegantbook 的 `{title}{label}`，或 `\begin` 行上、下一行开头的
+  `\label`）；没有标签的框只在 `\include` 进来的章节里、且那一章 .aux 的 `\@setckpt` 计数对得上时按位置数出编号
+  （见下文“P4–P6 的审查修复”），`\input` 进来的文件、单文件文档、`thmcnt=section`、打字后多出来还没编译的框只显示名字；
+  elegantbook 的语言
+  只分 cn 和其他（其他语言用英文名），`nocolor` 用默认强调色；thmtools 的 `\declaretheorem`、ntheorem 和不在项目
+  目录里的宏包定义的定理环境不认；amsthm 的 `\qedsymbol` 改了也显示 □；elegantbook 的 `example` 在 PDF 里编号和标题
+  之间没有空格，这里加了一个。图片只认独占一行的 `\includegraphics`，按主文件目录和最后一个 `\graphicspath` 找
+  （不查 TEXINPUTS：路径里有宏、或者项目里找不到的不带路径的名字保留源码、不加虚线下划线，TeX 可能在它自己的目录树里
+  找到，比如 mwe 的 `example-image-a`），`trim`/`clip`/`angle`/`page` 等选项不跟；vault 外的位图、eps 不显示（保留源码和
+  虚线下划线）；PDF 只显示第一页、白底。PDF 的第一页是异步画的（画的时候公式照常渲染，异步渲染按种类排队）。
+- PDF 裁剪（P5）：要开着预览（会话里才有编译开始时的源文件快照），块的文本要和那时磁盘上的一样（改过、编译开始时
+  没打开的文件、预览关着都不裁）。tcolorbox（elegantbook fancy 模式的定理框）里面的块不单独裁：pgf 移动了框里的内容，
+  SyncTeX 报的位置低约 20 pt；框里的显示公式悬停用 MathJax，框里的图悬停显示整个框。实时预览只裁 TikZ 图、表格和
+  MathJax 拒绝的独占整行的显示公式；行内公式从不裁（SyncTeX 只到行）。跨页的块只裁第一页。几何规则是在两本合成书和
+  一个 pdfLaTeX 文档上量出来的（见下文 P5 一节）：在分页处、不在正文里的 TikZ 图和表格可能带进上一页送出时留下的盒子；
+  用 PDF 变换缩放的块（`\resizebox`、adjustbox、graphicx 的 `width=`）SyncTeX 记录的是原始尺寸，只靠前后行限制。
+  裁剪第一次画时是异步的（35–70 ms，裁剪一次画一个，公式照常渲染）；画好以后是同步的。上一行正文的字形墨迹伸到它的
+  TeX 深度以下时（Fandol），裁剪顶边可能带一点墨点（没处理：要按墨迹裁掉贴着顶边的一条，需要在 Chrome 里核对）。
+- 片段编译（P6）：只给悬停用（实时预览和光标处预览不用：每次按键编译太贵）。片段按自己的计数器编号：定理框取实时预览
+  框头的编号（标签的 .aux 编号，或 `\include` 的章节里数出来的编号），都没有时从 0 编起（`\input` 进来的文件里没加标签的
+  elegantbook `例题` 显示 0.1）；浮动体只在 `.aux` 里有它的标签时取那个编号；带编号的公式只给有标签的行
+  `\tag`，`eqnarray` 从 1 编起；引用文献只到 `.aux` 的标签，`\cite` 显示键名（biblatex/BibTeX 的数据不带进来）。正文里的定义
+  取项目里所有正文文件的（和 MathJax 的定义一样按文档顺序，不看片段在哪一行），能重定义已有的命令；导言区只用根文档的
+  （`\input` 的文件照读）。不传 `-shell-escape`（minted 的片段失败）。XeLaTeX/LuaLaTeX 每次读整个导言区，约 1.3–1.5 s；
+  pdfLaTeX 只有 “Cache the preamble” 开着、编译留下了对当前导言区就绪的格式时才快（约 0.3 s），否则约 0.5 s。
 
 ## 下一步
 
@@ -329,8 +358,57 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
         `\iffalse` 块跳过；`\Citet`、`\citealp`、`\footcite` 等也是文献标签。
   - [ ] GUI 检查 L11（scratch vault）。
 - [ ] P4 定理框（BlockWrapper）和图片。
+  - [x] LaTeX 的定理框、图表行和图片（2026-09-29，无头部分；见下文“LaTeX 的实时预览：定理框与图片（P4）”）：
+        定理表 `src/tex/theorems.ts`（amsthm 的 proof、`\newtheorem`/`\newtheorem*`、`\elegantnewtheorem`、elegantbook
+        的内置表：标签前缀、defstyle/thmstyle/prostyle、五种配色、lang=cn 的中文名，和装好的 elegantbook.cls 对过），
+        随引用数据一起按主文件缓存、改了就重读；`latexScan.ts` 的 `env`（`\begin`/`\end` 各自独占一行的环境）和
+        `image` 构造，figure/table 的 `\begin`/`\end` 行折叠；`latexLive.ts` 的定理框（BlockWrapper、框头、`\end`
+        行折叠、amsthm 证明的 □）和图片部件（`src/tex/graphics.ts` 按 `\graphicspath` 和 graphicx 的扩展名找文件，
+        vault 里的文件走 Obsidian 的资源地址，PDF 用 pdf.js 画第一页）；`\autoref` 跟 hyperref 退回的 `\<type>name`
+        （elegantbook simple 模式的 `定义 1.1`）；扫描器的递归有深度上限（R6）。测试 T-L9（`tests/theorems.test.ts`、
+        `tests/latexLive.test.ts`）、扫描器和引用的新用例，浏览器冒烟 B6。
+  - [x] P4 的审查修复（2026-09-29，无头部分；见下文“P4–P6 的审查修复（LaTeX Live）”）：没有标签的框在 `\include` 的章节里
+        按 .aux 的 `\@setckpt` 核对后数出编号（`例题 1.1`、`定理 4.1`、附录的 `A.1`）；环境不收的参数留作文字
+        （elegantbook 的 `\begin{proof}[另一种证明]`）；`loss_lr0.01` 这类名字按 graphicx 补扩展名；路径里有宏、不带路径的
+        名字找不到时不再标错；elegantbook 的 `problemset` 按 enumerate 编号、行折叠；扫描器在没闭合的 `\text{$` 嵌套上
+        不再指数级变慢。
+  - [x] 光标在很长的环境里移动不再整篇重建（R1，2026-09-29，无头部分；见下文“P4–P6 的审查修复（LaTeX Live）”）：共享核心的
+        `LiveLanguage.reveals`，除裁剪外的 `env` 只在 `\begin`、`\end` 两行看光标；3192 行章节里 190 行的环境中移动 p50
+        0.3–0.4 ms、每次 6 次 decorate（以前 7.0–7.4 ms、6571 次）。测试 T-S5 的新用例、T-L9 的长框用例，浏览器冒烟 B5 的长框。
+  - [ ] GUI 检查 L12（scratch vault）。
 - [ ] P5 从上次编译的 PDF 裁剪（SyncTeX + pdf.js）。
+  - [x] LaTeX 的 PDF 裁剪（2026-09-29，无头部分；见下文“LaTeX 的 PDF 裁剪（P5）”）：`synctex.ts` 的 `forwardSearchAll`
+        （一行的全部记录）；会话在编译开始时读打开的本项目文件，写出 PDF 的结果带着这份快照（`session.compiled`）；
+        `src/preview/blockCrop.ts`（按文本找回编译时的行号，SyncTeX 记录按量出来的规则合成区域，最多 4 个 synctex、
+        2 s 超时、编译中不开始，按结果缓存，每个结果一个 pdf.js 文档，按设备像素比画出再裁到墨迹，纸卡片和反色）；
+        `main.ts` 的 `sessionFor(root)`；悬停链（显示公式：裁剪 → MathJax；定理类、TikZ 图、表格、浮动体：裁剪 →
+        “Changed since the last compile.”）；实时预览的 #4 和 #14（裁剪块部件，新结果的裁剪到之前保留旧的）。测试
+        T-L10–T-L12（`tests/crop.test.ts`，真实 XeLaTeX）和实时、悬停、扫描器的新用例。
+  - [x] P5 的审查修复（2026-09-29，无头部分；见下文“P4–P6 的审查修复（LaTeX Live）”）：编译进行时照样裁上一次结果
+        （第二遍和排队的编译期间裁剪不再退回源码，悬停不再等）；跨页的 tcolorbox 定理框不再带上整页；公式的 `\begin`
+        行当作前一行（段落最后一行不再露进裁剪顶边）；相同文本的块各自取最近的一处；SyncTeX 超时不再当成没有记录。
+  - [ ] GUI 检查 H5、H6、L13（scratch vault）。
 - [ ] P6 真实 TeX 片段编译兜底、光标处预览。
+  - [x] LaTeX 的片段编译和光标处预览（2026-09-29，无头部分；见下文“片段编译与光标处预览（P6）”）：`src/tex/fragment.ts`
+        （pdfLaTeX 用编译留下的导言区格式，`-fmt=<job>-preamble` 加 `TEXFORMATS`，格式旁的戳记说明它对哪个导言区就绪；
+        XeLaTeX/LuaLaTeX 或没有格式时读整个导言区，带看门狗；preview 宏包 `active,tightpage,auctex`；片段用到的 `.aux` 标签
+        `\global\@namedef{r@k}`；正文里的定义（章节自己的 `\newcommand`）；按日志里的 `Preview: Snippet n ended.(h+dxw)`
+        取盒子；每个主文件一个队列，新的替换等着的；按内容哈希缓存在 `<构建目录>/snippets`；中止、超时、会话关闭、插件卸载时
+        杀进程组；只写 `$TMPDIR`），`src/preview/fragments.ts`（用 Obsidian 的 pdf.js 画成纸卡片，反色和裁剪一样），悬停链的
+        片段一步（MathJax 失败且没有新鲜裁剪时；设置 “Compile what the hover cannot render”，`texFragmentFallback`，默认开），
+        光标处预览（共享的 `cursorPreview`，设置 “Preview the formula at the cursor”，`cursorPreview`，默认关）。测试 T-L13、T-L14
+        （`tests/fragment.test.ts`，真实 pdfLaTeX 和 XeLaTeX）和源码、日志、定义、队列、悬停链、片段正文、光标处预览的新用例。
+  - [ ] GUI 检查 H11、H13（scratch vault）。
+  - [x] P6 的审查修复（2026-09-29，无头部分；见下文“P4–P6 的审查修复（LaTeX Live）”）：插件卸载或预览关闭时正在等格式检查的
+        悬停不再启动 TeX；片段读的 `\input` 文件和图片改了会重新编译；中止或起不来的运行不留文件，`frag-*.aux` 不当成文档的
+        标签；“Render formulas on hover” 的说明写全裁剪和片段编译。
+  - [x] P4–P6 共享核心的审查修复（2026-09-29，无头部分，两个仓库相同；见下文“共享核心的审查修复（P4–P6）”）：
+        图片和裁剪的请求不带纪元（改宏不再重画 PDF 图和裁剪）；异步渲染按种类排队（裁剪或 PDF 页在画的时候公式照样渲染）；
+        展开的块里有错误诊断时下方的渲染保留（标 `is-error`）；光标处预览挂在公式最后一个视觉行下面（折行的公式不再盖住
+        正在打的那一行），实时预览不装饰时（超过 maxLines）显示公式也有；窗格底边、绘制的视口止于块时 ArrowDown 不再多跳
+        一行；深色主题下 `color=black` 的框头看得清。测试 T-S7、T-S9、T-S11、T-S13 的新用例、T-L9 的新断言，浏览器冒烟 B7、B8。
+        之后（TY-R1 的第二种情况）：CodeMirror 因为下面放不下把光标处预览翻到上面时，浮层在构造第一行的上面，不再盖住
+        显示公式的下半部分和正在打的那一行；B8 加了这种情况。
 - [ ] P7 复杂环境（多文件、elegantbook 模板）上的完整验证和实测数字。
 
 ## 环境问题：XeLaTeX 找不到 TeX Live 自带的中文字体
@@ -603,7 +681,8 @@ LaTeX 编辑器切到实时预览：公式原地渲染，光标碰到时显示�
   标签的提示框写出每个键的作者、年份和标题。
 - **`\label`**（公式外）：淡色的键名标签。
 - 导言区、注释、verbatim（含 tcblisting、fancyvrb、filecontents）、行首 `\iffalse` 到 `\fi` 的块、定义（`\newcommand`
-  等，宏文件没有 `\begin{document}` 也不会被装饰）、`\footnote` 命令本身、定理框和图表环境（P4）、TikZ 图（P5）不装饰；
+  等，宏文件没有 `\begin{document}` 也不会被装饰）、`\footnote` 命令本身、TikZ 图和表格（P5）不装饰（定理框和图表环境
+  见下文 P4）；
   根文档在 `\begin{document}` 之前 `\input` 的文件（`preambleFiles`：拆出去的 `setup.tex` 里的 `\hypersetup`、`\tcbset`、
   `\setlist`、`\title{$L^2$}`）整个没有构造，和 `.sty`/`.cls`/`.bib` 一样；带错误诊断的构造保留源码。
 
@@ -660,3 +739,364 @@ cleveref 的选项、`\crefname`/`\Crefname`、`\newtheorem`、`\<type>autorefna
 - 测试：新增的 15 个用例（`tests/latexRefs.test.ts` 4 个，扫描器 6 个，高亮 2 个，T-L8 的原地 `\item` 标签，
   `preambleFiles`，TexView 的导言区文件）在修复前的代码上都失败；全部 359 个测试通过，`npm run check`、
   `npm run build`、`test:yolo`（18/18）通过。GUI 检查仍然待做。
+
+## LaTeX 的实时预览：定理框与图片（P4，2026-09-29）
+
+实时模式下再加三类构造（design 4.4 #12、#8 的 figure/table、#13），光标规则和前面一样：
+
+- **定理框**：项目的定理表（`src/tex/theorems.ts`，纯函数，输入是项目源文件去掉注释后的文本，主文件在前）里的环境，
+  `\begin`（连同同一行的参数和紧跟的 `\label`）和 `\end` 各自独占一行时，整段画成一个 BlockWrapper 框
+  （`lsp-lp-box`，颜色角色 `is-main|is-second|is-third`，elegantbook 的配色写进 `--lp-box-color`；上下外边距和内边距都是 0，
+  间距只靠行）。`\begin` 行显示 PDF 印出来的框头：`定理 1.1 (全期望公式)`（elegantbook）、`Theorem 2.1 (Cauchy–Schwarz).`
+  （amsthm 带句点）、`例题 1.1 抛硬币`（elegantbook 的 example 标题跟在编号后）、`Proof.`/`Proof of theorem 2.1.`（amsthm 的
+  proof，可选参数替换名字）、`证明`；编号来自 .aux 里这个框的标签：elegantbook 的 `{title}{label}` 按前缀变成 `thm:label`，
+  否则是 `\begin` 行上或下一行开头的 `\label`。标题里有公式或引用时不换成文字：标题留在原处（和框头一个样式），两边的
+  框头部分是标签，公式照常渲染。`\end` 行折叠；amsthm 的 proof 在那一行靠右显示 □（elegantbook 的 proof 没有结束符）。
+  光标在 `\begin` 行或 `\end` 行上时只有那一行显示源码；正文是普通文字，在里面打字框不变；框可以嵌套；不在定理表里的
+  环境（`unknown`、`minipage`、`abstract`…）保持源码；某一行有错误诊断时那一行保持源码，框还在。
+- **定理表**：amsthm 的 proof（ctex 的类或 ctex 宏包时叫 证明）；`\newtheorem{env}[shared]{Title}[within]` 编号、
+  `\newtheorem*` 不编号，用 amsthm（或 AMS 文档类）时框头带句点；elegantbook 的七个 tcolorbox 定理（参数 `g o t\label g`，
+  前缀 thm/def/pos/axi/cor/lem/pro，defstyle=main、thmstyle=second、prostyle=third）和它们的带星号形式，simple 模式下是
+  amsthm 定理；example/exercise/problem（编号）、note、proof、solution、remark、assumption、conclusion、property、
+  custom{名字}；名字按 `lang=cn`（中文）或其他（英文）；配色按 `color=green|cyan|blue|gray|black` 或裸的配色名，
+  默认 blue（`\DeclareStringOption[blue]{color}`，所以合成书的框是 main 0,166,82、second 255,134,24、third 0,174,247）；
+  `\elegantnewtheorem{env}{名字}{style}{prefix}`（前缀缺省是环境名）。`tests/theorems.test.ts` 把这张表和装好的
+  elegantbook.cls（v4.6）逐项对照：五种配色的 RGB、cn/en 的 17 个名字、七个定理的前缀和样式。
+  定理表和引用数据一起读（`TexRender.refsOf(root).theorems`）：项目文件保存后 300 ms、改到 `\documentclass`、
+  `\usepackage`、`\newtheorem`、`\elegantnewtheorem`、`\graphicspath` 这些行后 500 ms 重读，内容不变就不换对象。
+- **引用的类型名**（P3 推迟的一项）：用合成探针对过 PDF（TeX Live 2026）：`\newtheorem{thm}{Theorem}` 的 `\autoref` 只印编号
+  （amsthm 不定义 `\thmname`，hyperref 没有名字可退），所以标签本来就对；hyperref 找不到 `\<type>autorefname` 时退回
+  `\<type>name`，elegantbook 在 simple 模式下锚点是 `definition.1.1`，印 `定义 1.1`（`\theoremautorefname` 是 hyperref 的
+  Theorem，优先）；fancy 模式的锚点是 `tcb@cnt@definition`，只印编号；elegantbook 的框用 cleveref 时印 `?? 1.1`。
+  现在 `refNames` 从定理表取 `\<env>name`（有名字的环境）和 cleveref 用的 `\newtheorem` 标题，这几种都和 PDF 一致。
+- **图表行**：figure、figure*、table、table* 独占一行的 `\begin`（带 `[htbp]`）和 `\end` 行像列表一样折叠。
+- **图片**：独占一行的 `\includegraphics[..]{f}` 换成块部件（最高 320 px），文件按 graphicx 的规则找（`src/tex/graphics.ts`）：
+  相对主文件目录，再加最后一个 `\graphicspath` 的前缀；没有扩展名时依次试 pdf、png、jpg、jpeg（和大写）。
+  png/jpg/jpeg/gif/svg 用 Obsidian 的资源地址（`app.vault.adapter.getResourcePath`）显示，PDF 用 Obsidian 的 pdf.js
+  （带 `PDFJS_ASSETS` 的 cMap）画第一页再转成 PNG；语言模块只拿到注入的 `image(path)`，保持纯函数。找不到的文件、
+  不支持的格式（eps）、vault 外的位图保留源码加虚线下划线，提示框写原因。光标在那一行时显示源码，图片留在下面
+  （和 Obsidian 的嵌入一样，不跳动）。解析结果按主文件缓存：vault 里新建、删除、重命名文件时清空，保存了某张图时只清它
+  （请求里带修改时间，图片重新渲染）。
+- **扫描器**：`env` 构造（除列表、center、figure、table、公式、verbatim、TikZ 之外，`\begin`/`\end` 各自独占一行、
+  200 行内闭合的环境，带 `\begin` 行上的参数和标签，按名字配对，没闭合的里层环境丢掉）先占住 `\begin` 的位置，
+  构造保持文档顺序；参数照常扫描（标题里的公式是构造）。`image` 构造。文字参数里的公式再嵌套文字参数最多 8 层，
+  更深的按普通数学读，两万层的病态输入也不会栈溢出（R6）。
+
+验证（2026-09-29，不入库的脚本在 scratchpad 的 `impl-p4/`）：
+
+- 测试：T-L9（`tests/theorems.test.ts` 5 个：`\newtheorem`、elegantbook 的语言/模式/配色、`\elegantnewtheorem`、夹具书、
+  和装好的 elegantbook.cls 对照；`tests/latexLive.test.ts` 4 个：夹具书的框头/编号/配色、`\begin`/`\end` 行分别展开和
+  正文编辑、amsthm 的句点/□/嵌套/下一行的标签/错误诊断、figure/table 行和图片（PNG、PDF 第一页、找不到、eps、
+  `\graphicspath`、新建文件、改了的图重新渲染）），扫描器 3 个（`env` 的参数和标签、图片、深嵌套），`\autoref` 退回
+  `\<type>name` 的 1 个；全部 372 个测试通过，`npm run check`、`npm run build`、`test:yolo`（18/18）通过；浏览器冒烟
+  25/25（新增 B6：两个紧挨着的框，ArrowDown/ArrowUp 一行一行经过框头、正文、显示公式、折叠的 `\end` 行，行号偏差 0 px）。
+- 合成项目的新拷贝，用插件的 `Compiler` 编译两遍后在 jsdom 里把每个 `.tex` 以实时模式挂到真实编辑器栈上：
+  latex-elegantbook（XeLaTeX，10 页）ch1–ch3 共 17 个框，编号都来自 .aux（`定义 1.1`、`定理 2.1`、`命题 2.1`、`引理 3.1`、
+  `推论 3.1`…），颜色是默认的 blue 配色；latex-article（pdfLaTeX，3 页，本地宏包里的 `\newtheorem` 和 amsthm）5 个框头，
+  Ghostscript 从 PDF 取出的文字里全都有（`Definition 2.1 (Linear reconstructor).`、`Lemma 2.2.`、`Proof of Theorem 2.2.`、
+  `Theorem 3.1.`、`Remark.`）；三个项目的 3 张图（含没有扩展名的 `figures/heatmap`）都找到。多文件流程：在 ch1 开头插入
+  带标签的新定理，编译后 ch1 的框头变成 `定理 1.1 (新定理)`，原来的全期望公式变成 `定理 1.2`；在 main.tex 里保存
+  `\elegantnewtheorem{fact}{事实}{prostyle}{fac}`，ch3 里（未保存）新写的 `fact` 框 332 ms 后出现（300 ms 防抖，third 色），
+  编译后是 `事实 3.1 (一个事实)`。
+- 无头 Chrome（Obsidian 的 app.css 深色、插件 styles.css、Obsidian 的 MathJax 和 pdf.js 5.3.34），同一本书的编译拷贝，
+  ch2 另加一张 pdfLaTeX 画的 TikZ PDF 图：ch1（98 行）、ch2（124 行）、ch3（90 行）行号和行的偏差都是 0 px，框的上下
+  外边距和内边距都是 0，ArrowDown 到末行、ArrowUp 回首行，每一行都按顺序经过（折行的长行多按几次）；光标在定理的
+  `\begin` 行时只有这一行显示源码；heatmap.png 按原尺寸 400×240 显示，PDF 图由 pdf.js 画成 187×149 的 PNG，图片加载后
+  偏差仍是 0 px。ch1–ch3 重复成 3121 行（170 个定理类的框、图片）：实时模式挂载 6.5 ms、在框的正文里打字 p95 5.0 ms、
+  光标 p50 0.3 ms / p95 1.6 ms、滚 20 屏帧 p90 16.7 ms、切到实时 8.6 ms、切回源码 4.2 ms；ch1 单独光标 p50 0.2 ms、
+  框里打字 p95 1.7 ms。
+- 和并行修改中的共享核心（obsidian-tinymist 的 `src/editor/shared/`，拷到 scratch 里的仓库副本）一起跑：实时预览相关的
+  110 个测试和冒烟 B1、B4、B6 通过。GUI 检查 L12 仍然待做。
+
+## LaTeX 的 PDF 裁剪（P5，2026-09-29）
+
+MathJax 画不了的块（TikZ 图、表格、MathJax 拒绝的显示公式）和悬停时想看 PDF 原样的块（定理框、浮动体），从预览
+上一次编译的 PDF 里裁出来（design 4.6、4.8；`src/preview/blockCrop.ts`，不依赖 obsidian 模块，pdf.js 由 main.ts 传入）。
+共享核心同时同步到了 obsidian-tinymist 的新版本（新纪元时构造保留旧的渲染直到新的到来、`cursorPreview`），
+LaTeX 这边的调用不用改。
+
+- **新鲜度**：会话在每次编译开始时从磁盘读一遍打开在编辑器里的本项目文件（主文件、上次编译的依赖、主文件目录下的
+  文件；通常一到三个，不到 1 ms），写出 PDF 的结果带着这份快照（`session.compiled`，`seq` 全局递增）。块只有在它现在的
+  文本出现在快照里时才裁：离它现在所在行最近的那一处就是编译时的行号（文本搜索，不做变更映射：上面插入两行后按行号
+  查，会查到旁边的块）。改过、编译开始时没打开、没有预览（没有会话）都不裁。
+- **SyncTeX 的记录**：`forwardSearchAll` 返回一行的全部记录（原来的 `parseView` 只取第一条）。查块里面的行（最多 12 行：
+  前 6 后 6）、`\end` 行，和块前后最近的非空、非注释行；不查 `\begin` 行。在合成书、合成文章和一个手写的 pdfLaTeX 文档上
+  逐个渲染出来看过之后定下的规则（`cropRegion`，按 CropKind）：
+  - 一行没有排出东西时，SyncTeX 返回邻近行的记录：`\begin{align}` 返回上一行正文；align 的一行续到下一行时，第一行也
+    返回上一行正文；浮动体的 `\end{figure}` 返回图后面的正文。和前一行相同（块的 `\end` 行没有）、和后一行相同（块里面
+    没有）的记录丢掉。
+  - elegantbook 的 tcolorbox 定理框：`\end` 行的记录就是整个框（连标题），框里的内容 SyncTeX 报得比实际低约 20 pt（pgf
+    用 PDF 变换移动了内容，SyncTeX 看不到）。所以框只取 `\end` 行，框里的东西不单独裁（latexLive 的 `cropKindOf`）。
+    design 为框定的“上 18 pt、下 6 pt”的边距不再需要。
+  - tikz-cd 的单元格记录在 TeX 放它们的位置，不在 pgf 画的位置（显示公式里差 (−35, +20) pt），`\end{tikzcd}` 行报告的
+    图片框才包住墨迹。图和表取里面的记录，加上 `\end` 行里包住它们的框，但不取段落行（段落中间的 tikz-cd 的 `\end`
+    行也报整行，连两边的文字）。
+  - 分页时输出例程在读块的时候把上一页送出，那一页的许多盒子都带着块的行号（多行公式正好在分页处时，区域盖满整页）：
+    正文里的块（公式、定理类）只取前一行下面的记录；第一页只剩不到 12 pt 的一条时从下一页开始。
+  - 公式扩到正文宽度（记录可能缺一边，比如 `A =`）；所有的块上下不越过前后行（边距会带进前后行的下伸部分，tikz-cd 的
+    图片框比墨迹高约 20 pt，graphicx 缩放的图 SyncTeX 记录原始尺寸）。
+  - 上下 4 pt、左右 1.5 pt 边距，裁到页面内；跨页的只裁第一页，卡片下写 “Continues on the next page”。画出来以后再裁到
+    墨迹（非白像素）外加 4 pt：居中在整行里的表格就只剩表格。
+- **调度和缓存**：最多 4 个 `synctex view` 同时跑，每个 2 s 超时（超时、被杀或起不来的查询让这个区域失败，下次渲染
+  重查，不当成“没有记录”）；编译进行时照样查上一次结果（审查修复后，见下文；原来会话编译时不开始新的查询，实时视图的裁剪
+  在第二遍、排队的编译期间退回源码）；`.synctex.gz` 的修改时间不是结果落地时记下的那个（后一遍刚写完）就安静地失败。按结果缓存：区域按（文件、编译时的行号、种类），画好的图按区域，画好之后同步返回（新纪元、反色、悬停都
+  不再等）。每个结果一个 pdf.js 文档，第一次用时从 `compiled.pdf.slice()` 加载（带 `PDFJS_ASSETS`），下一个结果或会话
+  关闭时销毁。图是 PNG 的 blob URL（实时预览的缓存最多留 2000 个渲染，data URL 会一直占着内存），晚一个结果才撤销。
+  插件卸载时杀掉还在跑的 synctex。
+- **外观**：白底纸卡片（`lsp-lp-paper`），深色主题下按预览的 “Invert preview colors” 反色（`is-inverted`，是请求的一部分，
+  换主题或改设置时视图重建）；窄窗格里等比缩小。
+- **实时预览**：#14 TikZ 图（tikzpicture、tikzcd、pgfpicture、circuitikz；扫描器现在把 `\begin`/`\end` 各自独占一行的
+  TikZ 图也报成 `env`，里面仍然不扫描）和表格（tabular、tabular*、tabularx、longtable）；#4 MathJax 拒绝的、独占整行的
+  显示公式。新鲜时是块部件，光标在它的行上时显示源码，下面没有预览（那是旧的）。新结果到来时视图重建，新的裁剪画好之前
+  还显示上一次的（`locate` 返回这个块上一次画出来的请求，语言层自己保留）。改过或裁不出来时：#14 是源码（表格里的公式照常
+  渲染），#4 是 MathJax 的报错。编译结束（结果或失败）、预览关闭、换主题或改反色设置时通知渲染器重建。
+- **悬停链**：`TexRender.hoverTarget` 取指针所在的公式，否则取包住它的最内层能裁的块（TikZ 图、表格、定理类、figure 和
+  table 浮动体；tcolorbox 里的图算作整个框）。独占整行的显示公式：新鲜的裁剪 → MathJax（编译中不等）；行内公式只用
+  MathJax；块：新鲜的裁剪（会话第一次编译时等它结束）→ 改过时显示 “Changed since the last compile.”；没有预览或还没编译时没有这一段
+  （只有 texlab 的悬停）。P6 在裁剪和提示之间加了片段编译（见下一节）。
+
+验证（2026-09-29，不入库的脚本在 scratchpad 的 `impl-p5/`）：
+
+- 测试：`tests/crop.test.ts` 9 个。5 个纯函数用例（`compiledLines` 取最近的一处，`queryLines`，`cropRegion` 的借来的记录、
+  tcolorbox、图片框和段落行、分页残留、跨页）；T-L10（真实 XeLaTeX 编译夹具书：align 的区域在定理框下面、`\[..\]` 上面，
+  `\begin{align}` 行返回上一行，行内公式的一行是整行，tikz-cd 从它上面的正文行下面开始，tabular 在它的浮动体里）；T-L11
+  （上面插入两行后仍映射回编译时的 18–21 行，改过的块 “Changed since”，编译时没打开的文件，编译中只有查过的块，没有会话）；
+  T-L12（新的一次编译进行时同时查询，dispose 后记录下来的 synctex 和 xelatex 进程都退出了，`pgrep -f` 输出目录为空）；
+  会话的快照（小的 pdfLaTeX 项目：只含本项目打开的文件、CRLF 变成 LF、每次编译一个新快照、`seq` 跨会话递增、没写出 PDF
+  的编译保留上一次的）。
+  `tests/latexLive.test.ts` 2 个（#4/#14 的裁剪部件、展开、改过、tcolorbox 里不裁、新结果的裁剪到之前保留旧的、裁不出时
+  回到源码或 MathJax 的报错），`tests/texRender.test.ts` 1 个（悬停链），`tests/latexScan.test.ts` 2 个（TikZ 的 `env`、
+  `blocks`/`blockAt`）。全部 391 个测试通过，`npm run check`、`npm run build`、`test:yolo`（18/18）、浏览器冒烟 25/25。
+- 几何：合成书（XeLaTeX，10 页）的 36 个候选块、合成文章（pdfLaTeX，3 页）的 18 个和手写 pdfLaTeX 文档（段落中间的
+  tikz-cd、行内的表格、amsthm 定理和证明、center 里的 tikzpicture）的 8 个，区域用 Ghostscript 渲染出来逐个看过，都对；
+  上面的规则都是在这一步发现问题后加的。
+- 延迟（合成书的新拷贝，`impl-p5/browser`）：
+  - SyncTeX（Node，真实的 `synctex view`，最多 4 个同时）：每个块 3–14 次查询，p50 9.2 ms，最大 19.1 ms。
+  - 无头 Chrome（Obsidian 的 pdf.js 5.3.34 和它的 cMap、深色 app.css、dpr 1），`CropService` 本身，SyncTeX 经 HTTP 转发到
+    真实的 synctex：36 个块全部裁出，中文字形正常；pdf.js 打开文档 58–62 ms（每个结果一次）；一个块从请求到卡片（SyncTeX、
+    区域渲染、裁到墨迹、PNG）p50 35–38 ms、p90 66 ms、最大 82 ms（第一个 148 ms，含打开文档）；同一个块再次请求 0 ms。
+    没有 cMap 时中文字形全部消失（重现了 P0 的问题，Obsidian 自己带着这些资源）。
+  - dpr 2 下 ch2 的实时视图在还没裁过的结果上第一次挂载：两个裁剪（tikz-cd #4、tabular #14）和全部公式 429 ms 内到位。
+  - ch2（118 行）、ch3（90 行，`\intertext` 的 align 是 #4）、tikz-projection.tex（16 行）的实时模式：裁剪部件没有上下外边距、
+    图片已加载，行号偏差 0 px，ArrowDown 逐行经过每一行（包括裁剪块）；光标在 tikz-cd 里时显示源码、下面没有预览，表格的
+    裁剪还在；有裁剪时光标 p50 0.2 ms、打字 p95 1.3 ms。反色卡片和悬停定理框的裁剪也看过。截图 `impl-p5/browser/p5-*.png`。
+- 发现（共享核心，没改）：光标在窗格底边、下面紧接着一个块部件、而这个块正好是 CodeMirror 渲染视口的最后一块时，ArrowDown
+  会跳过块后面的那一行：那一行不在 DOM 里，CodeMirror 的 `posAtCoordsImprecise` 多估了一行，`enterBlocks` 因为中间隔着
+  一行可见的行而不纠正。在 ch3 的 MathJax 公式块（68–74 行）上复现：渲染视口是 [1, 74] 时从 67 行下移到 76 行，块在视口
+  中间时到 75 行。和裁剪无关，MathJax 块一样。
+- GUI 检查 H5、H6、L13 仍然待做。
+
+## 片段编译与光标处预览（P6，2026-09-29）
+
+MathJax 画不了、又没有新鲜 PDF 裁剪的东西，悬停时用文档自己的引擎和导言区真的编译一次（design 4.7、4.8）；光标所在的公式
+可以浮在它下面随打字更新（design 3.1 的 `cursorPreview`）。
+
+- **片段**（`src/tex/fragment.ts`，不依赖 obsidian 模块）：每次一个 `.tex`，写在构建目录的 `snippets/` 里（`$TMPDIR`，从不写进
+  vault），在根文档的目录里运行（`\input`、图片按文档里的路径找到），自己的进程组。
+  - 导言区：pdfLaTeX 在编译留下的导言区格式就绪时用它（`-fmt=<job>-preamble`，`TEXFORMATS=<构建目录>:`，和编译一样按名字）：
+    文件开头是占位的 `\documentclass{article}` 和 `\endofdump`（格式从这里接着读），再接根文档自己 `\endofdump` 之后的
+    导言区。格式是否“就绪”看它旁边的戳记 `<job>-preamble.json`（`compiler.ts` 的 `readyPreambleFormat`：导言区的键和导言区读过的
+    本项目文件的修改时间；编译器开始重建格式前删掉它、建好才写，格式坏了也删），所以预览没开、插件重启之后也能用上一次留下的
+    格式。XeLaTeX、LuaLaTeX 或没有格式时读根文档 `\begin{document}` 之前的整个导言区，带看门狗（8 s 没有日志增长、也不占 CPU 就
+    停，给出字体下载的提示）。超时 pdfLaTeX 10 s、其他 20 s，杀整个进程组。格式坏了（“Fatal format file error”）用整个导言区重试。
+  - 然后是 `\usepackage[active,tightpage,auctex]{preview}`（每个片段一页，`auctex` 把盒子写进日志，还带 `\nofiles`：不写 `.aux`）、
+    片段里提到的标签（上次编译 `.aux` 的 `\newlabel` 原样，`\global\@namedef{r@k}{..}`，cleveref 的 `k@cref` 一起），
+    `\begin{document}` 之后是正文里的定义（`fragmentContext`：根文档正文和正文读入的文件里的 `\newcommand` 等，章节自己的 `\Lip`
+    也在；临时让 `\@ifdefinable` 放行，所以能重定义）和每个片段一个 preview 环境。不是行内的片段末尾加一个空行
+    （`\par\hbox{}`）：显示公式之后 preview 量到的盒子停在最后一行的基线，下伸部分会被页面切掉（合成文章的 `\intertext`
+    align 就是这样），空行让它包进来，多出来的白边画的时候裁掉。
+  - 结果：日志里的 `Preview: Snippet n ended.(h+dxw)`（sp）是第 n 页的盒子，`Preview: Tightpage` 是四边的留白（0.50001bp）；
+    报错按文件和行归到片段，片段自己的行里有错就算失败，导言区的错只在片段没有盒子时才算。
+  - 缓存：按内容哈希（引擎、生成的源文件、调用方给的戳记：导言区读的文件和格式的修改时间），`frag-<哈希>.pdf` 和 `.json`
+    留在 `snippets/` 里，超过 200 个删最旧的；一次运行的其他文件都删掉。超时、卡住或没写日志的不缓存。
+  - 队列（`FragmentQueue`）每个主文件一个：缓存命中直接返回；同时只跑一个、等一个，新的请求替换等着的那个（它得到 null，
+    悬停不显示）。会话关闭（`releaseSession`）和插件卸载时停掉正在跑的（杀进程组）。
+- **悬停里的样子**（`src/preview/fragments.ts` 的 `FragmentService`，pdf.js 由 main.ts 传入）：每次按编辑器里的内容（主文件未保存
+  的也算）现拼任务；页面用 Obsidian 的 pdf.js 按设备像素比画出来，四周留 3 pt，显示公式和块裁到墨迹，行内公式保留整个盒子；
+  白底纸卡片 `lsp-lp-paper ll-fragment`，和裁剪一样按 “Invert preview colors” 反色；画好的图是 PNG data URL，记住最近 50 个。
+- **悬停链**（`texRender.ts`）：公式先用 MathJax；失败时（不是括号不配对：TeX 也会停在那里）走片段编译，TeX 也失败时仍显示
+  MathJax 的报错和源码。独占整行的显示公式：新鲜的裁剪 → MathJax → 片段。块（TikZ 图、表格、定理类、浮动体）：新鲜的裁剪
+  （会话第一次编译时等它结束）→ 片段（失败时显示 TeX 的报错）→ “Changed since the last compile.”。设置 “Compile what the hover cannot
+  render”（`texFragmentFallback`，默认开）关掉这一步。片段在 400 ms 后还没好时悬停先显示转圈（共享 `renderHover` 的规则）。
+  片段的正文（`fragmentBody`）：带编号的公式环境换成带星号的，有 `.aux` 编号的行加 `\tag{n}`（和 MathJax 悬停一样，删掉 `\label`
+  留下的空行也删掉，否则是段落结束），`eqnarray` 不动；定理框和浮动体从它的标签在 `.aux` 里的 hyperref 锚点找到计数器，把
+  `\the<计数器>` 定成那个编号（`thm:x` 的锚点 `tcb@cnt@theorem.3.1` 印 `定理 3.1`）；浮动体换成 `\linewidth` 的 minipage、
+  `\@captype` 是它的类型（浮动体放不进 preview 的盒子），图注照样编号。
+- **光标处预览**（`texExtensions.ts` 的 `texCursorPreview`，设置 “Preview the formula at the cursor”，`cursorPreview`，默认关）：
+  光标所在的公式渲染在它最后一行下面，打字时在同一个浮层里更新。行内公式两种模式都有；显示公式只在源码模式（实时预览里独占
+  整行的公式是块，展开时下面已经有渲染；在正文里的显示公式照样有）。只用 MathJax（`TexRender.preview`，不走裁剪和片段），
+  失败时保留上一次的渲染并标出来；补全列表打开时隐藏；`.sty`/`.cls` 里没有。
+
+验证（2026-09-29，不入库的脚本在 scratchpad 的 `impl-p6/`）：
+
+- 测试：`tests/fragment.test.ts` 8 个：源文件（格式的占位和整个导言区、只带片段提到的标签和 cleveref 的孪生标签、能重定义的
+  定义、每个片段的行号、非行内片段的空行）、日志（盒子、留白、报错归属）、`fragmentContext`（正文的定义、未保存的文本、导言区
+  文件的戳记）、队列（假的 pdflatex：新的替换等着的、缓存、`dispose` 杀掉子进程）；T-L13（真实 pdfLaTeX：一次编译留下格式后
+  4 个片段 4 页、盒子尺寸、`\eqref` 按 `.aux` 解析（没有标签时印 `??`，更宽），整个导言区给出同样的盒子；真实 XeLaTeX：夹具书
+  的整个导言区、ch2 自己的 `\Lip`、elegantbook 的命题框和 tikz-cd，20 s 以内）；T-L14（`\loop` 的片段 1.5 s 超时后进程组
+  被杀、`pgrep` 输出目录为空、不缓存；同一个哈希命中缓存，戳记变了不命中）。`tests/texRender.test.ts` 2 个（悬停链的片段一步、
+  括号不配对和设置关掉时不编译、块的裁剪 → 片段 → 提示；`fragmentBody` 的星号和 `\tag`、定理框和浮动体的编号、`eqnarray`、
+  标签独占一行）、`tests/texEditor.test.ts` 1 个（光标处预览：行内两种模式、显示公式只在源码模式、设置关掉）、
+  `tests/compiler.test.ts` 的格式戳记。全部 402 个测试通过，`npm run check`、`npm run build`、`test:yolo`（18/18）、浏览器冒烟
+  25/25 通过。
+- 合成项目的新拷贝，用插件的 `Compiler` 编译（latex-article 用格式缓存，等格式的戳记就绪），然后在 jsdom 里把每个章节的每个
+  公式和每个能裁的块经 `TexRender.hover` 走一遍，没有预览（没有裁剪，H11 的情形），片段走真实的 `FragmentService`（pdf.js 的绘制
+  在下一条的 Chrome 里量）：
+
+  | 项目 | 目标 | MathJax | 片段 | 片段的 TeX 时间 | 再次悬停（缓存） |
+  | --- | --- | --- | --- | --- | --- |
+  | latex-article（pdfLaTeX，格式） | 44 个公式、10 个块 | 41 | 13（`\intertext` 的 align、两处 `\set{..}[..]`、10 个块），全部用上格式 | p50 264–278 ms，p90 303–317 ms，最大 356 ms | p50 0.9 ms |
+  | latex-elegantbook（XeLaTeX） | 129 个公式、23 个块 | 127 | 25（ch2 的 tikz-cd、ch3 的 `\intertext`、23 个块） | p50 1.31–1.43 s，p90 1.35–1.47 s，最大 1.51 s | p50 0.8 ms |
+
+  以前没有预览时这 3 + 2 个公式只有 MathJax 的报错、块没有悬停；现在全部画出来，0 个失败。第一轮时发现两处并修掉：标签独占一行
+  的带编号公式删掉标签后留下空行（TeX 当段落结束，报 “Missing $ inserted”），显示公式的最后一行下伸部分被 preview 的页面切掉。
+  跑完后两个构建目录上没有进程（`pgrep`），项目拷贝和原件逐字节相同（`diff -r`）。
+- 画面（无头 Chrome，Obsidian 的 pdf.js 5.3.34 和它的 cMap，深色 app.css，插件的 styles.css，dpr 2）：上面 38 个片段的 PDF 经
+  `FragmentService` 自己的绘制代码画成卡片：每个 p50 70 ms、p90 86 ms、最大 103 ms（每个片段一个 pdf.js 文档），再画 0 ms；
+  反色卡片 12/12。逐个看过：elegantbook 的定义、定理、命题框带中文标题和 `.aux` 里的编号（`定理 2.1 (谱定理 Spectral theorem)`、
+  公式 `(2.2)`、`(2.3)`），证明、例题、笔记，tikz-cd，TikZ 图和 heatmap 的图注 `图 2.1`、`图 2.2`，表 `表 2.1`，ch3 的
+  `\intertext` align 带 `(3.3)`；文章的 amsthm 定理、引理（(2a)、(2b)）、remark 里的 `\intertext` align 带 `(4)`、表格、图。
+  合起来悬停在 pdfLaTeX 上约是 300 ms 停留 + 280 ms 编译 + 70 ms 绘制，XeLaTeX 约 300 ms + 1.4 s + 70 ms（400 ms 起显示转圈）。
+- 光标处预览（jsdom，真实的编辑器扩展和 Obsidian 的 MathJax，elegantbook ch1 的 `$\E[Q]{X}$` 里打 28 个字符）：每键从 dispatch 到
+  浮层换成新渲染 p50 2.7 ms、p95 6.8 ms、最大 7.3 ms（预算 40 ms）；中间 16 次公式不完整，浮层保留上一次的渲染并标 `is-error`；
+  浮层一直是同一个。
+- GUI 检查 H11、H13 仍然待做。
+
+## 共享核心的审查修复（P4–P6，2026-09-29）
+
+P4–P6 的审查里落在共享部分（`src/editor/shared/`，规范副本在 obsidian-tinymist，拷过来逐字节相同；`styles.css` 里的
+`shared:editor.css` 一段同步）的问题，和两个仓库各自要跟着改的调用处：
+
+- **不带纪元的请求**（P4-R5）：`ctx.request(kind, src, display, pos, epochFree)` 的键用 `*` 代替纪元。纪元（这里是定义语句的
+  哈希）变了时缓存清空，但这类请求的结果留着，渲染到一半的也照样入缓存。`latexLive.ts` 的图片（`mtime|path`）和裁剪
+  （含上一次结果的 `previous`）都这样请求：它们和宏无关，以前每改一次宏，每张 PDF 图都要读文件再让 pdf.js 画一遍，
+  和公式挤在一个异步队列里。
+- **按种类排队的调度**（P4/P5 的请求）：以前异步渲染在飞的时候整批停下；LaTeX 的渲染器是混合的（MathJax 同步，PDF 页和
+  没画过的裁剪异步），公式要等裁剪。现在按请求的种类记下它是否返回过 promise：返回过的种类一次一个，等着；其他种类
+  （和还没见过的种类）照常渲染。Typst 只有一种异步的请求，行为不变（一次一个，按顺序）。
+- **错误诊断下的块**（TY-R2）：`renderConstruct` 以前只要构造里有错误诊断就直接返回，展开的块连下方的渲染也没了（打字停顿、
+  诊断落地后公式整个消失）。现在只是不替换：展开的块保留下方的渲染（上一次的，新源码失败时标 `is-error`，不加虚线下划线，
+  lint 的下划线在）；收起时仍是源码。新的 `liveActive(state)`（实时预览装着并且在装饰，即文档没超过 maxLines）替掉光标处预览里
+  的 `isLive`：实时视图不装饰时显示公式也有光标处预览（`texCursorPreview`、`typstCursorPreview`）。
+- **光标处预览的位置**（R3、TY-R1）：浮层的 `getCoords` 给出从构造第一行的上边到最后一行下边的矩形、锚点的左边：行内公式折行时
+  浮层挂在最后一个视觉行下面，不再盖住正在打的那一行；窗格底部放不下、CodeMirror 把它翻到上面时在第一行上面（以前矩形的上边
+  是最后一行的，翻上去的浮层盖住多行显示公式的下半部分和光标所在行）；左边还在公式开头（直接把锚点放到结尾会让宽的渲染伸出
+  编辑器右边）。
+- **长环境里的光标移动**（R1）：`LiveLanguage` 可选的 `reveals(c)` 给出构造真正看光标的范围（定理框：`\begin`、`\end` 两行），
+  null 是它的所有行。扫描时另建一份按这些范围的区间索引（`of[k]` 指回构造）；选区移动时，是否碰到构造、局部重画选哪些构造都按
+  这份索引，选中的构造仍把它所有的行加进重画的区域。所以光标移到框的 `\begin`、`\end` 行时整个框重画，在框里面移动只重画
+  那几行上的构造。`reveals` 抛异常时和扫描器一样只记一次日志，退回构造自己的行。
+- **窗格底边的行移动**：CodeMirror 按字符数估计没画出来的行的位置。块正好是它绘制的视口的最后一段、块后面是一行空行或短行时，
+  从块上面一行按 ArrowDown 会落在块后第二行（空行几乎分不到高度），`enterBlocks` 因为中间有一行“可见”而不拦。现在
+  `drawnViewport` 按状态记下每个视图上次绘制的视口（事务过滤器看不到视图），落点正好是块后第二行、而中间那一行不在视口里时
+  也停在块上；那一行画出来了就是更长的跳转（PageDown），不改。
+- **深色主题下的框头**（P4-R4）：`.theme-dark` 里框头文字用 `oklch(from var(--lp-box-color) max(l, 0.72) c h)`，色相不变、
+  调亮；边框和底色仍是配色本身。浅色主题不变（和 PDF 一致）。
+
+验证（2026-09-29，不入库的脚本在 scratchpad 的 `impl-p4/shared/`）：
+
+- 测试：共享的 `tests/livePreview.test.ts` 新增 4 个（T-S7 视口止于块时的落点、T-S9 错误诊断下展开的块、T-S11 混合种类的调度、
+  T-S11 不带纪元的请求），在修改前的核心上都失败；`tests/renderHover.test.ts` 新增 T-S13 的 `getCoords`；`tests/texEditor.test.ts`
+  的光标处预览加上不装饰的实时视图；T-L9 加上改宏后图片不重画（图片的键带纪元时失败）。LaTeX Live 全部 407 个测试通过，
+  obsidian-tinymist 268 个（1 个跳过，和以前一样）；两边 `npm run check`、`npm run build`、`test:yolo`（18/18）通过；
+  浏览器冒烟两边都是 29/29（MathJax 3.2.2 和替身渲染器）。新增的 B7、B8 在修改前的核心上失败（B7 落在第 55 行而不是 37 行；
+  B8 的浮层顶边在 25 px，盖住折行公式的第二、三行，也就是正在编辑的源码；现在在 137.5 px，正好是公式最后一行的下边）。B5：挂载
+  13.8 ms、打字 p95 3.5 ms、展开的块里打字到重新渲染 p95 5.6 ms、光标 p50 0.2 ms、滚 20 屏帧 p90 16.7 ms。
+- 无头 Chrome，P5 编译好的 latex-elegantbook 拷贝（Obsidian 的深色 app.css、MathJax 和 pdf.js，真实的 SyncTeX 和裁剪服务），
+  同一脚本分别打包修改前后的核心：
+  - ch2 在一个还没裁过的编译结果上挂载（dpr 2，视口在 tikz-cd 附近）：修改前 89 ms 时 4 个公式，裁剪在 258 ms、306 ms 落地，
+    其余 12 个公式等到 330 ms；修改后视口里的公式 95 ms 起陆续出现，140 ms 全部画完，两个裁剪 293 ms、342 ms 落地（和以前一样）。
+  - ch3 第 67 行在窗格底边（绘制的视口是 1–74 行，止于 68–74 行的公式，75 行是空行没画）：ArrowDown 以前落在 76 行，现在停在
+    68 行（dpr 1 和 2 都是）；ch2（118 行）、ch3（90 行）、TikZ 文件（16 行）的完整行走每一行都经过，行号偏差 0 px。
+- 框头的颜色（无头 Chrome，Obsidian 的 app.css，插件的 styles.css）：深色主题下 `color=black` 的框头是 rgb(164, 164, 164)，
+  对比度 6.84:1（以前是黑字，约 1.2:1）；blue 配色的三个角色 7.04–7.32:1，green 的 main 7.28:1；边框仍是配色本身；浅色主题
+  下框头就是配色（和以前一样）。
+- Typst 那边用真实的 tinymist 在 typst-book 的拷贝上复查了错误诊断：ch1 末尾的块公式里打一个 `(`、诊断落地之后，1 个 lint
+  范围，下方的渲染在（`is-below is-error`，上一次的渲染），0 个虚线下划线（以前 0 个下方渲染，什么都没有）。
+- `reveals` 和翻到上面的浮层（之后补上，不入库的脚本在 scratchpad 的 `impl-p4/gate/`）：共享的 `tests/livePreview.test.ts` 新增
+  T-S5 的 `reveals` 用例（同样 150 次随机移动和整篇重建比对；300 行的框里移动只重画那两行的 4 个公式，没有 `reveals` 时 600 多个）
+  和 `reveals` 抛异常的用例，`tests/latexLive.test.ts` 新增长框用例（190 行的定理框和 quote 里移动只重画那两行的公式，移到
+  `\begin` 行时框重画、框头变回源码），T-S13 的 `getCoords` 改成第一行上边到最后一行下边；这几个在忽略 `reveals` 或旧的
+  `getCoords` 上都失败。LaTeX Live 全部 422 个测试通过，obsidian-tinymist 276 个（1 个跳过，和以前一样）。浏览器冒烟 31/31（两边）：B5 新增 3193 行文档里 190 行定理框中的光标移动（p50 0.1–0.2 ms、每次 5.95 次
+  decorate；忽略 `reveals` 时每次 2321 次），B8 新增窗口底边的显示公式（浮层翻到上面、底边正好在 `\[` 行的上边 299.5 px；旧的
+  `getCoords` 下浮层在 344–367 px，盖住公式）。审查时的无头探针（Typst 的 wrap 探针，窗口 469 px）：翻上去的浮层在 291–343 px，
+  `$` 行的上边是 343 px，光标行 391–410 px 不再被盖；折行的行内公式仍挂在最后一行下面（74–126 px）。
+- GUI 检查仍然待做（L12、L13、H11、H13 等）。
+
+## P4–P6 的审查修复（LaTeX Live，2026-09-29）
+
+审查里落在 LaTeX Live 自己代码里的问题（共享核心的见上一节）：
+
+- **没有标签的框的编号**（P4-R1）：elegantbook 笔记里的框大多不加标签（`{标题}{}`、`例题`、`练习`），以前只显示名字，PDF 却有编号。
+  现在 `\include` 进来的章节里按位置数出来：`src/tex/aux.ts` 的 `readAuxCheckpoints` 读每个章节 .aux 的 `\@setckpt`（章节结束时
+  各计数器的值）和它最后一个编号章的 hyperref 锚点（`chapter.4` 是 4，附录的 `appendix.A` 是 A；不用 chapter 计数器，附录里它是
+  1，也不用目录的 `\numberline`，`chinese` 下是 `第四章`），随标签一起读（`LatexRefs.checkpoints`，不变时同一个对象）。
+  `theorems.ts` 给每个环境记下它按 `\thechapter.\arabic{c}` 编号、`\chapter` 清零的计数器 `counter`：elegantbook fancy 模式
+  `tcb@cnt@<env>`、simple 模式 `<env>`（`thmcnt=chapter`，默认），`usesamecnt` 时都是 `ELEGANT@samecnt`，`\elegantnewtheorem`
+  带 `[shared]` 时用那个环境的，example/exercise/problem 是 exam/exer/prob，`\newtheorem{env}{T}[chapter]` 和共用它计数器的；
+  `thmcnt=section`、没有 `[chapter]` 的 `\newtheorem` 没有。`latexLive.ts` 的 `boxNumber` 只有这些都成立时才数：文件里只有一个
+  `\chapter`、这个计数器上的框都在它后面、扫描器找到的个数等于检查点记的、有标签的框正好在 .aux 给它的位置上；否则不显示编号
+  （和以前一样）。`TexView` 把文件的 include 名（`includeName`：相对主文件目录、去掉 `.tex`）传给语言；悬停的片段编译也用这个
+  编号设 `\the<计数器>`（以前没标签的 `例题` 印 0.1）。
+- **框头只吃环境收的参数**（P4-R3）：elegantbook 的 proof、remark 这类不带参数的环境，`\begin{proof}[另一种证明]` 的方括号以前被
+  框头吃掉，PDF 印的是 `证明 [另一种证明]`；现在框头只盖住环境收下的参数（tcolorbox 的 `g o t\label g`、amsthm 的 `[标题]`、
+  custom 的 `{名字}`），其余的留在原处当文字，里面的公式照常渲染。
+- **图片**（P4-R2、P4-R6）：扩展名不是 graphicx 认识的（`loss_lr0.01`、`v1.2`）时和 graphicx 一样先补 pdf/png/jpg/jpeg 再试原名
+  （pdfLaTeX 核对过：空的 `weird.01` 和 `weird.01.png` 都在时用后者）。路径里有宏（`\figdir/plot`）、或者项目里找不到的不带路径的
+  名字（mwe 的 `example-image-a` 在 TeX 目录树里）不再标成找不到，保留源码。
+- **problemset**（P4-R7）：elegantbook 的练习题环境（TeX Live 2026 里只有它定义这个名字）按 enumerate 编号，`\begin`/`\end` 行
+  折叠；它的 `[标题]` 不当列表选项；它里面的 enumerate 在它的组里结束，后面的 `[resume]` 从 1 开始（XeLaTeX 印的就是这样）。
+- **扫描器的时间**（R4）：文字参数的结束位置在一次扫描里按（位置、嵌套层数）记下来。以前 80 层没闭合的 `\text{$` 要 23 s，
+  160 层超过 20 s（编辑器卡死：实时预览的字段和光标处预览都要扫描）；现在 40 层和 160 层都在 5 ms 左右。
+- **编译进行时照样裁剪**（C1、C7）：`CropService.locate` 不再在会话编译时对没查过的块说“编译中”。以前一次结果后面紧跟着第二遍
+  （标签变了）或排队的编译（编译中保存）时，实时视图在结果落地的同一个 tick 里重建，TikZ 图和表格退回源码约 2.5 s，下一次结果
+  到来时也没有 `previous` 可显示；悬停也会在第一遍结果之后又碰上第二遍、去跑片段编译。那条规则（设计 4.6 “会话编译时不查询”）的
+  前提不成立：XeLaTeX 和 pdfLaTeX 运行时写 `<job>.synctex(busy)`，只在一遍结束时换掉 `<job>.synctex.gz`。现在查询随时跑，
+  `.synctex.gz` 的修改时间在结果落地时记下（`CompiledPdf.synctex`，会话的 `onResult` 里），查询后不一样就安静地失败；悬停只在
+  会话还没有任何结果时等第一次编译。
+- **跨页的 tcolorbox**（C3）：框的 `\end` 行报告了整页（章标题、前面的段落），以前悬停的裁剪是整页；现在框也只取前一行下面的记录
+  （框的 `\end` 行报的前一行记录也算前一行的），只剩框在这一页的部分，仍然标“接下页”。
+- **段落最后一行**（C5）：段落后面紧接显示公式时，段落最后一行记在 `\begin` 行上（TeX 在那一行才断行），以前那一行露进裁剪顶边；
+  现在公式只打开的 `\begin` 行（`\[`、`$$`、`\begin{env}` 加参数和 `\label`）也查一次，它的记录当成前一行的。两行的块第一行只打开
+  时不再算里面的行。
+- **相同文本的块**（C4、R2）：`compiledLines` 的缓存键加上现在的行号，两个一模一样的公式各自裁自己的（以前先查的那个决定了
+  后面所有同文本块的行号，第二个编号公式显示第一个的 (1)）。`drawn`/`previous` 仍按文本记（按编译时行号记的话，上面插入行后
+  `previous` 就找不到了）。
+- **SyncTeX 失败**（C6）：`synctex view` 没有记录时也以 0 退出（未知文件、未知 PDF 也是），所以超时、被杀、起不来才是失败：
+  `forwardSearchAll` 这时 reject，区域失败、下次渲染重查，不再用剩下的记录拼一个缺边的区域缓存一整个结果。
+- **片段编译**（F1、R5、F2、R6）：`FragmentService.render` 在第一个 await（格式检查）之前拿到这个主文件的队列，预览关闭或插件卸载时
+  这个队列被停掉，不再在卸载后新建队列启动 TeX（`detached` 的 pdflatex 会活到超时）；卸载后的渲染直接返回 null。缓存键加上片段
+  自己读的文件（`bodyStamp`：`\input`/`\include` 的文件和它们再读的、`\includegraphics` 的图片，按 `\graphicspath` 找，取修改时间），
+  改了图或 TikZ 文件后悬停重新编译。中止或 TeX 起不来的运行也清掉它的文件；`readAuxLabels` 不读 `frag-<hash>.aux`。
+- **设置说明**（R7）：“Render formulas on hover” 写上裁剪和片段编译；styles.css 里错位的注释放回 `.ll-render-note`。
+- **长环境里的光标移动**（R1）：扫描器把每个 `\begin`/`\end` 各自独占一行的环境都报成 `env` 构造，光标在环境里面移动时
+  共享核心要重画整个环境，超过 400 个构造就整篇重建。3192 行的章节里一个 190 行（570 个行内公式）的 quote、minipage、abstract、
+  theorem、proof 里移动光标 p50 7.0–7.4 ms、p95 11 ms，每次 6571 次 decorate（外面 0.3 ms、6 次）。现在共享核心有
+  `LiveLanguage.reveals`（见上一节），`latexLiveLanguage` 让除裁剪外的每个 `env` 只在 `\begin`、`\end` 两行看光标（扫描按文本
+  缓存，看不到定理表，所以不只是定理框）：同样的移动 p50 0.33–0.44 ms、p95 0.6–0.8 ms，每次 6 次 decorate；300 次随机移动后装饰
+  和整篇重建一样（24 个框，没有重复）。
+
+验证（2026-09-29，不入库的脚本在 scratchpad 的 `impl-p4/fix-ll/`）：
+
+- 测试：新增 12 个（`tests/crop.test.ts` 4 个：编译进行时照样裁剪和悬停〔真实 XeLaTeX 第二遍在跑〕、SyncTeX 失败〔假的 synctex〕、
+  相同文本的块、段落最后一行，跨页的框加在分页残留的用例里；`tests/fragment.test.ts` 2 个：释放和卸载时不启动 TeX、`bodyStamp` 让改过的图重新编译；
+  `tests/latexLive.test.ts` 2 个：没有标签的框按检查点编号〔章节、附录 A、多一个框、标签位置不对、`\chapter` 之前的框、两个章〕、
+  不收的参数留作文字；`tests/aux.test.ts` 1 个：检查点；`tests/theorems.test.ts` 1 个：计数器；`tests/latexScan.test.ts` 2 个：
+  problemset、没闭合的 `\text{$` 的时间），另有 T-L9 图片、T-L11、`queryLines`、`fragmentBody`、队列、`readAuxLabels` 的新断言。
+  逐个把修复撤掉跑它的测试：16 处都失败（R4 的在 240 s 时限处被杀）。全部 419 个测试通过，`npm run check`、`npm run build`、
+  `test:yolo`（18/18）、浏览器冒烟 29/29。
+- 框头和 PDF 对照（合成 elegantbook 的新拷贝，加了第 4 章和附录里的框，插件的 `Compiler` 用 XeLaTeX 编译三遍，每章以实时模式挂到
+  真实的编辑器栈上，pdf.js 取 PDF 的文字）：37 个框里 36 个的框头逐字出现在 PDF 里（剩下一个标题里有公式，是渲染部件），修复前
+  7 个不对（ch1 的 `例题 1.1`、ch3 的 `练习 3.1`、ch4 两个没标签的定理和 `问题 4.1`、附录的 `定理 A.1`、`例题 A.1`）。一本 3 章的
+  小书按 6 种选项各编译一次：默认、`usesamecnt`（`定义 1.1`、`定理 1.2`、`引理 1.3`）、`simple`、`simple,usesamecnt`、
+  `\elegantnewtheorem{fact}{事实}{prostyle}{fac}[theorem]`（`事实 1.3`）都和 PDF 一样；`thmcnt=section` 的 7 个定理类框按设计不显示
+  编号（PDF 是 `1.0.1` 这样的节编号），例题、练习、问题照样有。latex-article（pdfLaTeX、`\input`、amsthm）5 个框头不变，都在 PDF 里。
+  1871 行、340 个没标签的框的章节：每次按键数编号 0.09 ms；框里打字 p50 1.59 ms，不传 include 名时 1.53 ms。
+- 裁剪的几何（同一套规则，修复前后各算一遍，真实的 `synctex view`）：pdfLaTeX 的 adj 文档 9 个块、C3 的 XeLaTeX 书（带跨页定理的
+  章节）28 个、合成 elegantbook 57 个，共 94 个块里 4 个变了：adj 的两个显示公式顶边从 136.7/243.3 移到 146.7/255.3（段落最后
+  一行不再进裁剪）、跨页定理第 10 页的部分从 y=60.7（整页）变成 388.7（只有框，仍标接下页）、adv 的 align 顶边从 337.8 到 353.3
+  （它前面一个零高度的空段落行，墨迹不变）；elegantbook 的 57 个一个没变。
+- 编译进行时的裁剪（审查时的复现脚本，真实的 `LatexSession`、`Compiler`、`CropService` 和夹具书）：第二遍和排队编译的场景里 ch2 的
+  表格一直有裁剪，旧的留到新的画好（16–17 ms 后）；第一次编译在第一遍结果后 1.74 s 就有裁剪（以前等第二遍，5.5 s）。
+- 跑完后没有 xelatex、pdflatex、synctex、headless Chrome 进程；项目拷贝都在 scratchpad 里编译，构建目录在 `$TMPDIR`。
+- GUI 检查仍然待做（L12、L13、H5、H6、H11、H13）。

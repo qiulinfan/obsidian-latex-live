@@ -288,6 +288,27 @@ export function prepareMath(
   display = true,
   refs?: (command: string, keys: readonly string[]) => string,
 ): string {
+  const tex = tagLabels(src, labels, display);
+  if (refs) {
+    return tex.replace(REF_COMMAND, (_m, cmd: string, keys: string) =>
+      `\\textup{${textArgument(refs(cmd, keys.split(",").map((k) => k.trim()).filter(Boolean)))}}`,
+    );
+  }
+  return tex.replace(/\\(eqref|ref)\s*\{([^{}]*)\}/g, (_m, cmd: string, key: string) => {
+    const n = labels.get(key.trim()) ?? "??";
+    return cmd === "eqref" ? `\\textup{(${n})}` : `\\textup{${n}}`;
+  });
+}
+
+/** The environment LaTeX numbers (`align`, not `align*`) a display formula's source starts with. */
+export const numberedEnv = (src: string): string | undefined => NUMBERED.exec(src)?.[1];
+
+/**
+ * prepareMath's numbers alone: in a numbered environment a row's first known `\label` becomes
+ * `\tag{n}` at the row's end, and every `\label` goes; references stay (a fragment compile
+ * resolves them itself).
+ */
+export function tagLabels(src: string, labels: ReadonlyMap<string, string>, display = true): string {
   const outer = display ? NUMBERED.exec(src)?.[1] : undefined;
   const rows = outer !== undefined && outer !== "equation" && outer !== "multline";
   let out = "";
@@ -316,16 +337,7 @@ export function prepareMath(
     } else if (/^\\(?:tag|notag|nonumber)$/.test(t)) own = true;
     out += t;
   }
-  const tex = out + src.slice(last);
-  if (refs) {
-    return tex.replace(REF_COMMAND, (_m, cmd: string, keys: string) =>
-      `\\textup{${textArgument(refs(cmd, keys.split(",").map((k) => k.trim()).filter(Boolean)))}}`,
-    );
-  }
-  return tex.replace(/\\(eqref|ref)\s*\{([^{}]*)\}/g, (_m, cmd: string, key: string) => {
-    const n = labels.get(key.trim()) ?? "??";
-    return cmd === "eqref" ? `\\textup{(${n})}` : `\\textup{${n}}`;
-  });
+  return out + src.slice(last);
 }
 
 const REF_COMMAND = /\\(eqref|ref|pageref|autoref|cref|Cref|nameref)\*?\s*\{([^{}]*)\}/g;

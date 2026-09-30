@@ -17,7 +17,7 @@ import {
 import type LatexLivePlugin from "../main";
 import type { EditingMode } from "../settings";
 import { Definitions, emptyDefinitions, projectDefinitions } from "../tex/macros";
-import { preambleFiles } from "../tex/project";
+import { includeName, preambleFiles } from "../tex/project";
 import { latexCompletionSource } from "./latexCompletion";
 import { latexLiveLanguage } from "./latexLive";
 import {
@@ -306,7 +306,14 @@ export class TexView extends TextFileView {
     if (!project || !render.ready) return null;
     const { root, abs } = project;
     const code = DATA_EXTENSIONS.has(this.file?.extension ?? "") || preambleFiles(root).has(resolve(abs));
-    const language = code ? NO_CONSTRUCTS : latexLiveLanguage({ refs: () => render.refsOf(root) });
+    const language = code
+      ? NO_CONSTRUCTS
+      : latexLiveLanguage({
+          refs: () => render.refsOf(root),
+          file: includeName(root, abs),
+          image: (path) => render.imageOf(root, path),
+          crop: (doc, from, to, kind) => render.cropOf(root, abs, doc, from, to, kind),
+        });
     return livePreview({ language, renderer: render.rendererFor(root) });
   }
 
@@ -379,11 +386,23 @@ export class TexView extends TextFileView {
       hover: {
         // Documents only: package and class files are code, their `$` rarely pair as math.
         enabled: () => plugin.settings.hoverRender && !PACKAGE_EXTENSIONS.has(this.file?.extension ?? ""),
-        render: (math, view) => {
+        target: (state, pos) => {
           const root = this.projectInfo()?.root;
-          return root ? plugin.texRender.hover(math, view, root) : null;
+          return root ? plugin.texRender.hoverTarget(state.doc, pos, root) : null;
+        },
+        render: (target, view) => {
+          const project = this.projectInfo();
+          return project ? plugin.texRender.hover(target, view, project.root, project.abs) : null;
         },
         lsp: (view, pos) => this.lspHover(view, pos),
+        // The formula being typed, rendered below it (setting-gated; MathJax alone).
+        cursor: {
+          enabled: () => plugin.settings.cursorPreview && !PACKAGE_EXTENSIONS.has(this.file?.extension ?? ""),
+          render: (math, view) => {
+            const root = this.projectInfo()?.root;
+            return root ? plugin.texRender.preview(math, view, root) : null;
+          },
+        },
       },
       extensions: [
         EditorView.domEventHandlers({

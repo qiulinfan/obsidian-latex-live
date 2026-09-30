@@ -26,6 +26,13 @@ export interface LatexLiveSettings {
   yoloTabCompletion: boolean;
   /** Render the formula under the mouse pointer in a hover (project macros included). */
   hoverRender: boolean;
+  /**
+   * The hover compiles what MathJax and the PDF crops cannot show with the document's own engine
+   * and preamble (a fragment compile in the build folder).
+   */
+  texFragmentFallback: boolean;
+  /** Show the rendering of the formula at the cursor below it while it is typed. */
+  cursorPreview: boolean;
   /** The mode of newly opened LaTeX editors; each view keeps its own in its view state. */
   editingMode: EditingMode;
 }
@@ -41,6 +48,8 @@ export const DEFAULT_SETTINGS: LatexLiveSettings = {
   texlabPath: "",
   yoloTabCompletion: false,
   hoverRender: true,
+  texFragmentFallback: true,
+  cursorPreview: false,
   editingMode: "source",
 };
 
@@ -201,12 +210,44 @@ export class LatexLiveSettingTab extends PluginSettingTab {
       .setDesc(
         "Hovering a formula in the editor shows it rendered with MathJax, using the macros " +
           "the project defines (\\newcommand, \\DeclareMathOperator, ... in the root, its " +
-          "inputs and local packages). Errors show MathJax's message. texlab's hover then " +
-          "stays quiet inside formulas.",
+          "inputs and local packages); texlab's hover then stays quiet inside formulas. While " +
+          "the preview is open, a display formula, theorem box, TikZ picture, table or float " +
+          "unchanged since the last compile shows as the PDF prints it. What neither can show " +
+          "is compiled on its own (see \"Compile what the hover cannot render\").",
       )
       .addToggle((t) =>
         t.setValue(s.hoverRender).onChange((v) => {
           s.hoverRender = v;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Compile what the hover cannot render")
+      .setDesc(
+        "When MathJax cannot draw a formula (tikz-cd, \\intertext, a macro built on internals) " +
+          "and there is no up-to-date crop from the preview's PDF, the hover typesets it with the " +
+          "document's own engine and preamble in the build folder: about 0.3 s with pdfLaTeX's " +
+          "cached preamble, 1–2 s with XeLaTeX. The same for tables, TikZ pictures and theorem " +
+          "boxes without a crop.",
+      )
+      .addToggle((t) =>
+        t.setValue(s.texFragmentFallback).onChange((v) => {
+          s.texFragmentFallback = v;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Preview the formula at the cursor")
+      .setDesc(
+        "While the cursor is in a formula, show its rendering below it and update it as you type " +
+          "(inline math in both modes, display math in source mode). Hidden while the completion " +
+          "list is open.",
+      )
+      .addToggle((t) =>
+        t.setValue(s.cursorPreview).onChange((v) => {
+          s.cursorPreview = v;
           save();
         }),
       );

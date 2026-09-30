@@ -1,8 +1,8 @@
 import { loadPdfJs } from "obsidian";
 import type { PdfBox } from "../tex/synctex";
 
-// The slice of the pdf.js API (bundled with Obsidian) used here.
-interface Viewport {
+// The slice of the pdf.js API (bundled with Obsidian) used here and by PDF crops.
+export interface Viewport {
   width: number;
   height: number;
 }
@@ -10,15 +10,16 @@ interface RenderTask {
   promise: Promise<void>;
   cancel(): void;
 }
-interface PdfPage {
-  getViewport(p: { scale: number }): Viewport;
+export interface PdfPage {
+  /** `offsetX`/`offsetY` shift the page on the canvas (CSS pixels of this scale). */
+  getViewport(p: { scale: number; offsetX?: number; offsetY?: number }): Viewport;
   render(p: {
     canvasContext: CanvasRenderingContext2D;
     canvas: HTMLCanvasElement;
     viewport: Viewport;
   }): RenderTask;
 }
-interface PdfDoc {
+export interface PdfDoc {
   numPages: number;
   getPage(n: number): Promise<PdfPage>;
   destroy(): Promise<void>;
@@ -49,6 +50,40 @@ export const PDFJS_ASSETS = {
   wasmUrl: "/lib/pdfjs/wasm/",
   iccUrl: "/lib/pdfjs/iccs/",
 };
+
+/** pdf.js draws PDF points at this many CSS pixels each (96 / 72). */
+const CSS_PER_PT = 4 / 3;
+
+/** A PDF document for crops, through Obsidian's pdf.js with its assets. The data buffer is transferred (pass a copy). */
+export async function openPdf(data: Uint8Array): Promise<PdfDoc> {
+  const pdfjs = (await loadPdfJs()) as PdfJs;
+  return pdfjs.getDocument({ data, isEvalSupported: false, ...PDFJS_ASSETS }).promise;
+}
+
+/**
+ * The first page of a PDF (an \includegraphics figure in live preview) as a PNG data URL, at
+ * its size in CSS pixels, scaled down to at most `maxHeight`, drawn for `dpr`: the image's URL
+ * and its display width. The data buffer is transferred to pdf.js (pass a copy).
+ */
+export async function pdfPageImage(data: Uint8Array, maxHeight: number, dpr: number): Promise<{ url: string; width: number }> {
+  const pdfjs = (await loadPdfJs()) as PdfJs;
+  const doc = await pdfjs.getDocument({ data, isEvalSupported: false, ...PDFJS_ASSETS }).promise;
+  try {
+    const page = await doc.getPage(1);
+    const css = page.getViewport({ scale: CSS_PER_PT });
+    const fit = Math.min(1, maxHeight / css.height);
+    const viewport = page.getViewport({ scale: CSS_PER_PT * fit * dpr });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("No canvas to draw the PDF on.");
+    await page.render({ canvasContext: ctx, canvas, viewport }).promise;
+    return { url: canvas.toDataURL("image/png"), width: css.width * fit };
+  } finally {
+    void doc.destroy();
+  }
+}
 
 interface Slot {
   el: HTMLDivElement;

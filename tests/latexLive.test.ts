@@ -1,11 +1,14 @@
-// T-L5 and T-L8: LaTeX's live preview (latexLive.ts, design 4.4 #1-#4 and #5-#11) on the real
-// editor stack (texEditorExtensions, keyArbiter first) with TexRender's live renderer over
-// Obsidian's MathJax (tests/support/mathjax.ts), on a temporary copy of the synthetic
-// elegantbook fixture; chips read static .aux excerpts (tests/fixtures/aux) and its refs.bib.
+// T-L5, T-L8 and T-L9: LaTeX's live preview (latexLive.ts, design 4.4 #1-#4, #5-#11, #12 and
+// #13, and P5's crops #4 and #14) on the real editor stack (texEditorExtensions, keyArbiter
+// first) with TexRender's live renderer over Obsidian's MathJax (tests/support/mathjax.ts), on a
+// temporary copy of the synthetic elegantbook fixture; chips and theorem numbers read static
+// .aux excerpts (tests/fixtures/aux) and its refs.bib; images resolve in the copy (a stand-in for
+// Obsidian's resource URLs and pdf.js); crops come from a stand-in for blockCrop's CropService
+// (tests/crop.test.ts runs that on real TeX).
 import "./support/dom";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { EditorSelection, EditorState, SelectionRange } from "@codemirror/state";
@@ -14,8 +17,10 @@ import { latexLiveLanguage } from "../src/editor/latexLive";
 import { DEFAULT_REF_NAMES, LatexRefs, refNames } from "../src/editor/latexRefs";
 import { livePreview, renderStats } from "../src/editor/shared/livePreview";
 import { showTexDiagnostics, texEditorExtensions } from "../src/editor/texExtensions";
-import { TexRender } from "../src/editor/texRender";
+import { TexCrops, TexRender } from "../src/editor/texRender";
+import { NOTE_CHANGED } from "../src/preview/blockCrop";
 import { readAuxLabels } from "../src/tex/aux";
+import { theoremMap } from "../src/tex/theorems";
 import { press, sleep, waitFor } from "./support/keyMatrix";
 import { obsidianMathJax } from "./support/mathjax";
 
@@ -32,17 +37,27 @@ EditorView.prototype.moveVertically = function (this: EditorView, start: Selecti
 const chars = (el: Element): string =>
   [...el.querySelectorAll("mjx-c")].map((c) => String.fromCodePoint(parseInt(c.className.split(" ")[0].slice(5), 16))).join("");
 
-/** A copy of the fixture book with TexRender over Obsidian's MathJax, preloaded. */
-async function project() {
+/** A copy of the fixture book with TexRender over Obsidian's MathJax (and `crops`), preloaded. */
+async function project(crops?: TexCrops) {
   const { window: mw, MathJax } = await obsidianMathJax();
   const dir = mkdtempSync(join(tmpdir(), "ll-live-"));
   const book = join(dir, "book");
   cpSync(resolve("tests/fixtures/elegantbook"), book, { recursive: true });
   const outDir = join(dir, "out");
   mkdirSync(join(outDir, "chapters"), { recursive: true });
+  const pdfPages: string[] = [];
   const render = new TexRender({
     outDirFor: () => outDir,
     buffers: () => new Map(),
+    images: {
+      url: (abs) => (abs.startsWith(book) ? `app://local${abs}` : null),
+      pdfPage: async (abs, maxHeight) => {
+        pdfPages.push(abs);
+        await sleep(5);
+        return { url: `data:image/png;base64,page1-${maxHeight}`, width: 120 };
+      },
+    },
+    crops,
     mathJax: {
       load: async () => {},
       global: () => MathJax,
@@ -58,11 +73,12 @@ async function project() {
   const views: EditorView[] = [];
   /**
    * A live LaTeX editor for `doc`, focused, the cursor at `anchor` (else the end); refs from
-   * `labels` (label numbers alone, or whole refs), else the root's (build folder and bibliography).
+   * `labels` (label numbers alone, or whole refs), else the root's (build folder and bibliography);
+   * `file` its \include name.
    */
-  const mount = async (doc: string, labels?: ReadonlyMap<string, string> | LatexRefs, anchor = doc.length) => {
+  const mount = async (doc: string, labels?: ReadonlyMap<string, string> | LatexRefs, anchor = doc.length, file?: string) => {
     const fixed: LatexRefs | undefined =
-      !labels || "names" in labels ? labels : { numbers: labels, labels: new Map(), cites: new Map(), names: DEFAULT_REF_NAMES };
+      !labels || "names" in labels ? labels : { numbers: labels, labels: new Map(), cites: new Map(), names: DEFAULT_REF_NAMES, theorems: new Map(), checkpoints: new Map() };
     const view = new EditorView({
       parent: document.body,
       state: EditorState.create({
@@ -72,7 +88,12 @@ async function project() {
           text: doc,
           diagnostics: true,
           live: livePreview({
-            language: latexLiveLanguage({ refs: () => fixed || render.refsOf(root) }),
+            language: latexLiveLanguage({
+              refs: () => fixed || render.refsOf(root),
+              file,
+              image: (path) => render.imageOf(root, path),
+              crop: (d, from, to, kind) => render.cropOf(root, join(book, "chapters/ch2.tex"), d, from, to, kind),
+            }),
             renderer: render.rendererFor(root),
           }),
         }),
@@ -89,7 +110,7 @@ async function project() {
     render.dispose();
     rmSync(dir, { recursive: true, force: true });
   };
-  return { render, root, book, outDir, mount, done };
+  return { render, root, book, outDir, mount, done, pdfPages };
 }
 
 /** Every render the view asked for has landed (a batch over its budget goes on in the next frames). */
@@ -290,17 +311,36 @@ test("T-L5 keys stay keyArbiter's: ArrowDown and ArrowUp enter a LaTeX block, wh
 // ---- T-L8: text constructs (#5-#11) ------------------------------------------------------
 
 /**
- * Each line as shown: render widgets as "[w]", chips and list markers as "[text]", hidden
- * markup gone; a collapsed line (a block replace without a widget) as "(collapsed)".
+ * Each line as shown: render widgets as "[w]" ("[img]" for images, "below" for the rendering
+ * under a revealed block), chips, list markers, theorem heads and proof marks as "[text]",
+ * hidden markup gone; a collapsed line (a block replace without a widget) as "(collapsed)";
+ * the lines in a theorem box prefixed with "│ " (per box).
  */
-const shown = (view: EditorView) =>
-  [...view.contentDOM.children].map((el) => {
-    if (!el.classList.contains("cm-line")) return el.classList.contains("lsp-lp-render") ? "[w]" : "(collapsed)";
-    const copy = el.cloneNode(true) as Element;
-    copy.querySelectorAll(".lsp-lp-render").forEach((w) => w.replaceWith("[w]"));
-    copy.querySelectorAll(".lsp-lp-chip, .lsp-lp-bullet").forEach((w) => w.replaceWith(`[${w.textContent}]`));
-    return copy.textContent ?? "";
-  });
+const shown = (view: EditorView) => rows(view.contentDOM, "");
+function rows(parent: Element, prefix: string): string[] {
+  const out: string[] = [];
+  for (const el of parent.children) {
+    if (el.classList.contains("lsp-lp-box")) {
+      out.push(...rows(el, `${prefix}│ `));
+      continue;
+    }
+    if (!el.classList.contains("cm-line")) {
+      const cls = el.classList;
+      out.push(prefix + (cls.contains("lsp-lp-render") ? `[${cls.contains("lsp-lp-image") ? "img" : "w"}${cls.contains("is-below") ? " below" : ""}]` : "(collapsed)"));
+      continue;
+    }
+    out.push(prefix + lineText(el));
+  }
+  return out;
+}
+/** A line's text with its widgets as in `shown` (a theorem head's chip is a widget: not editable, unlike its title in place). */
+function lineText(node: Node): string {
+  if (!(node instanceof Element)) return node.textContent ?? "";
+  if (node.classList.contains("lsp-lp-render")) return "[w]";
+  const widget = (node as HTMLElement).contentEditable === "false";
+  if (node.matches(".lsp-lp-chip, .lsp-lp-bullet, .lsp-lp-qed") || (widget && node.classList.contains("lsp-lp-box-title"))) return `[${node.textContent}]`;
+  return [...node.childNodes].map(lineText).join("");
+}
 /** The chips (refs, cites, labels) with their classes' state. */
 const chips = (view: EditorView) =>
   [...view.contentDOM.querySelectorAll(".lsp-lp-chip")].map((c) => (c.classList.contains("is-missing") ? `!${c.textContent}` : c.textContent));
@@ -467,7 +507,7 @@ test("T-L8 reference names: hyperref's by the anchor, cleveref's by the .aux typ
       "\\autoref{eq:bv-expand} \\cref{eq:wstar} \\Cref{def:linear} \\cref{fig:curve} \\autoref{app:derivations} " +
       "\\cref{lem:plain} \\ref{it:tight} \\autoref{fn:toy} \\cref{sec:intro,app:derivations} \\eqref{eq:wstar} \\autoref{nope}\n" +
       "$\\text{by \\Cref{def:linear}}$\n";
-    const view = await p.mount(doc, { numbers: new Map(), labels, cites: new Map(), names: DEFAULT_REF_NAMES });
+    const view = await p.mount(doc, { numbers: new Map(), labels, cites: new Map(), names: DEFAULT_REF_NAMES, theorems: new Map(), checkpoints: new Map() });
     assert.equal(chars(inline(view)[0]).replace(/\u00a0/g, " "), "by Theorem 2.1", "a reference inside a formula reads as its chip");
     assert.deepEqual(chips(view), [
       "Equation 2a",
@@ -484,7 +524,7 @@ test("T-L8 reference names: hyperref's by the anchor, cleveref's by the .aux typ
     ]);
     // \usepackage[capitalise,noabbrev]{cleveref} and a redefined \sectionautorefname.
     const names = refNames(["\\usepackage[capitalise,noabbrev]{cleveref}\n\\renewcommand{\\sectionautorefname}{Section}"]);
-    const named = await p.mount(doc.replace("\\autoref{fn:toy}", "\\autoref{sec:intro}"), { numbers: new Map(), labels, cites: new Map(), names });
+    const named = await p.mount(doc.replace("\\autoref{fn:toy}", "\\autoref{sec:intro}"), { numbers: new Map(), labels, cites: new Map(), names, theorems: new Map(), checkpoints: new Map() });
     assert.deepEqual(chips(named).slice(0, 9), [
       "Equation 2a",
       "Equation (⋆)",
@@ -559,6 +599,577 @@ test("T-L8 keys stay keyArbiter's: arrows reveal collapsed lines one at a time; 
     assert.deepEqual(shown(list), ["(collapsed)", "  [1.] first", "  [2.] ", "(collapsed)", ""], "the new item's marker at once");
     list.dispatch({ changes: { from: list.state.selection.main.head, insert: "x" }, selection: { anchor: list.state.selection.main.head + 1 } });
     assert.equal(shown(list)[2], "  [2.] x");
+  } finally {
+    p.done();
+  }
+});
+
+// ---- T-L9: theorem boxes (#12), figure and table lines (#8), images (#13) ---------------------
+
+/** The theorem boxes: class, colour and the first line's text. */
+const boxes = (view: EditorView) =>
+  [...view.contentDOM.querySelectorAll<HTMLElement>(".lsp-lp-box")].map((b) => [b.className, b.style.getPropertyValue("--lp-box-color").trim()]);
+
+const BOOK_BOXES = [
+  "\\begin{definition}{概率空间 Probability space}{prob-space}", // 1
+  "  三元组 $(\\Omega, \\mathcal{F}, \\Prob)$。",
+  "\\end{definition}",
+  "\\begin{theorem}{全期望公式 Law of total expectation}{total-exp}", // 4
+  "  若 $\\E{\\abs{X}} < \\infty$，则",
+  "  \\begin{equation}\\label{eq:total-exp}",
+  "    \\E{X} = \\E{\\E{X \\mid Y}}.",
+  "  \\end{equation}",
+  "\\end{theorem}",
+  "\\begin{proof}", // 10
+  "  由定义~\\ref{def:prob-space}。",
+  "\\end{proof}",
+  "\\begin{proposition}{半正定 $A \\succeq 0$}{psd} % a title with math", // 13
+  "  x",
+  "\\end{proposition}",
+  "\\begin{example}[抛硬币 Coin tossing]", // 16
+  "  $p$",
+  "\\end{example}",
+  "\\begin{lemma*}[无编号]",
+  "\\end{lemma*}",
+  "\\begin{theorem}", // 21: no label, no number
+  "\\end{theorem}",
+  "\\begin{unknown}", // not theorem-like
+  "\\end{unknown}",
+  "end",
+].join("\n");
+
+test("T-L9 #12: elegantbook's boxes with their heads as the PDF prints them, numbers from the .aux, the scheme's colours", async () => {
+  const p = await project();
+  try {
+    cpSync(resolve("tests/fixtures/aux/book"), p.outDir, { recursive: true });
+    const view = await p.mount(BOOK_BOXES, undefined, BOOK_BOXES.length);
+    assert.deepEqual(shown(view), [
+      "│ [定义 1.1 (概率空间 Probability space)]",
+      "│   三元组 [w]。",
+      "│ (collapsed)",
+      "│ [定理 1.1 (全期望公式 Law of total expectation)]",
+      "│   若 [w]，则",
+      "│ [w]",
+      "│ (collapsed)",
+      "│ [证明]",
+      "│   由定义~[1.1]。",
+      "│ (collapsed)",
+      "│ [命题 2.1 (]半正定 [w][)]", // the title stays in place, its formula rendered
+      "│   x",
+      "│ (collapsed)",
+      "│ [例题 抛硬币 Coin tossing]", // elegantbook's example: its counter has no label here
+      "│   [w]",
+      "│ (collapsed)",
+      "│ [引理 (无编号)]",
+      "│ (collapsed)",
+      "│ [定理]",
+      "│ (collapsed)",
+      "\\begin{unknown}",
+      "\\end{unknown}",
+      "end",
+    ]);
+    // The fixture book sets no colour: elegantbook's default scheme is blue (main 0,166,82, second 255,134,24, third 0,174,247).
+    assert.deepEqual(boxes(view), [
+      ["lsp-lp-box is-main", "rgb(0, 166, 82)"],
+      ["lsp-lp-box is-second", "rgb(255, 134, 24)"],
+      ["lsp-lp-box is-second", "rgb(255, 134, 24)"],
+      ["lsp-lp-box is-third", "rgb(0, 174, 247)"],
+      ["lsp-lp-box is-main", "rgb(0, 166, 82)"],
+      ["lsp-lp-box is-second", "rgb(255, 134, 24)"],
+      ["lsp-lp-box is-second", "rgb(255, 134, 24)"],
+    ]);
+    const title = view.contentDOM.querySelectorAll(".lsp-lp-box")[3].querySelector(".cm-line")!;
+    assert.deepEqual(
+      [...title.querySelectorAll<HTMLElement>(".lsp-lp-box-title")].map((e) => [e.contentEditable === "false", e.textContent]),
+      [[true, "命题 2.1 ("], [false, "半正定 "], [true, ")"]],
+      "the title (up to its formula's widget) between the head's chips, marked like them",
+    );
+    assert.equal(chars(inline(view).find((w) => title.contains(w))!), "𝐴⪰0");
+  } finally {
+    p.done();
+  }
+});
+
+test("T-L9 reveal: the \\begin and \\end lines each on their own; editing the body keeps the box; ArrowDown enters the collapsed \\end line", async () => {
+  const p = await project();
+  try {
+    cpSync(resolve("tests/fixtures/aux/book"), p.outDir, { recursive: true });
+    const doc = ["top", "\\begin{theorem}{全期望公式}{total-exp}", "  body $x$", "  more", "\\end{theorem}", "end"].join("\n");
+    const view = await p.mount(doc, undefined, 0);
+    const line = (n: number) => view.state.doc.line(n);
+    assert.deepEqual(shown(view), ["top", "│ [定理 1.1 (全期望公式)]", "│   body [w]", "│   more", "│ (collapsed)", "end"]);
+    cursorAt(view, line(2).from + 3);
+    assert.deepEqual(shown(view), ["top", "│ \\begin{theorem}{全期望公式}{total-exp}", "│   body [w]", "│   more", "│ (collapsed)", "end"], "the \\begin line only");
+    cursorAt(view, line(5).to);
+    assert.deepEqual(shown(view), ["top", "│ [定理 1.1 (全期望公式)]", "│   body [w]", "│   more", "│ \\end{theorem}", "end"], "the \\end line only");
+    cursorAt(view, line(4).to);
+    view.dispatch({ changes: { from: line(4).to, insert: " and $y$" }, selection: { anchor: line(4).to + 8 }, userEvent: "input.type" });
+    await rendered(view);
+    assert.deepEqual(shown(view), ["top", "│ [定理 1.1 (全期望公式)]", "│   body [w]", "│   more and $y$", "│ (collapsed)", "end"], "typing in the body: the box stays");
+    view.dispatch({ changes: { from: line(4).to, insert: "\n" }, selection: { anchor: line(4).to + 1 }, userEvent: "input.type" });
+    assert.equal(boxes(view).length, 1, "a new line in the body");
+    assert.equal(view.contentDOM.querySelector(".lsp-lp-box")!.querySelectorAll(".cm-line").length, 4);
+
+    // keyArbiter hands the arrows to CodeMirror; enterBlocks stops them on the collapsed \end line.
+    // (jsdom's vertical motion jumps to the document's end or start: B6 walks every line in Chrome.)
+    const at = () => view.state.doc.lineAt(view.state.selection.main.head).number;
+    cursorAt(view, line(5).from);
+    press(view, "ArrowDown");
+    assert.equal(at(), 6);
+    assert.equal(shown(view)[5], "│ \\end{theorem}");
+    press(view, "ArrowDown");
+    assert.deepEqual([at(), shown(view)[5]], [7, "│ (collapsed)"]);
+  } finally {
+    p.done();
+  }
+});
+
+test("T-L9 a move inside a long box re-decorates only the constructs on its lines; one onto its \\begin line, the box", async () => {
+  const p = await project();
+  cpSync(resolve("tests/fixtures/aux/book"), p.outDir, { recursive: true });
+  // 190 body lines (an environment spans at most 200), two formulas each.
+  const body = Array.from({ length: 190 }, (_, i) => `  line ${i} with $x_{${i}}$ and $y_{${i}}$.`);
+  const doc = ["top", "\\begin{theorem}{全期望公式}{total-exp}", ...body, "\\end{theorem}", "\\begin{quote}", ...body, "\\end{quote}", "end"].join("\n");
+  const language = latexLiveLanguage({ refs: () => p.render.refsOf(p.root) });
+  const decorated: string[] = [];
+  const decorate = language.decorate.bind(language);
+  language.decorate = (c, ctx) => {
+    decorated.push(c.kind === "env" ? c.env : `${c.kind}@${ctx.state.doc.lineAt(c.from).number}`);
+    decorate(c, ctx);
+  };
+  const view = new EditorView({
+    parent: document.body,
+    state: EditorState.create({
+      doc,
+      selection: { anchor: 0 },
+      extensions: texEditorExtensions({ text: doc, diagnostics: true, live: livePreview({ language, renderer: p.render.rendererFor(p.root) }) }),
+    }),
+  });
+  try {
+    view.focus();
+    await sleep(40);
+    await rendered(view);
+    const at = (n: number) => view.state.doc.line(n).from + 3;
+    const moved = (n: number) => {
+      decorated.length = 0;
+      cursorAt(view, at(n));
+      return [...decorated];
+    };
+    moved(100);
+    assert.deepEqual(moved(101), ["math@100", "math@100", "math@101", "math@101"], "the theorem's body: only the formulas on the two lines");
+    moved(300);
+    assert.deepEqual(moved(301), ["math@300", "math@300", "math@301", "math@301"], "a quote's body too");
+    assert.ok(moved(2).includes("theorem"), "onto the \\begin line: the box re-decorates");
+    assert.equal(shown(view)[1], "│ \\begin{theorem}{全期望公式}{total-exp}");
+    moved(50);
+    assert.equal(shown(view)[1], "│ [定理 1.1 (全期望公式)]", "and back into the body: its head again");
+  } finally {
+    view.destroy();
+    p.done();
+  }
+});
+
+test("T-L9 amsthm: \\newtheorem heads with their period, a \\label numbers them, proofs end in □, boxes nest; an error keeps a line source", async () => {
+  const p = await project();
+  try {
+    const sources = ["\\documentclass{article}\n\\usepackage{amsthm}\n\\newtheorem{thm}{Theorem}[section]\n\\newtheorem{lem}[thm]{Lemma}\n\\newtheorem*{rem}{Remark}"];
+    const labels = new Map([
+      ["thm:cs", { number: "2.1", page: "3", title: "Cauchy", anchor: "thm.2.1", kind: "thm", order: null }],
+      ["lem:aux", { number: "2.2", page: "3", title: "", anchor: "thm.2.2", kind: "thm", order: null }],
+    ]);
+    const refs: LatexRefs = { numbers: new Map(), labels, cites: new Map(), names: refNames(sources), theorems: theoremMap(sources), checkpoints: new Map() };
+    const doc = [
+      "\\begin{thm}[Cauchy--Schwarz]\\label{thm:cs}", // 1
+      "  $\\abs{x \\cdot y} \\le \\norm{x}\\norm{y}$",
+      "  \\begin{proof}[Proof of \\cref{thm:cs}]", // 3: a title with a reference
+      "    \\begin{lem}",
+      "    \\label{lem:aux}", // 5: the label first on the next line
+      "    \\end{lem}",
+      "    Trivial.",
+      "  \\end{proof}",
+      "\\end{thm}",
+      "\\begin{rem}",
+      "\\end{rem}",
+      "\\begin{proof}",
+      "\\end{proof}",
+      "end",
+    ].join("\n");
+    const view = await p.mount(doc, refs);
+    assert.deepEqual(shown(view), [
+      "│ [Theorem 2.1 (Cauchy–Schwarz).]",
+      "│   [w]",
+      "│ │   Proof of [theorem 2.1][.]", // the indentation stays
+      "│ │ │     [Lemma 2.2.]",
+      "│ │ │     [lem:aux]",
+      "│ │ │ (collapsed)",
+      "│ │     Trivial.",
+      "│ │ [□]",
+      "│ (collapsed)",
+      "│ [Remark.]",
+      "│ (collapsed)",
+      "│ [Proof.]",
+      "│ [□]",
+      "end",
+    ]);
+    assert.ok(view.contentDOM.querySelectorAll(".cm-line.ll-qed-line").length === 2, "the proof's mark sits at the right");
+    assert.deepEqual(boxes(view).map(([cls, color]) => cls + color), Array(5).fill("lsp-lp-box"), "no scheme: the accent colour");
+    showTexDiagnostics(view, [{ severity: "error", file: null, line: 1, message: "Undefined control sequence." }]);
+    assert.equal(shown(view)[0], "│ \\begin{thm}[Cauchy--Schwarz]\\label{thm:cs}", "an error on the \\begin line: its source");
+    assert.equal(boxes(view).length, 5, "the box stays");
+  } finally {
+    p.done();
+  }
+});
+
+/**
+ * Excerpts of the .aux XeLaTeX wrote for \include'd chapters of a synthetic elegantbook book (lang=cn,
+ * chinese: the toc says 第四章, the anchor chapter.4; the first appendix's chapter counter is 1).
+ */
+const CH4_AUX = [
+  "\\relax ",
+  "\\@writefile{toc}{\\contentsline {chapter}{\\numberline {第四章}边界情形}{8}{chapter.4}\\protected@file@percent }",
+  "\\newlabel{chap:edge}{{4}{8}{边界情形}{chapter.4}{}}",
+  "\\newlabel{thm:t-label}{{4.3}{8}{边界情形}{tcb@cnt@theorem.4.3}{}}",
+  "\\newlabel{thm:next-line}{{4.4}{8}{边界情形}{tcb@cnt@theorem.4.4}{}}",
+  "\\newlabel{exam:lbl}{{4.2}{8}{边界情形}{exam.4.2}{}}",
+  "\\@setckpt{chapters/ch4}{",
+  "\\setcounter{page}{10}",
+  "\\setcounter{chapter}{4}",
+  "\\setcounter{tcb@cnt@theorem}{4}",
+  "\\setcounter{tcb@cnt@definition}{0}",
+  "\\setcounter{exam}{2}",
+  "\\setcounter{exer}{0}",
+  "\\setcounter{prob}{1}",
+  "}",
+].join("\n");
+const APPENDIX_AUX = [
+  "\\relax ",
+  "\\@writefile{toc}{\\contentsline {chapter}{\\numberline {A}记号表}{10}{appendix.A}\\protected@file@percent }",
+  "\\@setckpt{chapters/appendix}{",
+  "\\setcounter{chapter}{1}",
+  "\\setcounter{tcb@cnt@theorem}{1}",
+  "\\setcounter{exam}{1}",
+  "}",
+].join("\n");
+const CH4 = [
+  "\\chapter{边界情形}\\label{chap:edge}", // 1
+  "\\begin{theorem}{无标签定理}{}",
+  "\\end{theorem}",
+  "\\begin{theorem}[可选标题]", // 4
+  "\\end{theorem}",
+  "\\begin{theorem}{标题后标签}\\label{thm:t-label}", // 6
+  "\\end{theorem}",
+  "\\begin{theorem}[下一行标签]", // 8
+  "  \\label{thm:next-line}",
+  "\\end{theorem}",
+  "\\begin{theorem*}{无编号定理}", // 11
+  "\\end{theorem*}",
+  "\\begin{example}", // 13
+  "\\end{example}",
+  "\\begin{example}[带标签]\\label{exam:lbl}", // 15
+  "\\end{example}",
+  "\\begin{problem}[一个问题]", // 17
+  "\\end{problem}",
+].join("\n");
+/** The theorem heads, top to bottom. */
+const heads = (view: EditorView) => shown(view).filter((l) => l.startsWith("│ [")).map((l) => l.slice(2));
+
+test("T-L9 boxes without a label: numbered by their place when the \\include'd file's .aux checkpoint confirms the count", async () => {
+  const p = await project();
+  try {
+    writeFileSync(join(p.outDir, "chapters", "ch4.aux"), CH4_AUX);
+    writeFileSync(join(p.outDir, "chapters", "appendix.aux"), APPENDIX_AUX);
+    // As the PDF prints them (pdf.js's text of the compiled book).
+    const printed = ["[定理 4.1 (无标签定理)]", "[定理 4.2 (可选标题)]", "[定理 4.3 (标题后标签)]", "[定理 4.4 (下一行标签)]", "[定理 (无编号定理)]", "[例题 4.1]", "[例题 4.2 带标签]", "[问题 4.1 一个问题]"];
+    assert.deepEqual(heads(await p.mount(CH4, undefined, 0, "chapters/ch4")), printed);
+    const unknown = ["[定理 (无标签定理)]", "[定理 (可选标题)]", "[定理 4.3 (标题后标签)]", "[定理 4.4 (下一行标签)]", "[定理 (无编号定理)]", "[例题]", "[例题 4.2 带标签]", "[问题 一个问题]"];
+    assert.deepEqual(heads(await p.mount(CH4, undefined, 0)), unknown, "an \\input'd file (no include name): labels only");
+    assert.deepEqual(heads(await p.mount(CH4, undefined, 0, "chapters/ch5")), unknown, "a file the last compile did not include");
+
+    // One more theorem than the checkpoint counted (typed since): the theorems wait for a compile, the examples do not.
+    const added = CH4.replace("\\begin{theorem*}", "\\begin{theorem}{新定理}{}\n\\end{theorem}\n\\begin{theorem*}");
+    assert.deepEqual(heads(await p.mount(added, undefined, 0, "chapters/ch4")), [
+      ...unknown.slice(0, 4),
+      "[定理 (新定理)]",
+      "[定理 (无编号定理)]",
+      ...printed.slice(5),
+    ]);
+    // A labelled box whose .aux number is not its place (moved first): its counter numbers nothing counted.
+    const moved = CH4.replace("\\begin{theorem}{标题后标签}\\label{thm:t-label}\n\\end{theorem}\n", "").replace(
+      "\\begin{theorem}{无标签定理}",
+      "\\begin{theorem}{标题后标签}\\label{thm:t-label}\n\\end{theorem}\n\\begin{theorem}{无标签定理}",
+    );
+    assert.deepEqual(heads(await p.mount(moved, undefined, 0, "chapters/ch4")).slice(0, 3), ["[定理 4.3 (标题后标签)]", "[定理 (无标签定理)]", "[定理 (可选标题)]"]);
+    // A box before the \\chapter heading (it counts on the chapter before), or two chapters in the file.
+    const early = "x\n\\begin{problem}\n\\end{problem}\n" + CH4.replace("\\begin{problem}[一个问题]\n\\end{problem}", "");
+    assert.deepEqual(heads(await p.mount(early, undefined, 0, "chapters/ch4"))[0], "[问题]");
+    assert.deepEqual(heads(await p.mount(`${CH4}\n\\chapter{第二章}`, undefined, 0, "chapters/ch4"))[0], "[定理 (无标签定理)]");
+
+    // The first appendix: its chapter counter is 1, the heads print A.
+    const appendix = "\\chapter{记号表}\n\\begin{theorem}{附录定理}{}\n\\end{theorem}\n\\begin{example}\n\\end{example}";
+    assert.deepEqual(heads(await p.mount(appendix, undefined, 0, "chapters/appendix")), ["[定理 A.1 (附录定理)]", "[例题 A.1]"]);
+  } finally {
+    p.done();
+  }
+});
+
+test("T-L9 arguments a box does not take stay in place as text (elegantbook's proof and remark take none)", async () => {
+  const p = await project();
+  try {
+    const sources = ["\\documentclass{article}\n\\usepackage{amsthm}\n\\newtheorem{thm}{Theorem}"];
+    const amsthm: LatexRefs = { numbers: new Map(), labels: new Map(), cites: new Map(), names: refNames(sources), theorems: theoremMap(sources), checkpoints: new Map() };
+    const doc = [
+      "\\begin{proof}[另一种证明]", // 1
+      "  可选参数。",
+      "\\end{proof}",
+      "\\begin{remark}[重要 $x$] % a note", // 4: the argument's formula renders
+      "\\end{remark}",
+      "\\begin{example}[抛硬币]{extra}", // 6: example takes [title] only
+      "\\end{example}",
+      "\\begin{theorem}{全期望公式}{total-exp}[x]", // 8: tcolorbox's g o t\\label g
+      "\\end{theorem}",
+      "end",
+    ].join("\n");
+    const view = await p.mount(doc);
+    assert.deepEqual(shown(view).filter((l) => l !== "│ (collapsed)"), [
+      "│ [证明][另一种证明]",
+      "│   可选参数。",
+      "│ [注][重要 [w]]",
+      "│ [例题 抛硬币]{extra}",
+      "│ [定理 (全期望公式)][x]",
+      "end",
+    ]);
+    const thm = await p.mount("\\begin{thm}{extra}\n\\end{thm}\nend", amsthm);
+    assert.equal(shown(thm)[0], "│ [Theorem.]{extra}", "amsthm's [title] only");
+  } finally {
+    p.done();
+  }
+});
+
+test("T-L9 #8 and #13: figure and table lines collapse; \\includegraphics shows the image, a PDF's first page, or keeps its source", async () => {
+  const p = await project();
+  try {
+    writeFileSync(join(p.book, "figures", "plot.pdf"), "%PDF-1.4 synthetic\n");
+    mkdirSync(join(p.book, "img"));
+    writeFileSync(join(p.book, "img", "logo.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>");
+    // A dot in a name without an extension: graphicx appends its extensions (pdfLaTeX reads loss_lr0.01.png).
+    writeFileSync(join(p.book, "figures", "loss_lr0.01.png"), readFileSync(join(p.book, "figures", "grid.png")));
+    const doc = [
+      "\\begin{figure}[htbp]", // 1
+      "  \\centering",
+      "  \\includegraphics[width=0.3\\linewidth]{figures/grid.png}",
+      "  \\caption{合成图片}\\label{fig:grid}",
+      "\\end{figure}",
+      "\\includegraphics{figures/plot}", // 6: graphicx's extensions (pdf first)
+      "\\includegraphics{logo.svg}", // 7: not in \\graphicspath (main.tex has none)
+      "\\includegraphics{figures/grid.eps}",
+      "\\begin{table}", // 9
+      "\\end{table}",
+      "\\includegraphics[width=2cm]{figures/loss_lr0.01}", // 11
+      "\\includegraphics{\\figdir/plot}", // 12: TeX expands the macro; the plugin cannot tell
+      "\\includegraphics{example-image-a}", // 13: TeX may find a bare name in its tree (mwe)
+      "end",
+    ].join("\n");
+    const view = await p.mount(doc, LABELS, doc.length);
+    assert.deepEqual(shown(view), [
+      "(collapsed)",
+      "  \\centering",
+      "[img]",
+      "  \\caption{合成图片}[fig:grid]",
+      "(collapsed)",
+      "[img]",
+      "\\includegraphics{logo.svg}",
+      "\\includegraphics{figures/grid.eps}",
+      "(collapsed)",
+      "(collapsed)",
+      "[img]",
+      "\\includegraphics{\\figdir/plot}",
+      "\\includegraphics{example-image-a}",
+      "end",
+    ]);
+    const imgs = [...view.contentDOM.querySelectorAll<HTMLImageElement>(".lsp-lp-image img")];
+    assert.deepEqual(
+      imgs.map((i) => [i.getAttribute("src"), i.getAttribute("width")]),
+      [
+        [`app://local${join(p.book, "figures", "grid.png")}`, null],
+        ["data:image/png;base64,page1-320", "120"],
+        [`app://local${join(p.book, "figures", "loss_lr0.01.png")}`, null],
+      ],
+      "the host's resource URL; the PDF's first page at most 320 px high",
+    );
+    assert.deepEqual(p.pdfPages, [join(p.book, "figures", "plot.pdf")]);
+    assert.deepEqual(
+      [...view.contentDOM.querySelectorAll<HTMLElement>(".lsp-lp-error")].map((e) => [e.textContent, e.title]),
+      [["\\includegraphics{figures/grid.eps}", "Image not found: figures/grid.eps"]],
+      "a path not found is marked; a bare name (logo.svg too) or a macro in the path is not",
+    );
+    // Revealed: the source, the image below it.
+    cursorAt(view, view.state.doc.line(3).from + 4);
+    assert.deepEqual(shown(view).slice(2, 4), ["  \\includegraphics[width=0.3\\linewidth]{figures/grid.png}", "[img below]"]);
+    cursorAt(view, view.state.doc.line(1).to);
+    assert.equal(shown(view)[0], "\\begin{figure}[htbp]");
+
+    // A \graphicspath and a file created later: the image appears (filesChanged).
+    const main = join(p.book, "main.tex");
+    writeFileSync(main, readFileSync(main, "utf8").replace("\\usepackage{mathtools}", "\\usepackage{mathtools}\n\\graphicspath{{img/}}"));
+    p.render.fileModified(main);
+    await waitFor(() => shown(view)[6] === "[img]");
+    writeFileSync(join(p.book, "figures", "grid.eps"), "%!PS");
+    p.render.filesChanged();
+    await waitFor(() => view.contentDOM.querySelector<HTMLElement>(".lsp-lp-error")?.title === "Live preview does not show .eps images: figures/grid.eps");
+    assert.equal(view.contentDOM.querySelectorAll(".lsp-lp-error").length, 1);
+    // A saved image renders anew (its mtime is in the request).
+    const before = renderStats(view).renders;
+    const png = join(p.book, "figures", "grid.png");
+    writeFileSync(png, readFileSync(png));
+    const t = new Date(Date.now() + 5000);
+    utimesSync(png, t, t);
+    p.render.fileModified(png);
+    await waitFor(() => renderStats(view).renders === before + 1);
+
+    // A definitions change is a new epoch: no image renders again (image requests are epoch-free).
+    const renderer = p.render.rendererFor(p.root);
+    const [epoch, renders, pages] = [renderer.epoch, renderStats(view).renders, p.pdfPages.length];
+    const macros = join(p.book, "macros.tex");
+    writeFileSync(macros, readFileSync(macros, "utf8") + "\\newcommand{\\foo}{x}\n");
+    p.render.fileModified(macros);
+    await waitFor(() => renderer.epoch !== epoch);
+    await sleep(50);
+    await rendered(view);
+    assert.deepEqual([renderStats(view).renders, p.pdfPages.length], [renders, pages]);
+    assert.equal(view.contentDOM.querySelectorAll(".lsp-lp-image img").length, 4, "the images stay");
+  } finally {
+    p.done();
+  }
+});
+
+/**
+ * A stand-in for blockCrop's CropService: the blocks whose text is in `compiled` crop (as
+ * `${seq}|${kind}|${first line}` cards), the rest changed; `previous` as the service gives it;
+ * renders take `delay` ms and fail for blocks whose first line is in `failing`.
+ */
+function fakeCrops() {
+  const f = {
+    seq: 1,
+    compiled: null as string | null,
+    failing: new Set<string>(),
+    delay: 5,
+    /** Request source -> its block's text; block text -> the source that drew it last. */
+    blocks: new Map<string, string>(),
+    drawn: new Map<string, string>(),
+  };
+  const crops: TexCrops = {
+    locate(_root, _file, text, _line, kind) {
+      if (f.compiled === null || !f.compiled.includes(text)) return { note: NOTE_CHANGED };
+      const src = `${f.seq}|${kind}|${text.split("\n")[0].trim()}`;
+      f.blocks.set(src, text);
+      const was = f.drawn.get(text);
+      return { src, previous: was && was !== src ? was : null };
+    },
+    async render(_root, src) {
+      await sleep(f.delay);
+      if ([...f.failing].some((t) => src.endsWith(t))) return { ok: false, message: "no records", quiet: true };
+      f.drawn.set(f.blocks.get(src)!, src);
+      const card = document.createElement("div");
+      card.className = "lsp-lp-paper ll-crop";
+      card.textContent = `crop ${src}`;
+      return { ok: true, node: card };
+    },
+    hover: async () => ({ note: NOTE_CHANGED }),
+  };
+  return Object.assign(f, { crops });
+}
+
+/** The crop cards the view shows in place of blocks. */
+const cropCards = (view: EditorView) => blocks(view).filter((w) => w.classList.contains("lsp-lp-crop")).map((w) => w.textContent);
+
+const CROP_DOC = [
+  "\\begin{tikzpicture}[scale=2]", // 1-3: #14
+  "  \\draw (0,0) -- (1,1);",
+  "\\end{tikzpicture}",
+  "\\begin{equation*}", // 4-8: #4, MathJax rejects tikz-cd
+  "  \\begin{tikzcd}",
+  "    A \\arrow[r] & B",
+  "  \\end{tikzcd}",
+  "\\end{equation*}",
+  "\\begin{table}[htbp]", // 9-14: #14 in a float
+  "  \\begin{tabular}{ll}",
+  "    a & $x^2$ \\\\",
+  "  \\end{tabular}",
+  "  \\caption{T}",
+  "\\end{table}",
+  "$\\undefinedmacro$ inline", // 15: #4 inline, never a crop
+  "\\begin{theorem}{Title}{t}", // 16-20: inside elegantbook's tcolorbox, never a crop
+  "  \\begin{tikzpicture}",
+  "    \\draw (0,0) circle (1);",
+  "  \\end{tikzpicture}",
+  "\\end{theorem}",
+  "end",
+].join("\n");
+
+test("P5 #4 and #14: PDF crops for TikZ pictures, tables and rejected block formulas; source when changed", async () => {
+  const f = fakeCrops();
+  f.compiled = CROP_DOC;
+  const p = await project(f.crops);
+  try {
+    const view = await p.mount(CROP_DOC, undefined, CROP_DOC.length);
+    await waitFor(() => cropCards(view).length === 3);
+    assert.deepEqual(cropCards(view), [
+      "crop 1|picture|\\begin{tikzpicture}[scale=2]",
+      "crop 1|math|\\begin{equation*}",
+      "crop 1|picture|\\begin{tabular}{ll}",
+    ]);
+    assert.deepEqual(
+      lines(view),
+      ["[w]", "[w]", "<>", "[w]", "  \\caption{T}", "<>", "$\\undefinedmacro$ inline", "<lsp-lp-box is-second>", "end"],
+      "the float's \\begin and \\end lines collapse around the crop, its caption stays",
+    );
+    assert.match(view.contentDOM.querySelector(".lsp-lp-box")!.textContent!, /\\begin\{tikzpicture\}/, "inside elegantbook's tcolorbox: source");
+    assert.deepEqual(errors(view), ["$\\undefinedmacro$"], "inline math never crops");
+
+    // Revealed: the source, no preview below (the crop would be stale).
+    view.dispatch({ selection: EditorSelection.cursor(view.state.doc.line(2).from + 3) });
+    assert.deepEqual(lines(view).slice(0, 3), ["\\begin{tikzpicture}[scale=2]", "  \\draw (0,0) -- (1,1);", "\\end{tikzpicture}"]);
+    assert.equal(below(view), null);
+    // Changed since the compile: source after the cursor leaves.
+    view.dispatch({ changes: { from: view.state.doc.line(2).to - 1, insert: " -- (2,0)" } });
+    view.dispatch({ selection: EditorSelection.cursor(view.state.doc.length) });
+    await rendered(view);
+    assert.equal(lines(view)[0], "\\begin{tikzpicture}[scale=2]");
+    assert.equal(cropCards(view).length, 2);
+    // A rejected formula without a crop is MathJax's error again.
+    view.dispatch({ changes: { from: view.state.doc.line(6).from + 4, insert: "C " } });
+    await rendered(view);
+    assert.ok(errors(view).includes("\\begin{equation*}"));
+  } finally {
+    p.done();
+  }
+});
+
+test("P5 a new compile's crop replaces the last one when it lands; a crop that fails leaves the source", async () => {
+  const f = fakeCrops();
+  f.compiled = CROP_DOC;
+  const p = await project(f.crops);
+  try {
+    const view = await p.mount(CROP_DOC, undefined, CROP_DOC.length);
+    await waitFor(() => cropCards(view).length === 3);
+    // A new result: every block's request changes; the old crops stay until the new ones land.
+    f.seq = 2;
+    f.delay = 60;
+    p.render.cropsChanged(p.root);
+    await sleep(30);
+    assert.deepEqual(cropCards(view).map((c) => c!.slice(0, 7)), ["crop 1|", "crop 1|", "crop 1|"], "the last crops meanwhile");
+    await waitFor(() => cropCards(view).every((c) => c!.startsWith("crop 2|")), 3000);
+    assert.equal(cropCards(view).length, 3);
+
+    // A crop that cannot render (no SyncTeX records): #14 keeps its source, #4 MathJax's error.
+    f.seq = 3;
+    f.delay = 5;
+    f.failing = new Set(["\\begin{tabular}{ll}", "\\begin{equation*}"]);
+    p.render.cropsChanged(p.root);
+    await waitFor(() => cropCards(view).length === 1 && cropCards(view)[0]!.startsWith("crop 3|"), 3000);
+    assert.ok(lines(view).includes("  \\begin{tabular}{ll}"));
+    assert.ok(errors(view).includes("\\begin{equation*}"));
   } finally {
     p.done();
   }

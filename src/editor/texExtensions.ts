@@ -26,7 +26,7 @@ import type { TexDiagnostic } from "../tex/logParser";
 import { opensArgumentList, typingCommand } from "./latexCompletion";
 import { latexEnterHooks, latexIndent } from "./latexEnter";
 import { latexHighlightPlugin } from "./latexHighlight";
-import { LatexMath, mathAt } from "./latexScan";
+import { LatexBlock, LatexMath, mathAt } from "./latexScan";
 import {
   CLOSE_BEFORE,
   darkThemeExtension,
@@ -41,9 +41,9 @@ import {
   typingDiagnostics,
 } from "./shared/editorKit";
 import { InlineSuggestions, keyArbiter } from "./shared/keyArbiter";
-import { liveInput, livePreviewCompartment, replacedAt } from "./shared/livePreview";
+import { liveActive, liveInput, livePreviewCompartment, replacedAt } from "./shared/livePreview";
 import { lspGlyphColumn } from "./shared/lspCompletion";
-import { renderHover } from "./shared/renderHover";
+import { cursorPreview, renderHover } from "./shared/renderHover";
 
 export interface TexEditorOptions {
   /** The file's text, to detect its indent unit. */
@@ -131,25 +131,39 @@ export function texEditorExtensions(o: TexEditorOptions): Extension[] {
 export interface TexHoverOptions {
   /** The `hoverRender` setting, read on every hover. */
   enabled(): boolean;
-  /** The formula's rendering (MathJax), a failure (`hoverError`), or null. */
-  render(math: LatexMath, view: EditorView): HTMLElement | null | Promise<HTMLElement | null>;
+  /**
+   * What renders at `pos`: a formula, or a block cropped from the PDF (TexRender's
+   * `hoverTarget`). Default: the formula there.
+   */
+  target?(state: EditorState, pos: number): LatexMath | LatexBlock | null;
+  /** The rendering (MathJax, a PDF crop), a failure (`hoverError`) or a note, or null. */
+  render(target: LatexMath | LatexBlock, view: EditorView): HTMLElement | null | Promise<HTMLElement | null>;
   /** texlab's hover. */
   lsp?: HoverTooltipSource;
+  /** The cursor preview (texCursorPreview). */
+  cursor?: TexCursorOptions;
+}
+
+export interface TexCursorOptions {
+  /** The `cursorPreview` setting, read at every change. */
+  enabled(): boolean;
+  /** The formula's rendering (TexRender's `preview`: MathJax), or a failure (`hoverError`). */
+  render(math: LatexMath, view: EditorView): HTMLElement | null | Promise<HTMLElement | null>;
 }
 
 /**
  * The hover sources: the render hover (Prec.high, so its section sits above texlab's) for the
- * formula under the pointer, and texlab's hover, which returns nothing inside a formula while
- * rendering is on (it would only repeat a glyph). Neither shows over a live preview widget
- * (renderHover skips them itself).
+ * formula or block under the pointer, and texlab's hover, which returns nothing inside a
+ * formula while rendering is on (it would only repeat a glyph). Neither shows over a live
+ * preview widget (renderHover skips them itself). With `cursor`, the cursor preview too.
  */
 export function texHover(o: TexHoverOptions): Extension[] {
   const lsp = o.lsp;
   return [
-    renderHover<LatexMath>({
+    renderHover<LatexMath | LatexBlock>({
       enabled: o.enabled,
-      target: (state, pos) => mathAt(state.doc, pos),
-      render: o.render,
+      target: (state, pos) => (o.target ? o.target(state, pos) : mathAt(state.doc, pos)),
+      render: (t, view) => o.render(t, view),
     }),
     lsp
       ? hoverTooltip(
@@ -158,7 +172,26 @@ export function texHover(o: TexHoverOptions): Extension[] {
           { hoverTime: 300 },
         )
       : [],
+    o.cursor ? texCursorPreview(o.cursor) : [],
   ];
+}
+
+/**
+ * The cursor preview for LaTeX math (shared `cursorPreview`, design 3.1): the formula around the
+ * main cursor rendered below it while it is typed. Inline math in both modes, display math in
+ * source mode; in live preview a formula owning its lines is a block, which keeps its own
+ * rendering below its revealed source (also under an error diagnostic), unless live preview does
+ * not decorate (a document grown past its maxLines).
+ */
+export function texCursorPreview(o: TexCursorOptions): Extension {
+  return cursorPreview<LatexMath>({
+    enabled: o.enabled,
+    target: (state) => {
+      const m = mathAt(state.doc, state.selection.main.head);
+      return m && !(m.block && liveActive(state)) ? m : null;
+    },
+    render: (m, view) => o.render(m, view),
+  });
 }
 
 /** The pointer (at `pos`, on the character before it when side < 0) is on a formula. */

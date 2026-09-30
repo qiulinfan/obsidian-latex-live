@@ -22,7 +22,10 @@
 - TeX tool conventions that bugs have already come from:
   - Pass the preamble format by name (`-fmt=<job>-preamble`) with
     `TEXFORMATS=<outDir>:`; an absolute `-fmt` path breaks the `-recorder`
-    temp file name and pdfTeX exits before writing a log.
+    temp file name and pdfTeX exits before writing a log. A ready format has a
+    stamp `<job>-preamble.json` (its key and the project files its preamble read,
+    with mtimes), deleted before a rebuild and when the format proves broken;
+    other runs (fragment compiles) take a format only through `readyPreambleFormat`.
   - Delete the job log before each run so a run that dies early never
     reports the previous log as success.
   - TeX reports physical paths (`/private/var/...` on macOS); map them back
@@ -96,7 +99,18 @@
   at the target's start: CodeMirror hides a tooltip whose anchor is scrolled out and places
   the merged hover at its lowest section anchor, so a long `align` scrolled past its first
   line would show nothing (`tests/renderHover.test.ts` checks the anchor). A render still
-  pending when the pointer leaves the editor shows nothing.
+  pending when the pointer leaves the editor shows nothing. `cursorPreview` (same module, T-S13 in
+  the same test; setting-gated) is a `showTooltip` field: while the focused editor's main cursor
+  is in a target, its rendering floats below the target's last row (the tooltip view's `getCoords`:
+  a rect from the top of the target's first row to the bottom of its last, its left edge at the
+  anchor, so a formula that soft-wraps never covers the row being typed, and a preview CodeMirror
+  flips above for want of room below clears the whole target; smoke B8). It renders again after every
+  edit in the same tooltip view (kept while the target's start maps onto itself), so typing never
+  rebuilds or blanks it: a pending render keeps the last one, an older render never lands over a
+  newer one, and a `hoverError` after a rendering keeps that rendering marked `is-error`. It hides
+  while the completion list is open (`is-covered`; both sit below the line), takes no clicks
+  (`pointer-events: none`) and binds no keys; it goes when the cursor leaves the target or the
+  editor blurs (a state set on a focused editor picks the focus up in a microtask).
 - Live preview (`src/editor/shared/livePreview.ts`; its test `tests/livePreview.test.ts`
   is identical in both repositories): one StateField holds every decoration (block widgets
   and replaced line breaks throw from a ViewPlugin). `liveInput()` is mounted always and
@@ -110,7 +124,11 @@
   goal column on the range (cursorLineUp/Down, their Shift forms, PageUp/Down) and as many
   ranges as before, so Select All, Mod-Home/End, Cmd-ArrowUp/Down, snippet fields and
   Escape's simplifySelection are never redirected; a line move into a block at the
-  document's end or start stops on its first or last line. jsdom's vertical motion returns
+  document's end or start stops on its first or last line. A line move that lands one line past
+  the line after a block stops on the block too when that line is outside the viewport the view
+  last drew (CodeMirror places undrawn lines by their characters: a short or blank line there gets
+  almost no height); transaction filters see no view, so `drawnViewport` records each view's
+  viewport by its state (T-S7, smoke B7). jsdom's vertical motion returns
   no goal column: tests that press arrows into blocks patch
   `EditorView.prototype.moveVertically` to add one (`tests/livePreview.test.ts`,
   `tests/latexLive.test.ts`). A construct shows its source while the editor has focus, or
@@ -119,11 +137,16 @@
   snippet fields and YOLO ghost text always sit in visible source. A language's `decorate`
   keeps a construct's decorations within its own lines (a selection move re-decorates only
   the constructs on the lines it left or entered; the test compares that with a full
-  build) and draws rendered constructs through `renderConstruct`. A construct with an
+  build). A construct that tests the selection on fewer lines says so with the optional
+  `reveals` (theorem boxes: their `\begin` and `\end` lines), so a move inside a long one
+  re-decorates only the constructs on the lines moved over, not the box and its whole body
+  (T-S5). `decorate` draws rendered constructs through `renderConstruct`. A construct with an
   error diagnostic in it (overlapping it, or empty and inside or at its edge; one that
-  only ends where it starts does not count) stays source: diagnostics still reach the
-  editor only through `showTexDiagnostics`, the field rebuilds on lint's
-  `setDiagnosticsEffect`, and the live layer never dispatches `setDiagnostics`. While the
+  only ends where it starts does not count) stays source; a revealed block keeps its rendering
+  below it (the last one, `is-error` when the new source fails, no dotted mark: the lint
+  underline shows). Diagnostics still reach the editor only through `showTexDiagnostics`, the
+  field rebuilds on lint's `setDiagnosticsEffect`, and the live layer never dispatches
+  `setDiagnostics`. While the
   mouse is down and during `input.type.compose` the decorations are only mapped
   (`compositionend` refreshes); renders that land are shown through `refreshLive` carrying
   their keys, which re-decorates only the constructs waiting for them
@@ -137,7 +160,20 @@
   `replacedAt` and `enterBlocks` read the whole sets, and tests comparing decorations
   include the function's output. A scanner that throws leaves that text as source (logged
   once). A `FragmentRenderer` keys its results on its `epoch` and calls `subscribe`'s
-  listener when that changes; a construct still rendering stays source (no placeholders).
+  listener when that changes; a construct still rendering stays source (no placeholders). A new
+  epoch empties the cache but keeps its successful renders by request identity (the key without
+  its `${epoch}|` prefix, so only keys built with `ctx.request`): while a construct's render for
+  the new epoch is pending, `ctx.result` answers with the earlier rendering (display-only: the
+  render stays queued, it is never a hit, `ctx.peek` never returns it), so a definitions change
+  never flashes the document back to source; the new result replaces it, a failure shows the
+  source and its error mark, and a construct whose own text changed has no earlier rendering.
+  Those renderings count against the cache bound and are evicted first when no build shows them
+  (`renderStats().cached`). An epoch-free request (`ctx.request(.., epochFree)`: what the epoch
+  cannot change, images and crops) has `*` in place of the epoch and stays cached across epochs.
+  Asynchronous renders run one at a time per renderer, by kind: while one is in flight, requests
+  of a kind that has answered with a promise wait, other kinds (and kinds not seen yet) keep
+  rendering, so a formula never waits for a PDF page or crop being drawn. `isLive` says the
+  compartment holds live preview, `liveActive` that it decorates (the document is within maxLines).
   A pending or failed `RenderWidget` keeps what its element shows only when that was its
   own construct's (the same request, or the preview below the block being edited):
   CodeMirror hands any dropped widget's DOM to `updateDOM`, with the old widget. Block
@@ -152,15 +188,19 @@
   Chrome, skipped without it: B1 arrows through blocks, including blocks at the document's
   edges, and the jumps that must not be redirected; B2 IME; B3 drag; B4 gutter drift; B5
   performance on `scripts/gen-perf-fixture.mjs`'s 5,700-line chapter, typing in a revealed
-  block until its preview re-rendered, and the page staying responsive with the mouse held
-  during the prefetch). Both scripts are identical in the two repositories.
+  block until its preview re-rendered, cursor moves inside a 190-line theorem box, and the page
+  staying responsive with the mouse held during the prefetch; B6 arrows through theorem boxes one
+  line at a time, gutter aligned; B7 ArrowDown at the pane's bottom edge, the drawn viewport
+  ending at a block; B8 the cursor preview below a soft-wrapped formula, and above a display near
+  the window's bottom). Both scripts are identical in the two repositories.
 - LaTeX's live preview (`src/editor/latexLive.ts`, pure; `tests/latexLive.test.ts` runs it on
   the real stack with Obsidian's MathJax): formulas (`$..$`, `\(..\)`, `\[..\]`, `$$..$$`, the math
-  environments) and, since P3, the text constructs of design 4.4 #5-#11; theorem boxes, figures,
-  images, TikZ pictures (#14, P5's crops) and unknown environments stay source. A display
+  environments), since P3 the text constructs of design 4.4 #5-#11, since P4 theorem boxes (#12),
+  figure/table lines (#8) and images (#13), since P5 PDF crops (#14: TikZ pictures and tables; #4:
+  a block formula MathJax rejects); unknown environments stay source. A display
   formula owning its lines (latexScan's `block`; inline math never is one) becomes a block
-  widget, one in running text an inline display widget; a formula MathJax rejects keeps its
-  source with the `lsp-lp-error` underline.
+  widget, one in running text an inline display widget; a formula MathJax rejects shows its crop
+  when it owns its lines and has one, else keeps its source with the `lsp-lp-error` underline.
   Requests carry the formula already prepared (`prepareMath` with the root's refs: `\label` ->
   `\tag{n}`, references -> the chips' text), so the renderer's epoch is the definitions' hash
   alone and a renumbering compile re-renders only the formulas whose text changed; `TexRender`
@@ -170,7 +210,9 @@
     cursor touches either end. `\textbf`/`\textit`/`\emph`/`\underline`/`\texttt`/`\textsc` with a
     one-line argument: a mark on the content, the markup hidden until the construct is touched.
   - `\item` shows the marker LaTeX typesets (latexScan computes it: bullets by itemize depth,
-    numbers by enumerate depth, the enumerate package's short form, enumitem `label=`/`start=`,
+    numbers by enumerate depth (elegantbook's `problemset` is an enumerate: its `[title]` is no
+    list option, and `resume` after it starts over, its enumerate having ended in its group), the
+    enumerate package's short form, enumitem `label=`/`start=`,
     `resume`/`resume*`/`series=`/`resume=` (enumitem's rules: `resume` sees the last list of that
     environment ended in the same list or around it, a `resume*` list saves the counter only) and
     `\setcounter`/`\addtocounter`/`\stepcounter{enumi..iv}` inside the list, `\item[x]` without a
@@ -178,9 +220,57 @@
     reveals it, so typing after it keeps the marker. An `\item[..]` label with math or a
     reference (`\item[$\sigma$-algebra]`) is no widget: `\item[` and `]` hide, the label stays in
     place (bold for a term) and its constructs render; touching `\item[` or `]` reveals both. The
-    `\begin`/`\end` lines of lists and `center` alone on their lines collapse (a block replace
-    without a widget) until the cursor is on the line; arrows reach them through `enterBlocks`
-    like any block.
+    `\begin`/`\end` lines of lists, `center`, `figure(*)` and `table(*)` alone on their lines
+    collapse (a block replace without a widget) until the cursor is on the line; arrows reach them
+    through `enterBlocks` like any block.
+  - theorem boxes: latexScan emits every other environment whose `\begin` (with the arguments and
+    a `\label` on its line) and `\end` are alone on their lines, within 200 lines, as an `env`
+    construct (held at its `\begin` so constructs stay in document order; nested ones pair by
+    name); latexLive draws those in the project's theorem map (`src/tex/theorems.ts`, pure, checked
+    against the installed elegantbook.cls by `tests/theorems.test.ts`: amsthm's proof,
+    `\newtheorem`/`\newtheorem*`, elegantbook's boxes and heads by `lang`/`mode`/`color`,
+    `\elegantnewtheorem`) as a BlockWrapper (`lsp-lp-box is-<role>`, elegantbook's scheme colour
+    inline as `--lp-box-color`; never a vertical margin or padding; in a dark theme the head's text
+    is that colour lightened to oklch L >= 0.72, so `color=black` stays readable, while the border and
+    background keep it). The `\begin` line shows the
+    head the PDF prints (`定理 1.1 (title)`, `Theorem 2 (title).`, `例题 1.1 title`, `Proof.`), its
+    number from the .aux label of the box (elegantbook's `{title}{label}` is `prefix:label`, else a
+    `\label` after the arguments or first on the next line); a title with math or a reference stays
+    in place between the head's chips; arguments the environment does not take stay as text
+    (`\begin{proof}[x]` under elegantbook, whose proof takes none: the PDF prints `证明 [x]`). A box
+    without a label is numbered by counting (`boxNumber`, also the hover fragment's `\the<counter>`)
+    only in an `\include`d file (`LatexLiveEnv.file`, project's `includeName`) whose .aux checkpoint
+    (`readAuxCheckpoints`: `\@setckpt` counters, the chapter from its hyperref anchor, `A` in an
+    appendix) confirms it: one `\chapter`, the boxes on the def's `counter` (theorems.ts: a
+    chapter-reset counter printing `\thechapter.\arabic`) all after it, as many as the checkpoint
+    counted, the labelled ones at their .aux numbers; otherwise no number (`\input`, single files,
+    thmcnt=section, unsaved extra boxes). The `\end` line collapses (amsthm's proof: `□` at the right,
+    `ll-qed-line` in styles.css outside the shared block). Each of the two lines reveals on its own;
+    the body is plain text, so typing keeps the box. Every `env` but a crop declares the live core's
+    `reveals` (its `\begin` and `\end` lines: the memoized scan cannot see which ones the theorem map
+    boxes), so a cursor move inside a long environment re-decorates only the constructs on the lines
+    moved over (on a 3,192-line chapter with a 190-line box, 0.3-0.4 ms and 6 decorate calls instead
+    of a full rebuild).
+  - images: `\includegraphics` alone on its line is an `image` construct; `LatexLiveEnv.image`
+    (TexRender's `imageOf`) resolves it (`src/tex/graphics.ts`: root folder, the last
+    `\graphicspath`, graphicx's extensions) to an epoch-free request `mtime|path` (a definitions
+    change never draws it again) the renderer draws as an
+    `<img>` of Obsidian's resource URL, or of a PDF's first page (`pdfPageImage`, pdf.js with
+    `PDFJS_ASSETS`, async); not found, eps or a bitmap outside the vault keep the source with a
+    titled `lsp-lp-error` mark, but a path with a macro or a bare name found nowhere in the project
+    (TeX may find it in its tree: mwe's `example-image-a`) keeps it unmarked (`image` returns null).
+    A name whose extension is none of graphicx's (`loss_lr0.01`) gets the extensions appended.
+  - crops (P5): latexScan reports a TikZ picture (tikzpicture, tikzcd, pgfpicture, circuitikz; its
+    inside still skipped) whose `\begin` and `\end` are alone on their lines as an `env`, like tables;
+    `CROP_ENVS` and a block formula whose MathJax render failed get `LatexLiveEnv.crop` (TexRender's
+    `cropOf`: the crop service's `locate`) and render (epoch-free requests) as a `crop` block
+    widget through `renderConstruct(.., { below: false })`: its source while the cursor is on its
+    lines, no preview below. While a new result's crop is pending, the block shows the crop its
+    `previous` request drew (the key changes with every result, so the core's stale-while-revalidate
+    cannot match it); changed, without a preview or failing (quietly) it is source (#4: MathJax's
+    error).
+    `cropKindOf` decides how a block crops and refuses anything inside a tcolorbox (elegantbook's
+    fancy theorems): pgf moves a box's content, and SyncTeX places it ~20 pt off.
   - `\ref`-family, `\cite`-family (`CITE_COMMANDS` in latexHighlight: natbib's and biblatex's,
     capitalized ones too) and `\label` (outside math) are `TextWidget` chips; their texts come
     from `src/editor/latexRefs.ts` (pure; also prepareMath's `refs`, so a `\cref` inside a formula
@@ -204,7 +294,8 @@
     (`preambleFiles`: its preamble's `\input` chains) get no constructs, like package, class and
     .bib files; a chapter with no root is still scanned whole.
   - A construct with an error diagnostic on it stays source.
-  Refs (`TexRender.refsOf(root)`, no MathJax needed): `readAuxLabels` over the build folder's
+  Refs (`TexRender.refsOf(root)`, no MathJax needed; `theorems` is the theorem map of the same
+  sources, and refNames' autoref names fall back to its `\<env>name`s as hyperref does): `readAuxLabels` over the build folder's
   `**/*.aux` (a number field loses only its outer braces; the kind is the `k@cref` twin's type,
   with its sort key, else the anchor's counter: `tcb@cnt@` stripped, `AMS` equation, `Item`
   enumi), the entries of the .bib files the project's sources name (`bibFiles`: `\addbibresource`,
@@ -212,8 +303,10 @@
   (`refNames` of the comment-free sources, kept while equal). The labels are re-read after every
   session result (`compiled`); everything when a view opens a document of the root (`opened`: a
   compile run elsewhere), when a project or .bib file is saved (300 ms), and when an edit changes
-  a .bib buffer or a bibliography, `\documentclass`, cleveref, `\crefname`, `\newtheorem` or
-  `autorefname` line (500 ms). A refs object changes only when something in it did (`numbers`
+  a .bib buffer or a bibliography, `\documentclass`, `\usepackage`, cleveref, `\crefname`,
+  `\(elegant)newtheorem`, `\graphicspath` or `autorefname` line (500 ms). Image resolutions are cached
+  per root: a saved image drops its entry, a vault create/delete/rename (`filesChanged`, registered
+  after the layout is ready) drops them all; the views rebuild through the renderer's subscribers. A refs object changes only when something in it did (`numbers`
   keeps its identity while the numbers stay); a change drops the hover's render cache and notifies
   the renderer's subscribers. `TexRender.rendererFor(root)` is one object per root (views of a
   project share renders); its `flush` installs MathJax's stylesheet at once and copies it into
@@ -267,9 +360,14 @@
   with `insertRule`, which a cloned element misses).
 - `texHover` (the `hover` option of `texEditorExtensions`) mounts the render hover and
   texlab's hover together: texlab's returns nothing inside a formula while `hoverRender`
-  is on, and nothing over a live widget. Formulas come from `latexScan.ts` (`formulas`/`mathAt`;
-  memoized per `Text`, body only, bounded by paragraphs; inline math steps over text arguments:
-  `$f = \text{当 $x$ 时} 1$` is one formula; definitions are skipped).
+  is on, and nothing over a live widget. Its `cursor` option mounts `texCursorPreview` (setting
+  `cursorPreview`, default off): inline math in both modes, display math in source mode (a live
+  block has its own rendering below it, also under an error diagnostic; a live view that does not
+  decorate, past maxLines, gets the preview: `liveActive`), rendered by `TexRender.preview`
+  (MathJax alone: it runs at every keystroke, never crops or fragment compiles). Formulas come
+  from `latexScan.ts` (`formulas`/`mathAt`; memoized per `Text`, body only, bounded by paragraphs;
+  inline math steps over text arguments: `$f = \text{当 $x$ 时} 1$` is one formula; definitions
+  are skipped).
 - Tests load Obsidian's MathJax with `tests/support/mathjax.ts`: the devDependency
   `mathjax@3.2.2` (`es5/tex-chtml-full.js` + `es5/ui/safe.js` is byte for byte Obsidian's
   `lib/mathjax/tex-chtml-full.js`) with the config from app.js. It is never bundled.
@@ -327,6 +425,64 @@
     the cursor inside.
   - A complete list is reused only while the query extends the one it was asked for
     (shared `lspCompletion`); backspacing into it asks texlab again, explicit lists too.
+- PDF crops (`src/preview/blockCrop.ts`, `CropService`, one per plugin; free of the obsidian
+  module, main.ts passes `openPdf` and `sessionFor`; `tests/crop.test.ts` runs its SyncTeX part on
+  a real XeLaTeX compile, T-L10..T-L12). A session reads the open editors' project files from disk
+  at each compile start and hangs them on the result that writes a PDF (`session.compiled`, `seq`
+  unique across sessions): a block crops only while its text is in that snapshot, the occurrence
+  nearest to its current line giving the compiled lines (a text search: line numbers after an
+  insertion point at the neighbouring block). `forwardSearchAll` returns every record of a line;
+  `queryLines`/`cropRegion` hold the geometry measured on the synthetic books (docs/design.md, P5):
+  never the `\begin` line as the block's own (a formula's opening line is asked as a line before:
+  a paragraph's last line is tagged with the line that ended the paragraph); records borrowed from
+  the neighbouring lines dropped; a tcolorbox is its `\end` line's record; a picture or table takes
+  the enclosing box its `\end` line reports, never a paragraph line; running text and tcolorboxes
+  drop what lies above the line before them (a page shipped out while the block was read tags its
+  boxes with the block's lines; a box broken over pages reports that page whole); formulas span the
+  text width; every block stops at the lines around it; the drawing is trimmed to its ink. Rules:
+  at most 4 `synctex view` at once, 2 s each, killed on dispose; a query that times out, is killed
+  or cannot start fails its region (never taken for "no records"; `synctex view` exits 0 then), and
+  the next render asks again; the last result's queries also run while the next compile runs
+  (TeX writes `<job>.synctex(busy)` and replaces the `.synctex.gz` when a pass ends; the hover waits
+  only before a session's first result), and a `.synctex.gz` whose mtime is not the one taken when
+  the result landed (`CompiledPdf.synctex`) fails the query quietly; `compiledLines` is memoized per
+  file, current line and text (duplicate blocks each get their own occurrence); regions and
+  drawings cached per result, drawn crops render synchronously; one pdf.js
+  document per result (a copy of the bytes, `PDFJS_ASSETS`: without the cMaps the Chinese glyphs
+  vanish), destroyed with the next result or the session; drawings are PNG blob URLs revoked one
+  result later (never data URLs: live preview keeps up to 2000 renders). Cards are
+  `lsp-lp-paper ll-crop`, `is-inverted` when "Invert preview colors" applies (part of the request;
+  `refreshPreviews` rebuilds). main.ts tells TexRender (`cropsChanged`) when a compile ends, a
+  preview closes (`crops.release`) or the theme changes. The render hover (TexRender's
+  `hoverTarget`/`hover`): a formula, else the innermost block that crops; a block formula shows its
+  fresh crop, else MathJax (a first compile running is not waited for); a block its fresh crop
+  (waiting for the session's first compile) or the note "Changed since the last compile."; no
+  preview: no section. P6 puts a fragment compile between them (next bullet).
+- Fragment compiles (design 4.7; `src/tex/fragment.ts`, pure, T-L13/T-L14 in `tests/fragment.test.ts`
+  against real TeX; `src/preview/fragments.ts`'s `FragmentService` draws them with pdf.js): the
+  render hover's last resort, only when MathJax failed (not on an unbalanced brace, which TeX
+  rejects too) and no fresh crop exists, setting `texFragmentFallback` (default on); when TeX fails
+  too, a formula shows MathJax's message and a block TeX's. Never for live preview or the cursor
+  preview. A job is one `.tex` in `<build folder>/snippets` run from the root's folder: pdfLaTeX from
+  the ready preamble format (a placeholder `\documentclass` line, `\endofdump`, the root's lines after
+  its own `\endofdump`), else the root's whole preamble; then `preview` (`active,tightpage,auctex`,
+  which also sets `\nofiles`), the `.aux` labels the fragments name as `\global\@namedef{r@k}` (raw
+  values, `readAuxDefinitions`), and after `\begin{document}` the body's definitions
+  (`fragmentContext`, allowed to redefine) and one preview environment per fragment; a fragment that is
+  not inline ends with `\par\hbox{}` (preview's box after a display loses the last line's depth).
+  Boxes come from `Preview: Snippet n ended.(h+dxw)`; errors in a fragment's lines are its own. Runs
+  have their own process group, killed on abort, on the 10 s (pdfLaTeX) / 20 s timeout, by the 8 s
+  stall watchdog, when the root's session is released and on unload; `FragmentQueue` (one per root)
+  runs one and keeps the newest waiting; `FragmentService.render` takes the root's queue before its
+  first await (a release or unload meanwhile disposes it, and a disposed queue starts no TeX) and
+  starts nothing after `dispose`. Results are cached by content hash (the source, a stamp of the files
+  the preamble reads, and `bodyStamp`: the files the fragment itself `\input`s and its images) as
+  `frag-<hash>.pdf`/`.json`; every other file of a run goes, also when it is aborted or TeX cannot
+  start, and `readAuxLabels` never reads a `frag-<hash>.aux`. `fragmentBody` (texRender) writes a
+  target as the PDF numbers it: numbered displays starred with `\tag{n}` from the .aux, a theorem box's
+  `\the<counter>` from its head's number (`boxNumber`), a float's from its label's .aux entry, a float
+  as a minipage with `\@captype`.
+  Cards are `lsp-lp-paper ll-fragment` (`is-inverted` as crops), drawn as PNG data URLs.
 - Build output goes to `$TMPDIR/obsidian-latex-live/<hash of root>/`, never
   into the vault.
 - Desktop only (`isDesktopOnly: true`).
@@ -339,8 +495,9 @@
   in a real vault via `scripts/install-dev.sh <vault> [more vaults]`: open a `.tex` file,
   open the preview, edit, introduce an error, double-click the PDF, run
   "Show cursor position in preview", and try completion (`\fr` Tab,
-  `\begin{ali` Enter, `\ref{`), a hover on a formula that uses a project macro (rendered)
-  and a hover on a `\ref` (texlab); then switch to live preview (header icon), check the
+  `\begin{ali` Enter, `\ref{`), a hover on a formula that uses a project macro (rendered),
+  a hover on a `\ref` (texlab) and one on an `\intertext` align with the preview closed (a
+  fragment compile, spinner first); then switch to live preview (header icon), check the
   equation numbers and the `\ref`/`\cite` chips after a compile, walk the arrows through a
   display block and a list, press Enter after an `\item`, and repeat the completion keys next to
   a rendered formula. Obsidian ignores background clicks from

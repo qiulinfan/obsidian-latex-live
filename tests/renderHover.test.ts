@@ -1,9 +1,10 @@
 import "./support/dom";
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { autocompletion, closeCompletion, completionStatus, startCompletion } from "@codemirror/autocomplete";
 import { EditorState, Extension } from "@codemirror/state";
-import { EditorView, activateHover, closeHoverTooltips, hoverTooltip, showTooltip } from "@codemirror/view";
-import { HoverTarget, hoverError, renderHover } from "../src/editor/shared/renderHover";
+import { EditorView, activateHover, closeHoverTooltips, getTooltip, hoverTooltip, keymap, showTooltip } from "@codemirror/view";
+import { CursorPreviewConfig, HoverTarget, cursorPreview, hoverError, renderHover } from "../src/editor/shared/renderHover";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -368,4 +369,185 @@ test("hoverError: the message and the source, as plain text", () => {
   assert.equal(el.querySelector("b"), null);
   assert.equal(el.querySelector("pre.lsp-render-hover-source")?.textContent, "$\\frac{a}{$");
   assert.equal(hoverError("unclosed delimiter").querySelector(".lsp-render-hover-source"), null);
+});
+
+// ---- T-S13 cursor preview ------------------------------------------------------------------
+
+/** `$$...$$` (over lines) or `$...$` around the main cursor. */
+function formulaAtCursor(state: EditorState): Span | null {
+  const pos = state.selection.main.head;
+  for (const m of state.doc.toString().matchAll(/\$\$[\s\S]*?\$\$|\$[^$\n]*\$/g)) {
+    const from = m.index ?? 0;
+    const to = from + m[0].length;
+    if (from <= pos && pos <= to) return { from, to, src: m[0] };
+  }
+  return null;
+}
+
+/** An editor with a cursor preview (rendering each formula's source) on `doc`. */
+function previewed(doc: string, cfg: Partial<CursorPreviewConfig<Span>> = {}, more: Extension[] = []) {
+  const renders: string[] = [];
+  const errors: unknown[] = [];
+  const extensions = [
+    more,
+    cursorPreview<Span>({
+      enabled: () => true,
+      target: formulaAtCursor,
+      render: (t) => (renders.push(t.src), rendered(t.src)),
+      ...cfg,
+    }),
+    EditorView.exceptionSink.of((e) => errors.push(e)),
+  ];
+  const view = new EditorView({ state: EditorState.create({ doc, extensions }), parent: document.body });
+  const tip = () => view.dom.querySelector<HTMLElement>(".cm-tooltip.lsp-cursor-preview");
+  /** What the preview shows (null: no preview, or an empty one). */
+  const shown = () => {
+    const el = tip();
+    return el && !el.classList.contains("is-empty") ? el.textContent : null;
+  };
+  const at = (needle: string, offset = 1) => view.state.doc.toString().indexOf(needle) + offset;
+  const anchor = () => view.state.facet(showTooltip).find((t) => t)?.pos;
+  return { view, extensions, renders, errors, tip, shown, at, anchor };
+}
+
+test("T-S13 cursorPreview: below the formula at the cursor, updated while typing, gone when it leaves or the editor blurs", async () => {
+  let on = true;
+  const { view, extensions, renders, tip, shown, at, anchor } = previewed("a $x$ b $y$ c\n$$\nz\n$$\nend", { enabled: () => on });
+  view.dispatch({ selection: { anchor: at("$x$") } });
+  assert.equal(tip(), null, "only while the editor has focus");
+  view.focus();
+  await sleep(40);
+  assert.equal(shown(), "$x$");
+  assert.equal(anchor(), 2, "under the formula");
+  const first = tip();
+  assert.ok(first?.classList.contains("cm-tooltip"));
+  // Typing inside: the same tooltip renders the new text.
+  view.dispatch({ changes: { from: at("x$"), insert: "^2" }, selection: { anchor: at("x$") + 3 }, userEvent: "input.type" });
+  assert.equal(shown(), "$x^2$");
+  assert.equal(tip(), first, "not rebuilt while typing");
+  // A move inside renders nothing again; leaving hides it; the next formula gets its own.
+  const n = renders.length;
+  view.dispatch({ selection: { anchor: at("$x^2$", 2) } });
+  assert.equal(renders.length, n);
+  view.dispatch({ selection: { anchor: 0 } });
+  assert.equal(tip(), null);
+  view.dispatch({ selection: { anchor: at("$y$", 3) } }); // right after it
+  assert.equal(shown(), "$y$");
+  assert.notEqual(tip(), first);
+  // A display over lines: below its last line, so the lines being typed stay visible.
+  view.dispatch({ selection: { anchor: at("z", 0) } });
+  assert.equal(shown(), "$$\nz\n$$");
+  assert.equal(anchor(), view.state.doc.line(4).from);
+  // Blurred: gone; focused again: back.
+  view.contentDOM.blur();
+  await sleep(40);
+  assert.equal(tip(), null);
+  view.focus();
+  await sleep(40);
+  assert.equal(shown(), "$$\nz\n$$");
+  // A state set on the focused editor (another file, the history cache) shows it too.
+  view.setState(EditorState.create({ doc: "p $w$", selection: { anchor: 3 }, extensions }));
+  await sleep(0);
+  assert.equal(shown(), "$w$");
+  // The setting off: gone at the next change.
+  on = false;
+  view.dispatch({ selection: { anchor: 4 } });
+  assert.equal(tip(), null);
+  view.destroy();
+});
+
+test("T-S13 cursorPreview: hangs below the construct's last row, or flipped above its first (a soft-wrapped formula), its left edge at the anchor", async () => {
+  const { view, shown, at, anchor } = previewed("a $x + y + z$ b");
+  view.focus();
+  await sleep(40);
+  view.dispatch({ selection: { anchor: at("z") } });
+  assert.equal(shown(), "$x + y + z$");
+  assert.equal(anchor(), 2);
+  // jsdom has no layout: the formula wraps before the second "+", its second row 20 px lower.
+  Object.assign(view, {
+    coordsAtPos: (pos: number) => (pos < 9 ? { left: 8 * pos, right: 8 * pos + 1, top: 0, bottom: 20 } : { left: 8 * (pos - 9), right: 8 * (pos - 9) + 1, top: 20, bottom: 40 }),
+  });
+  const tooltip = view.state.facet(showTooltip).find((t) => t)!;
+  const coords = getTooltip(view, tooltip)!.getCoords!(tooltip.pos);
+  assert.deepEqual(coords, { left: 16, right: 17, top: 0, bottom: 40 }, "from the formula's first row's top to its last row's bottom, the anchor's left edge");
+  view.destroy();
+});
+
+test("T-S13 cursorPreview: a pending render keeps the last one; a failure keeps it, marked; older renders never land over newer", async () => {
+  const jobs: { src: string; job: ReturnType<typeof deferred<HTMLElement | null>> }[] = [];
+  const { view, errors, tip, shown, at } = previewed("a $x$ b", {
+    render: (t) => {
+      const job = deferred<HTMLElement | null>();
+      jobs.push({ src: t.src, job });
+      return job.promise;
+    },
+  });
+  view.focus();
+  await sleep(40);
+  view.dispatch({ selection: { anchor: at("x") } });
+  assert.equal(shown(), null, "nothing rendered yet");
+  jobs[0].job.resolve(rendered(jobs[0].src));
+  await sleep(0);
+  assert.equal(shown(), "$x$");
+  const type = (text: string) => {
+    const pos = at("$ b", 0);
+    view.dispatch({ changes: { from: pos, insert: text }, selection: { anchor: pos + text.length }, userEvent: "input.type" });
+  };
+  type("1");
+  type("2");
+  assert.deepEqual(jobs.map((j) => j.src), ["$x$", "$x1$", "$x12$"]);
+  assert.equal(shown(), "$x$", "pending: the last rendering stays");
+  jobs[2].job.resolve(rendered("$x12$"));
+  await sleep(0);
+  assert.equal(shown(), "$x12$");
+  jobs[1].job.resolve(rendered("$x1$"));
+  await sleep(0);
+  assert.equal(shown(), "$x12$", "an older render landing late is dropped");
+  type("(");
+  jobs[3].job.resolve(hoverError("unclosed delimiter", "$x12($"));
+  await sleep(0);
+  assert.equal(shown(), "$x12$");
+  assert.ok(tip()!.classList.contains("is-error"));
+  type(")");
+  jobs[4].job.resolve(rendered("$x12()$"));
+  await sleep(0);
+  assert.equal(shown(), "$x12()$");
+  assert.ok(!tip()!.classList.contains("is-error"));
+  // A new formula's first render failing shows the error; null shows nothing.
+  view.dispatch({ changes: { from: view.state.doc.length, insert: " $q$" }, selection: { anchor: view.state.doc.length + 3 } });
+  jobs[5].job.resolve(hoverError("unknown variable: q"));
+  await sleep(0);
+  assert.equal(shown(), "unknown variable: q");
+  view.dispatch({ changes: { from: at("q"), insert: "q" } });
+  jobs[6].job.resolve(null);
+  await sleep(0);
+  assert.equal(shown(), null);
+  assert.ok(tip()!.classList.contains("is-empty"));
+  // A rejection is logged and shows nothing.
+  view.dispatch({ changes: { from: at("q"), insert: "q" } });
+  jobs[7].job.reject(new Error("renderer crashed"));
+  await sleep(0);
+  assert.equal(shown(), null);
+  assert.equal(errors.length, 1);
+  view.destroy();
+});
+
+test("T-S13 cursorPreview: hidden while the completion list is open, back when it closes; no keys bound", async () => {
+  const { view, tip, shown, at } = previewed("a $xy$ b", {}, [
+    autocompletion({ override: [(ctx) => ({ from: ctx.pos, options: [{ label: "alpha" }] })], activateOnTyping: false }),
+  ]);
+  view.focus();
+  await sleep(40);
+  view.dispatch({ selection: { anchor: at("y") } });
+  assert.equal(shown(), "$xy$");
+  startCompletion(view);
+  for (let i = 0; i < 50 && completionStatus(view.state) !== "active"; i++) await sleep(10);
+  assert.equal(completionStatus(view.state), "active");
+  assert.ok(tip()!.classList.contains("is-covered"));
+  closeCompletion(view);
+  assert.ok(!tip()!.classList.contains("is-covered"));
+  assert.equal(shown(), "$xy$");
+  view.destroy();
+  const state = EditorState.create({ extensions: cursorPreview({ enabled: () => true, target: () => null, render: () => null }) });
+  assert.equal(state.facet(keymap).length, 0);
 });

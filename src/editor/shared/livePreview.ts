@@ -10,6 +10,9 @@
 //             reconfiguration and the mouse coming up. A selection change re-decorates only
 //             the constructs on the lines of the old and the new selection (nothing when there
 //             are none): on a 5,700-line document a cursor move costs 0.2 ms, a rebuild 3 ms.
+//             A construct whose look depends on the selection only on some of its lines (a
+//             theorem box: its \begin and \end line) says so with `reveals`: a move inside a
+//             long one keeps it, re-decorating only what is on the lines moved over.
 //             Renders that land re-decorate only the constructs that waited for them.
 //             While the mouse is down (Obsidian's freeze: nothing moves under a drag) and
 //             during an IME composition the decorations are only mapped (a formula collapsing
@@ -25,7 +28,9 @@
 //             construct with an error diagnostic in it, or whose render failed, is never
 //             replaced (the lint underline, or a dotted `lsp-lp-error` underline, stays).
 //             `renderConstruct` applies this to a rendered construct: a block (whole lines)
-//             reveals over its lines and keeps a rendering below its source.
+//             reveals over its lines and keeps a rendering below its source, also while an
+//             error diagnostic is in it (the preview replaces nothing: the last rendering
+//             stays, marked when the new source fails).
 //   Widgets   RenderWidget clones the renderer's node. CodeMirror hands a widget's DOM to
 //             the next widget of the class at that place (a replaced block becomes the
 //             preview below its revealed source), so updateDOM resyncs everything, and a
@@ -37,14 +42,26 @@
 //             its render lands. The scheduler renders the viewport first: a synchronous
 //             renderer in a microtask (before paint) with an 8 ms budget per run, the rest in
 //             the next frames; an asynchronous one with one request in flight per renderer.
-//             The rest of the document is prefetched in idle chunks, nearest first, so
-//             scrolling finds its widgets. Results of an older epoch are dropped; a new epoch
-//             drops the cache. One `refreshLive` per batch (async: per frame), held while the
-//             mouse is down or a composition is open (both rebuild when they end).
+//             A renderer may answer some kinds synchronously and others not (LaTeX: MathJax,
+//             and a PDF page or crop being drawn): while an asynchronous render is in flight,
+//             requests of a kind that has answered with a promise wait for it, the others keep
+//             rendering (a formula never waits for a PDF page). The rest of the document is
+//             prefetched in idle chunks, nearest first, so scrolling finds its widgets. Results
+//             of an older epoch are dropped; a new epoch empties the cache, but a construct
+//             keeps showing its rendering from before (the same request under the old epoch:
+//             its text is unchanged) until its new render lands, or fails and shows the source
+//             (stale-while-revalidate: a template saved in another pane re-renders without a
+//             flash of source). Those renderings are display-only (never a hit or a peek) and
+//             count against the cache's bound. A request the epoch cannot change (an image, a
+//             PDF crop: `ctx.request(.., epochFree)`) has no epoch in its key: its render stays
+//             cached across epochs. One `refreshLive` per batch (async: per frame), held while
+//             the mouse is down or a composition is open (both rebuild when they end).
 //   Keys      none are bound. Vertical motion (keyArbiter hands the arrows to
 //             cursorLineUp/Down, which skip lines under block widgets) is corrected by the
 //             `enterBlocks` transaction filter: a line move (it carries a goal column) over
-//             hidden lines stops on the block, which then reveals.
+//             hidden lines stops on the block, which then reveals. Past a block where the
+//             drawn viewport ends, CodeMirror estimates the next line's place and a move can
+//             land one line further: the filter knows the viewport the view last drew.
 //   Heights   a block widget whose size changes after CodeMirror measured it (MathJax's
 //             glyph CSS, web fonts) bumps a line attribute (rAF-coalesced), which makes
 //             CodeMirror measure again; without it, the gutter drifted from the lines in
@@ -91,7 +108,7 @@ export interface Construct {
 
 /** What a renderer draws. Equal keys render identically (build them with `ctx.request`). */
 export interface RenderRequest {
-  /** `${epoch}|${kind}|${display ? 1 : 0}|${src}` */
+  /** `${epoch}|${kind}|${display ? 1 : 0}|${src}`; `*` in place of the epoch for an epoch-free request. */
   readonly key: string;
   readonly src: string;
   readonly display: boolean;
@@ -111,9 +128,18 @@ export type RenderResult =
   | { readonly ok: false; readonly message: string; readonly quiet?: boolean };
 
 export interface FragmentRenderer {
-  /** Results computed under an older epoch are dropped; a new epoch drops the cache. */
+  /**
+   * Results computed under an older epoch are dropped; a new epoch empties the cache. Until
+   * a construct's render for the new epoch lands, it shows its rendering from the epoch
+   * before (only for a request equal but for the epoch: keys built with `ctx.request`).
+   * Epoch-free requests are kept.
+   */
   readonly epoch: number;
-  /** A throw or a rejection counts as `{ ok: false, message }` (cached like one). */
+  /**
+   * A throw or a rejection counts as `{ ok: false, message }` (cached like one). Requests of a
+   * kind that has answered with a promise render one at a time; while one is in flight, other
+   * kinds go on.
+   */
   render(req: RenderRequest): RenderResult | Promise<RenderResult>;
   /** After a batch of renders (LaTeX: MathJax's stylesheet). */
   flush?(): void;
@@ -138,11 +164,18 @@ export interface LiveContext {
    * (inclusively). One that only ends where the range starts, or starts where it ends, does not.
    */
   hasError(from: number, to: number): boolean;
-  /** A request keyed with the renderer's current epoch. */
-  request(kind: string, src: string, display: boolean, pos: number): RenderRequest;
-  /** The cached result, or undefined: then the request is queued and a refresh follows. */
+  /**
+   * A request keyed with the renderer's current epoch, or, `epochFree`, with none: for what the
+   * epoch cannot change (an image, a PDF crop), whose render then outlives a new epoch.
+   */
+  request(kind: string, src: string, display: boolean, pos: number, epochFree?: boolean): RenderRequest;
+  /**
+   * The cached result, or undefined: then the request is queued and a refresh follows. While
+   * a request of a new epoch is queued, its successful rendering from the epoch before comes
+   * back instead (display-only: the render is still queued, and its result replaces it).
+   */
   result(req: RenderRequest): RenderResult | undefined;
-  /** The cached result without queueing a render. */
+  /** The cached result without queueing a render (never an earlier epoch's rendering). */
   peek(req: RenderRequest): RenderResult | undefined;
   /** A replace decoration (atomic). One overlapping a replace added earlier is dropped. */
   replace(from: number, to: number, deco: Decoration): void;
@@ -160,9 +193,17 @@ export interface LiveLanguage<C extends Construct = Construct> {
   /** The document's constructs in document order (by `from`). Pure; memoized per Text. */
   scan(doc: Text): readonly C[];
   /**
+   * Where `decorate` tests the selection, when that is less than the construct's lines (a
+   * theorem box: its \begin and \end line); null for its lines. A selection move elsewhere in it
+   * keeps its decorations (only the constructs on the lines moved over are decorated again), one
+   * there re-decorates it whole.
+   */
+  reveals?(c: C): readonly (readonly [number, number])[] | null;
+  /**
    * A construct's decorations. They must lie within the construct's own lines and depend on
-   * the selection only there: a selection move re-decorates just the constructs on the lines
-   * it left or entered (and those on their lines, for nesting), keeping the rest.
+   * the selection only there (or only on its `reveals`): a selection move re-decorates just the
+   * constructs on the lines it left or entered (and those on their lines, for nesting), keeping
+   * the rest.
    */
   decorate(c: C, ctx: LiveContext): void;
 }
@@ -301,10 +342,11 @@ export function liveInput(): Extension {
 // ---- Render cache and scheduler ------------------------------------------------------
 
 /**
- * Renders kept per renderer, the oldest rendered out first. Renders the attached views' last
- * builds use are never dropped (a document with more constructs than this would otherwise
- * evict and re-render its own renders forever); eviction runs in passes, each time the cache
- * has grown by CACHE_SLACK past what the last pass left.
+ * Renders kept per renderer, the oldest rendered out first (earlier epochs' renderings still
+ * shown count too, and go before this epoch's). Renders the attached views' last builds use
+ * are never dropped (a document with more constructs than this would otherwise evict and
+ * re-render its own renders forever); eviction runs in passes, each time the cache has grown
+ * by CACHE_SLACK past what the last pass left.
  */
 const CACHE_SIZE = 2000;
 const CACHE_SLACK = 200;
@@ -360,13 +402,31 @@ const messageOf = (e: unknown): string => (e instanceof Error ? e.message : Stri
 const isPromise = <T>(v: T | Promise<T>): v is Promise<T> =>
   typeof (v as { then?: unknown } | null)?.then === "function";
 
+/** Marks, in a build's `used` keys, an earlier epoch's rendering it shows (by request identity). */
+const SHOWN = "~";
+/** The key prefix of an epoch-free request (in place of `${epoch}|`). */
+const EPOCH_FREE = "*|";
+
 /** One renderer's cache, queue and statistics, shared by the views that use it. */
 class RenderStore {
   epoch: number;
   private readonly cache = new Map<string, RenderResult>();
+  /**
+   * Successful renders of earlier epochs by request identity (the key without its epoch),
+   * oldest first: shown in place of a request of this epoch until its own result is cached.
+   */
+  private readonly previous = new Map<string, RenderResult>();
   readonly views = new Set<EditorView>();
-  /** The key of the asynchronous render in flight (one per renderer). */
-  private inflight: string | null = null;
+  /**
+   * The keys of the asynchronous renders in flight: one, except when a kind answers with a
+   * promise for the first time while another is in flight (at most one more per kind).
+   */
+  private readonly inflight = new Set<string>();
+  /**
+   * Per request kind: it has answered with a promise (true: one at a time) or only
+   * synchronously (false: renders while another is in flight, as a kind not seen yet does).
+   */
+  private readonly kinds = new Map<string, boolean>();
   private pumpQueued = false;
   /** A run went over its budget: the next frame goes on with it. */
   private frameQueued = false;
@@ -387,35 +447,83 @@ class RenderStore {
     this.epoch = renderer.epoch;
   }
 
-  /** Drop the cache when the renderer moved to a new epoch. */
+  /**
+   * When the renderer moved to a new epoch: empty the cache but for epoch-free requests,
+   * keeping its successful renders (and those of earlier epochs not rendered again yet) to
+   * show until the new ones land.
+   */
   sync(): void {
     if (this.renderer.epoch === this.epoch) return;
+    const prefix = `${this.epoch}|`;
+    for (const [key, result] of this.cache) {
+      if (key.startsWith(EPOCH_FREE)) continue;
+      this.cache.delete(key);
+      if (!result.ok || !key.startsWith(prefix)) continue;
+      const id = key.slice(prefix.length);
+      this.previous.delete(id);
+      this.previous.set(id, result);
+    }
     this.epoch = this.renderer.epoch;
-    this.cache.clear();
+    if (this.size > this.limit) this.evict();
+  }
+
+  /** Renders held: this epoch's and earlier ones still waiting to be shown again. */
+  get size(): number {
+    return this.cache.size + this.previous.size;
   }
 
   get(key: string): RenderResult | undefined {
     return this.cache.get(key);
   }
 
+  /**
+   * The request's identity: its key without this epoch (null for a key of another epoch, and
+   * for an epoch-free one, which a new epoch keeps as it is).
+   */
+  private identity(key: string): string | null {
+    const prefix = `${this.epoch}|`;
+    return key.startsWith(prefix) ? key.slice(prefix.length) : null;
+  }
+
+  /**
+   * The rendering an earlier epoch made for `key`'s request, to show while its own render is
+   * pending; `used` records it (kept from eviction while shown).
+   */
+  shown(key: string, used: Set<string>): RenderResult | undefined {
+    const id = this.identity(key);
+    const result = id === null ? undefined : this.previous.get(id);
+    if (result) used.add(SHOWN + id);
+    return result;
+  }
+
   private put(key: string, result: RenderResult): void {
     this.cache.delete(key);
     this.cache.set(key, result);
-    if (this.cache.size > this.limit) this.evict();
+    // Its own result is in: the earlier rendering (or the source, on a failure) gives way.
+    const id = this.identity(key);
+    if (id !== null) this.previous.delete(id);
+    if (this.size > this.limit) this.evict();
   }
 
-  /** Drop the oldest renders no attached view's last build used. */
+  /**
+   * Drop the oldest renders no attached view's last build used, earlier epochs' first (losing
+   * one only shows a construct's source until its new render lands).
+   */
   private evict(): void {
     const used: ReadonlySet<string>[] = [];
     for (const view of this.views) {
       const value = view.state.field(liveField, false);
       if (value) used.push(value.used);
     }
+    for (const id of this.previous.keys()) {
+      if (this.size <= CACHE_SIZE) break;
+      if (!used.some((u) => u.has(SHOWN + id))) this.previous.delete(id);
+    }
     for (const key of this.cache.keys()) {
-      if (this.cache.size <= CACHE_SIZE) break;
+      if (this.size <= CACHE_SIZE) break;
       if (!used.some((u) => u.has(key))) this.cache.delete(key);
     }
-    this.limit = Math.max(CACHE_SIZE, this.cache.size) + CACHE_SLACK;
+    this.limit = Math.max(CACHE_SIZE, this.size) + CACHE_SLACK;
   }
 
   get pending(): number {
@@ -470,7 +578,7 @@ class RenderStore {
       if (!value?.missing.size || value.epoch !== this.epoch) continue;
       const { from, to } = view.viewport;
       for (const { req } of value.missing.values()) {
-        if (req.key === this.inflight) continue;
+        if (this.inflight.has(req.key)) continue;
         if (req.pos >= from && req.pos <= to) visible.push({ req, view });
         else rest.push({ req, view, dist: req.pos < from ? from - req.pos : req.pos - to });
       }
@@ -479,8 +587,23 @@ class RenderStore {
     return { visible, rest };
   }
 
+  /** `job` waits for the asynchronous render in flight: its kind has answered with a promise. */
+  private waits(job: Job): boolean {
+    return this.inflight.size > 0 && this.kinds.get(job.req.kind) === true;
+  }
+
+  /**
+   * An asynchronous render is in flight and no kind is known to answer synchronously (Typst):
+   * nothing to do before it lands.
+   */
+  private get blocked(): boolean {
+    if (!this.inflight.size) return false;
+    for (const async of this.kinds.values()) if (!async) return false;
+    return true;
+  }
+
   private pump(): void {
-    if (this.inflight !== null || !this.views.size) return;
+    if (this.blocked || !this.views.size) return;
     const start = now();
     const landed: Landed = new Map();
     const { visible, rest } = this.collect();
@@ -489,6 +612,7 @@ class RenderStore {
         land(landed, job); // rendered for another view meanwhile
         continue;
       }
+      if (this.waits(job)) continue;
       if (now() - start > BUDGET_MS) {
         this.frameQueued = true;
         frame(this.win, () => {
@@ -498,10 +622,10 @@ class RenderStore {
         this.landed(landed, false);
         return;
       }
-      if (this.start(job, landed)) break;
+      this.start(job, landed);
     }
     this.landed(landed, false);
-    if (this.inflight !== null || !rest.length) return;
+    if (this.blocked || !rest.length) return;
     if (this.chunkLeft > 0) this.prefetch(null);
     else this.prefetchIdle();
   }
@@ -518,12 +642,13 @@ class RenderStore {
 
   /** Render part of what is out of view (chunks of PREFETCH_CHUNK per idle callback). */
   private prefetch(deadline: IdleDeadlineLike | null): void {
-    if (this.inflight !== null || !this.views.size) return;
+    if (this.blocked || !this.views.size) return;
     const { visible, rest } = this.collect();
     // The viewport first. Visible misses already cached only wait for a refresh the mouse or a
     // composition holds: waiting for them would spin this through microtasks, and with it the
-    // mouseup or compositionend that ends the hold would never run.
-    if (visible.some((j) => !this.cache.has(j.req.key))) return this.schedule();
+    // mouseup or compositionend that ends the hold would never run. Those waiting for the
+    // render in flight start when it lands.
+    if (visible.some((j) => !this.cache.has(j.req.key) && !this.waits(j))) return this.schedule();
     const landed: Landed = new Map();
     let more = false;
     for (const job of rest) {
@@ -531,24 +656,27 @@ class RenderStore {
         land(landed, job);
         continue;
       }
+      if (this.waits(job)) continue;
       if (this.chunkLeft <= 0 || (deadline && !deadline.didTimeout && deadline.timeRemaining() <= 0)) {
         more = true;
         break;
       }
       this.chunkLeft--;
-      if (this.start(job, landed)) break;
+      this.start(job, landed);
     }
     this.landed(landed, true);
-    if (this.inflight !== null) return; // an async render continues the chunk when it lands
-    this.chunkLeft = 0;
-    if (more) this.prefetchIdle();
+    if (more) {
+      this.chunkLeft = 0;
+      this.prefetchIdle();
+    } else if (!this.inflight.size) this.chunkLeft = 0;
+    // else an async render continues the chunk when it lands
   }
 
   /**
-   * Render one request. True when it went asynchronous: nothing else starts until it lands
-   * (then the scheduler runs again).
+   * Render one request. One that goes asynchronous is in flight until it lands (then the
+   * scheduler runs again); its kind waits for it from then on.
    */
-  private start(job: Job, landed: Landed): boolean {
+  private start(job: Job, landed: Landed): void {
     const { req } = job;
     const epoch = this.epoch;
     const t0 = now();
@@ -560,22 +688,25 @@ class RenderStore {
     }
     this.renders++;
     if (!isPromise(out)) {
+      if (!this.kinds.has(req.kind)) this.kinds.set(req.kind, false);
       record(this.renderTimes, now() - t0);
       this.put(req.key, out);
       land(landed, job);
-      return false;
+      return;
     }
-    this.inflight = req.key;
+    this.kinds.set(req.kind, true);
+    this.inflight.add(req.key);
     void out
       .then(
         (r) => r,
         (e: unknown): RenderResult => ({ ok: false, message: messageOf(e) }),
       )
       .then((r) => {
-        this.inflight = null;
+        this.inflight.delete(req.key);
         record(this.renderTimes, now() - t0);
-        // A result computed under an older epoch describes macros or a preamble that are gone.
-        if (epoch === this.renderer.epoch && epoch === this.epoch) {
+        // A result computed under an older epoch describes macros or a preamble that are gone
+        // (an epoch-free request's does not).
+        if (req.key.startsWith(EPOCH_FREE) || (epoch === this.renderer.epoch && epoch === this.epoch)) {
           this.put(req.key, r);
           this.renderer.flush?.();
           for (const view of this.views) {
@@ -584,7 +715,6 @@ class RenderStore {
         }
         this.schedule(); // the viewport first, then the prefetch chunk goes on
       });
-    return true;
   }
 
   /** Renders of this batch landed: flush, then one refresh per view (now, or next frame). */
@@ -711,11 +841,13 @@ class Intervals {
 
 interface Scan {
   constructs: readonly Construct[];
-  index: Intervals;
+  /** Where the constructs test the selection (their spans, or `reveals`): item k is construct `of[k]`. */
+  touched: Intervals;
+  of: readonly number[];
 }
 
 const scans = new WeakMap<LiveLanguage, WeakMap<Text, Scan>>();
-/** Languages whose scanner threw once (logged once). */
+/** Languages whose scanner (or `reveals`) threw once (logged once). */
 const failedScans = new WeakSet<LiveLanguage>();
 
 function scanOf(language: LiveLanguage, state: EditorState): Scan {
@@ -734,7 +866,27 @@ function scanOf(language: LiveLanguage, state: EditorState): Scan {
       failedScans.add(language);
       constructs = [];
     }
-    perDoc.set(doc, (scan = { constructs, index: new Intervals(constructs) }));
+    let spans: readonly { from: number; to: number }[] = constructs;
+    let of: number[] = constructs.map((_c, i) => i);
+    if (language.reveals) {
+      const narrowed: { from: number; to: number }[] = [];
+      of = [];
+      try {
+        constructs.forEach((c, i) => {
+          for (const [from, to] of language.reveals!(c) ?? [[c.from, c.to]]) {
+            narrowed.push({ from, to });
+            of.push(i);
+          }
+        });
+        spans = narrowed;
+      } catch (e) {
+        // As a scanner bug: every construct tests its own lines.
+        if (!failedScans.has(language)) logException(state, e, "live preview reveals");
+        failedScans.add(language);
+        of = constructs.map((_c, i) => i);
+      }
+    }
+    perDoc.set(doc, (scan = { constructs, touched: new Intervals(spans), of }));
   }
   return scan;
 }
@@ -815,8 +967,8 @@ function decorateAll(
       });
       return found;
     },
-    request: (kind, src, display, pos) => ({
-      key: `${store.epoch}|${kind}|${display ? 1 : 0}|${src}`,
+    request: (kind, src, display, pos, epochFree) => ({
+      key: `${epochFree ? EPOCH_FREE : `${store.epoch}|`}${kind}|${display ? 1 : 0}|${src}`,
       src,
       display,
       kind,
@@ -825,14 +977,16 @@ function decorateAll(
     result(req) {
       used.add(req.key);
       const hit = store.get(req.key);
-      if (hit) store.hits++;
-      else {
-        store.misses++;
-        const miss = missing.get(req.key);
-        if (miss) miss.at.push(current);
-        else missing.set(req.key, { req, at: [current] });
+      if (hit) {
+        store.hits++;
+        return hit;
       }
-      return hit;
+      store.misses++;
+      const miss = missing.get(req.key);
+      if (miss) miss.at.push(current);
+      else missing.set(req.key, { req, at: [current] });
+      // A new epoch's render pending: the construct keeps its rendering from before.
+      return store.shown(req.key, used);
     },
     peek(req) {
       used.add(req.key);
@@ -942,7 +1096,8 @@ function patch(
     grew = false;
     const spans: [number, number][] = [...region];
     for (const [from, to] of region) {
-      scan.index.each(from, to, (i) => {
+      scan.touched.each(from, to, (k) => {
+        const i = scan.of[k];
         if (picked.has(i)) return;
         picked.add(i);
         grew = true;
@@ -1006,11 +1161,11 @@ function mapValue(value: LiveValue, changes: ChangeDesc): LiveValue {
   };
 }
 
-/** A selection range is on a construct's lines (the widest range `decorate` may test). */
+/** A selection range is where a construct tests it (its lines, the widest range, or its `reveals`). */
 function onConstruct(state: EditorState, cfg: LivePreviewConfig, sel: EditorSelection): boolean {
   const { doc } = state;
-  const { index } = scanOf(cfg.language, state);
-  return sel.ranges.some((r) => index.touches(doc.lineAt(r.from).from, doc.lineAt(r.to).to));
+  const { touched } = scanOf(cfg.language, state);
+  return sel.ranges.some((r) => touched.touches(doc.lineAt(r.from).from, doc.lineAt(r.to).to));
 }
 
 const liveField: StateField<LiveValue> = StateField.define<LiveValue>({
@@ -1115,32 +1270,66 @@ function inlineNearViewport(view: EditorView, value: LiveValue | undefined): Dec
 // ---- Vertical motion -----------------------------------------------------------------
 
 /**
- * Where a line move from `oldHead` to `newHead` should stop instead: on the hidden run of
- * block replacements it jumped over, when those are exactly the lines in between (a visible
- * line there means a longer jump, PageDown). The move may also land inside the run: CodeMirror
- * puts it at the document's end or start when the run reaches there. Down: the run's first
- * block start; up: its last block end.
+ * The viewport each view last drew, by the state it drew it for: a transaction filter sees no
+ * view, and `enterBlocks` needs to know which lines CodeMirror only estimates.
  */
-function blockStop(deco: DecorationSet, doc: Text, oldHead: number, newHead: number): number | null {
-  const a = doc.lineAt(oldHead).number;
-  const b = doc.lineAt(newHead).number;
-  if (Math.abs(b - a) < 2) return null;
-  const down = b > a;
-  const lo = doc.line(Math.min(a, b) + 1).from;
-  const hi = doc.line(Math.max(a, b) - 1).to;
+const drawn = new WeakMap<EditorState, { from: number; to: number }>();
+
+const drawnViewport = ViewPlugin.define((view) => {
+  drawn.set(view.state, view.viewport);
+  return { update: (u) => void drawn.set(u.state, u.view.viewport) };
+});
+
+/**
+ * The run of hidden block replacements over exactly the lines `lo`..`hi` (numbers): its first
+ * block's start and its last block's end, or null when a visible line lies in between.
+ */
+function hiddenRun(deco: DecorationSet, doc: Text, lo: number, hi: number): { from: number; to: number } | null {
+  const from = doc.line(lo).from;
+  const to = doc.line(hi).to;
   const blocks: { from: number; to: number }[] = [];
-  deco.between(lo, hi, (from, to, d) => {
-    if (d.spec.block) blocks.push({ from, to });
+  deco.between(from, to, (f, t, d) => {
+    if (d.spec.block) blocks.push({ from: f, to: t });
   });
   if (!blocks.length) return null;
   blocks.sort((x, y) => x.from - y.from);
-  let covered = lo - 1;
+  let covered = from - 1;
   for (const blk of blocks) {
     if (blk.from > covered + 1) return null; // a visible line in between
     covered = Math.max(covered, blk.to);
   }
-  if (covered < hi) return null;
-  return down ? blocks[0].from : blocks.reduce((m, blk) => Math.max(m, blk.to), -1);
+  return covered < to ? null : { from: blocks[0].from, to: covered };
+}
+
+/**
+ * Where a line move from `oldHead` to `newHead` should stop instead: on the hidden run of
+ * block replacements it jumped over, when those are exactly the lines in between (a visible
+ * line there means a longer jump, PageDown). The move may also land inside the run: CodeMirror
+ * puts it at the document's end or start when the run reaches there. It may also land one line
+ * past the line after the run, when that line is outside the viewport the view drew (`viewport`):
+ * CodeMirror then estimates where lines are by their characters, and a short line gets almost
+ * no height. Down: the run's first block start; up: its last block end.
+ */
+function blockStop(
+  deco: DecorationSet,
+  doc: Text,
+  oldHead: number,
+  newHead: number,
+  viewport?: { from: number; to: number },
+): number | null {
+  const a = doc.lineAt(oldHead).number;
+  const b = doc.lineAt(newHead).number;
+  if (Math.abs(b - a) < 2) return null;
+  const down = b > a;
+  let run = down ? hiddenRun(deco, doc, a + 1, b - 1) : hiddenRun(deco, doc, b + 1, a - 1);
+  if (!run && viewport && Math.abs(b - a) >= 3) {
+    const skipped = doc.line(down ? b - 1 : b + 1);
+    if (down ? skipped.from > viewport.to : skipped.to < viewport.from) {
+      run = down ? hiddenRun(deco, doc, a + 1, b - 2) : hiddenRun(deco, doc, b + 2, a - 1);
+    }
+  }
+  if (!run) return null;
+  return down ? run.from : run.to;
 }
 
 const enterBlocks = EditorState.transactionFilter.of((tr) => {
@@ -1151,12 +1340,13 @@ const enterBlocks = EditorState.transactionFilter.of((tr) => {
   const old = tr.startState.selection.ranges;
   // Ranges pair up by index only while their number stays (Escape's simplifySelection, merges).
   if (old.length !== tr.selection.ranges.length) return tr;
+  const viewport = drawn.get(tr.startState);
   let changed = false;
   const ranges = tr.selection.ranges.map((r, i) => {
     // Only line moves: cursorLineUp/Down, their Shift forms and PageUp/Down give the range a goal
     // column. Select All, Mod-Home/End, Cmd-ArrowUp/Down and snippet fields set none.
     if (r.goalColumn === undefined) return r;
-    const stop = blockStop(value.blocks, tr.startState.doc, old[i].head, r.head);
+    const stop = blockStop(value.blocks, tr.startState.doc, old[i].head, r.head, viewport);
     if (stop === null) return r;
     changed = true;
     return r.empty ? EditorSelection.cursor(stop, 0, undefined, r.goalColumn) : EditorSelection.range(r.anchor, stop, r.goalColumn);
@@ -1366,7 +1556,10 @@ const errorMark = Decoration.mark({ class: "lsp-lp-error" });
  * construct is replaced by an inline widget and reveals when touched (no render is asked for
  * while it is revealed). Never replaced: a construct with an error diagnostic (its lint
  * underline shows), one whose render failed (dotted `lsp-lp-error` underline, except for a
- * quiet failure; the render hover shows the message), one still pending (it stays source).
+ * quiet failure or under an error diagnostic; the render hover shows the message), one still
+ * pending (it stays source). A revealed block keeps its rendering below while an error
+ * diagnostic is in it: the preview replaces nothing, and shows the last rendering (marked
+ * `is-error` when the new source fails) while the source is typed.
  */
 export function renderConstruct(
   ctx: LiveContext,
@@ -1374,14 +1567,15 @@ export function renderConstruct(
   req: RenderRequest,
   opts: { below?: boolean } = {},
 ): void {
-  if (ctx.hasError(c.from, c.to)) return;
+  const error = ctx.hasError(c.from, c.to);
   const { doc } = ctx.state;
   if (c.block) {
     const from = doc.lineAt(c.from).from;
     const to = doc.lineAt(c.to).to;
     const revealed = ctx.touch(from, to);
+    if (error && !revealed) return;
     const r = revealed && opts.below === false ? ctx.peek(req) : ctx.result(req);
-    if (r && !r.ok && !r.quiet) ctx.mark(c.from, c.to, errorMark);
+    if (r && !r.ok && !r.quiet && !error) ctx.mark(c.from, c.to, errorMark);
     if (revealed) {
       if (opts.below !== false) {
         ctx.point(to, Decoration.widget({ widget: new RenderWidget(req, r, "below"), block: true, side: 1 }));
@@ -1391,6 +1585,7 @@ export function renderConstruct(
     }
     return;
   }
+  if (error) return;
   const revealed = ctx.touch(c.from, c.to);
   const r = revealed ? ctx.peek(req) : ctx.result(req);
   if (r && !r.ok) {
@@ -1444,6 +1639,7 @@ export function livePreview<C extends Construct>(cfg: LivePreviewConfig<C>): Ext
     liveConfig.of(cfg),
     liveField,
     enterBlocks,
+    drawnViewport,
     generation,
     scheduler,
     EditorView.editorAttributes.of({ class: "lsp-lp-live" }),
@@ -1453,6 +1649,11 @@ export function livePreview<C extends Construct>(cfg: LivePreviewConfig<C>): Ext
 /** Live preview is mounted (the compartment holds it). */
 export function isLive(state: EditorState): boolean {
   return state.field(liveField, false) !== undefined;
+}
+
+/** Live preview is mounted and decorates: the document is within its `maxLines`. */
+export function liveActive(state: EditorState): boolean {
+  return state.field(liveField, false)?.active === true;
 }
 
 /** `pos` lies in (or at an end of) a range a live widget renders. */
@@ -1472,6 +1673,8 @@ export function replacedAt(state: EditorState, pos: number): boolean {
 export interface RenderStats {
   /** Renders run for this view's renderer. */
   renders: number;
+  /** Renders held (this epoch's, and earlier epochs' still shown while their new render is pending). */
+  cached: number;
   /** Cache hits and misses of the builds. */
   hits: number;
   misses: number;
@@ -1493,9 +1696,10 @@ export interface RenderStats {
 export function renderStats(view: EditorView): RenderStats {
   const cfg = view.state.field(liveField, false) ? view.state.facet(liveConfig) : null;
   const s = cfg ? stores.get(cfg.renderer) : undefined;
-  if (!s) return { renders: 0, hits: 0, misses: 0, pending: 0, p50: 0, p95: 0, builds: 0, buildP50: 0, buildP95: 0 };
+  if (!s) return { renders: 0, cached: 0, hits: 0, misses: 0, pending: 0, p50: 0, p95: 0, builds: 0, buildP50: 0, buildP95: 0 };
   return {
     renders: s.renders,
+    cached: s.size,
     hits: s.hits,
     misses: s.misses,
     pending: s.pending,

@@ -24,9 +24,28 @@
 //            renderers change outside the document. A render still pending when the
 //            pointer leaves the editor shows nothing (CodeMirror would still show it).
 //   Closing  hideOnChange: an edit or a selection change closes the tooltip.
+// Cursor preview (`cursorPreview`, setting-gated): the rendering of the construct around the
+// main cursor, floating below it (below its last row, or, flipped for want of room, above its
+// first: a formula that soft-wraps or a display being typed stays visible; its left edge at
+// the start of the construct's last line) while the focused editor's cursor is in it. It
+// renders again after every edit in the same tooltip view (a render pending keeps the last one
+// shown; a failure after a rendering keeps that rendering, marked), hides while the completion
+// list is open (both would sit below the line), and goes when the cursor leaves the construct
+// or the editor loses focus. It binds no keys and takes no clicks.
 // Only type imports from "obsidian" are allowed here: tests bundle this without Obsidian.
-import { EditorState, Extension, Prec, Text } from "@codemirror/state";
-import { EditorView, Tooltip, closeHoverTooltip, hoverTooltip, logException } from "@codemirror/view";
+import { completionStatus } from "@codemirror/autocomplete";
+import { EditorState, Extension, Prec, StateEffect, StateField, Text } from "@codemirror/state";
+import {
+  EditorView,
+  Rect,
+  Tooltip,
+  TooltipView,
+  ViewPlugin,
+  closeHoverTooltip,
+  hoverTooltip,
+  logException,
+  showTooltip,
+} from "@codemirror/view";
 import { replacedAt } from "./livePreview";
 
 /** A span of visible source that renders as one piece: a formula, an environment, a call. */
@@ -170,6 +189,151 @@ function fill(dom: HTMLElement, content: HTMLElement): void {
   dom.classList.remove("is-pending");
   dom.removeAttribute("aria-busy");
   dom.replaceChildren(content);
+}
+
+// ---- Cursor preview ---------------------------------------------------------------------
+
+export interface CursorPreviewConfig<T extends HoverTarget> {
+  /** Read at every selection or document change (the `cursorPreview` setting). */
+  enabled(): boolean;
+  /** The renderable construct around the main cursor whose source is visible, or null. */
+  target(state: EditorState): T | null;
+  /**
+   * As renderHover's `render`, called again after every edit while the cursor stays in the
+   * construct. A failure (`hoverError`) after a rendering of the construct keeps that
+   * rendering (marked `is-error`); null shows nothing.
+   */
+  render(target: T, view: EditorView): HTMLElement | null | Promise<HTMLElement | null>;
+}
+
+interface Preview<T extends HoverTarget> {
+  readonly focused: boolean;
+  readonly target: T | null;
+  readonly tooltip: Tooltip | null;
+}
+
+const previewFocus = StateEffect.define<boolean>();
+
+/**
+ * A floating render below the construct around the main cursor while the editor has focus
+ * (see the header). The language's `target` decides which constructs get one.
+ */
+export function cursorPreview<T extends HoverTarget>(cfg: CursorPreviewConfig<T>): Extension {
+  const field: StateField<Preview<T>> = StateField.define<Preview<T>>({
+    create: () => ({ focused: false, target: null, tooltip: null }),
+    update(value, tr) {
+      let focused = value.focused;
+      for (const e of tr.effects) if (e.is(previewFocus)) focused = e.value;
+      if (focused === value.focused && !tr.docChanged && !tr.selection && !tr.reconfigured) return value;
+      const target = focused && cfg.enabled() ? cfg.target(tr.state) : null;
+      if (!target) return value.tooltip || focused !== value.focused ? { focused, target: null, tooltip: null } : value;
+      const old = value.target;
+      // The same construct (its start mapped through the edit) keeps its tooltip view, which
+      // renders it again: typing never rebuilds the tooltip or blanks it.
+      const same = !!old && !!value.tooltip && tr.changes.mapPos(old.from) === target.from;
+      if (same && !tr.docChanged && old.to === target.to) return value;
+      const { doc } = tr.state;
+      const pos = Math.min(Math.max(doc.lineAt(target.to).from, target.from), target.to);
+      const create = same ? value.tooltip!.create : (view: EditorView) => previewView(view, cfg, field);
+      return { focused, target, tooltip: { pos, above: false, create } };
+    },
+    provide: (f) => showTooltip.from(f, (v) => v.tooltip),
+  });
+  // A state set on a focused editor (setState, HistoryCache) starts out unfocused.
+  const focusSync = ViewPlugin.fromClass(
+    class {
+      private destroyed = false;
+      constructor(view: EditorView) {
+        queueMicrotask(() => {
+          if (!this.destroyed && view.hasFocus !== view.state.field(field, false)?.focused) {
+            view.dispatch({ effects: previewFocus.of(view.hasFocus) });
+          }
+        });
+      }
+      destroy() {
+        this.destroyed = true;
+      }
+    },
+  );
+  return [field, focusSync, EditorView.focusChangeEffect.of((_state, focusing) => previewFocus.of(focusing))];
+}
+
+function previewView<T extends HoverTarget>(
+  view: EditorView,
+  cfg: CursorPreviewConfig<T>,
+  field: StateField<Preview<T>>,
+): TooltipView {
+  const doc = view.dom.ownerDocument;
+  const dom = doc.createElement("div");
+  dom.className = "lsp-cursor-preview is-empty";
+  const body = dom.appendChild(doc.createElement("div"));
+  body.className = "lsp-render-hover";
+  /** The construct and text last rendered. */
+  let last: { doc: Text; from: number; to: number } | null = null;
+  let asked = 0;
+  let shown = 0;
+  /** A rendering of the construct is on screen. */
+  let rendered = false;
+
+  const show = (el: HTMLElement | null) => {
+    const failed = !!el?.classList.contains("lsp-render-hover-error");
+    dom.classList.toggle("is-error", failed && rendered);
+    if (failed && rendered) return; // the last rendering stays
+    rendered = !!el && !failed;
+    body.replaceChildren(...(el ? [el] : []));
+    dom.classList.toggle("is-empty", !el);
+  };
+
+  const render = (state: EditorState) => {
+    const t = state.field(field, false)?.target;
+    if (!t || (last && last.doc === state.doc && last.from === t.from && last.to === t.to)) return;
+    last = { doc: state.doc, from: t.from, to: t.to };
+    const n = ++asked;
+    let out: HTMLElement | null | Promise<HTMLElement | null>;
+    try {
+      out = cfg.render(t, view);
+    } catch (e) {
+      logException(state, e, "cursor preview");
+      out = null;
+    }
+    // Renders may land out of order: an older one never replaces a newer one.
+    const land = (el: HTMLElement | null) => {
+      if (n <= shown) return;
+      shown = n;
+      show(el);
+    };
+    if (!out || !("then" in out)) return land(out);
+    out.then(land, (e) => {
+      logException(view.state, e, "cursor preview");
+      land(null);
+    });
+  };
+
+  // The completion list would cover it (both sit below the line): hidden while it is open.
+  const cover = (state: EditorState) => dom.classList.toggle("is-covered", completionStatus(state) === "active");
+  cover(view.state);
+  render(view.state);
+  return {
+    dom,
+    // The construct's rows, not its anchor's: below its last row, or, flipped for want of room
+    // near the pane's bottom, above its first (a formula that soft-wraps, or a display, would
+    // otherwise have the row being typed covered). The left edge stays at the anchor (the end
+    // would push a wide rendering past the editor's right edge).
+    getCoords(pos) {
+      const t = view.state.field(field, false)?.target;
+      const at = view.coordsAtPos(pos);
+      const first = t && view.coordsAtPos(t.from, 1);
+      const end = t && view.coordsAtPos(t.to, -1);
+      return (at && end ? { left: at.left, right: at.right, top: first ? first.top : end.top, bottom: end.bottom } : at) as Rect;
+    },
+    update(u) {
+      cover(u.state);
+      render(u.state);
+    },
+    destroy() {
+      shown = Infinity;
+    },
+  };
 }
 
 /**

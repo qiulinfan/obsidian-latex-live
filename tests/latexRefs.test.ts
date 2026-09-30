@@ -11,7 +11,7 @@ import { DEFAULT_REF_NAMES, LatexRefs, RefNames, refNames, refText, sameRefNames
 import { readAuxLabels } from "../src/tex/aux";
 
 const labels = readAuxLabels(resolve("tests/fixtures/aux/cleveref"));
-const refs = (names: RefNames): LatexRefs => ({ numbers: new Map(), labels, cites: new Map(), names });
+const refs = (names: RefNames): LatexRefs => ({ numbers: new Map(), labels, cites: new Map(), names, theorems: new Map(), checkpoints: new Map() });
 
 /** The probe's preambles: the cleveref options and the lines after its \newtheorem's. */
 const THEOREMS = String.raw`\newtheorem{theorem}{Theorem}[section] \newtheorem{lemma}[theorem]{Lemma} \newtheorem{prop}{Proposition} \newtheorem{claim}{Claim}`;
@@ -140,12 +140,47 @@ test("T-L1 elegantbook's coloured item numbers: \\ref, \\autoref and \\cref show
         "\\newlabel{it:probe2}{{{{\\color  {structurecolor}(a).}}}{7}{随机梯度}{Item.8}{}}",
       ].join("\n"),
     );
-    const book: LatexRefs = { numbers: new Map(), labels: readAuxLabels(dir), cites: new Map(), names: DEFAULT_REF_NAMES };
+    const book: LatexRefs = { numbers: new Map(), labels: readAuxLabels(dir), cites: new Map(), names: DEFAULT_REF_NAMES, theorems: new Map(), checkpoints: new Map() };
     const text = (command: string, key: string) => refText(command, [key], book).text;
     assert.deepEqual(
       [text("ref", "it:probe"), text("autoref", "it:probe"), text("cref", "it:probe"), text("ref", "it:probe2")],
       ["1.", "item 1.", "item 1.", "(a)."],
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T-L9 \\autoref of a theorem: hyperref's name, else the theorem map's \\<env>name, else the number alone (as the PDFs print)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ll-refs-"));
+  try {
+    // The .aux labels of synthetic probes (TeX Live 2026): elegantbook in simple mode (XeLaTeX
+    // printed `Theorem 1.1` and `定义 1.1`), in fancy mode with \elegantnewtheorem (`1.1`, `1.1`, `1.1`)
+    // and amsthm's \newtheorem{thm}{Theorem} with hyperref (pdfLaTeX printed `1.1`, `1.2`).
+    writeFileSync(
+      join(dir, "main.aux"),
+      [
+        "\\newlabel{thm:simple}{{1.1}{1}{主}{theorem.1.1}{}}",
+        "\\newlabel{def:simple}{{1.1}{1}{}{definition.1.1}{}}",
+        "\\newlabel{thm:fancy}{{1.1}{1}{C}{tcb@cnt@theorem.1.1}{}}",
+        "\\newlabel{fac:f}{{1.1}{1}{C}{tcb@cnt@fact.1.1}{}}",
+        "\\newlabel{ex:coin}{{1.1}{1}{C}{exam.1.1}{}}",
+        "\\newlabel{t1}{{1.1}{1}{Cauchy}{thm.1.1}{}}",
+        "\\newlabel{l1}{{1.2}{1}{}{thm.1.2}{}}",
+      ].join("\n"),
+    );
+    const labels = readAuxLabels(dir);
+    const autoref = (preamble: string, key: string) => {
+      const sources = [preamble];
+      const refs: LatexRefs = { numbers: new Map(), labels, cites: new Map(), names: refNames(sources), theorems: new Map(), checkpoints: new Map() };
+      return refText("autoref", [key], refs).text;
+    };
+    const simple = "\\documentclass[lang=cn,simple]{elegantbook}";
+    assert.deepEqual([autoref(simple, "thm:simple"), autoref(simple, "def:simple")], ["Theorem 1.1", "定义 1.1"]);
+    const fancy = "\\documentclass[lang=cn]{elegantbook}\n\\elegantnewtheorem{fact}{事实}{prostyle}{fac}";
+    assert.deepEqual(["thm:fancy", "fac:f", "ex:coin"].map((k) => autoref(fancy, k)), ["1.1", "1.1", "1.1"]);
+    const amsthm = "\\documentclass{article}\n\\usepackage{amsthm}\n\\newtheorem{thm}{Theorem}[section]\n\\newtheorem{lem}[thm]{Lemma}";
+    assert.deepEqual([autoref(amsthm, "t1"), autoref(amsthm, "l1")], ["1.1", "1.2"], "amsthm defines no \\thmname");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

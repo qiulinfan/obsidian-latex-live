@@ -148,6 +148,24 @@
   white-space: pre-wrap;
 }
 
+/* Cursor preview (renderHover.ts `cursorPreview`): the rendering of the formula at the
+   cursor, below it while it is typed. Clicks go through to the text under it; hidden while
+   the completion list (below the line too) is open. */
+.lsp-cm-view .cm-tooltip.lsp-cursor-preview {
+  overflow: hidden;
+  box-shadow: var(--shadow-s);
+  pointer-events: none;
+}
+.lsp-cm-view .cm-tooltip.lsp-cursor-preview.is-empty,
+.lsp-cm-view .cm-tooltip.lsp-cursor-preview.is-covered {
+  display: none;
+}
+/* The source being typed fails: its last rendering stays, marked. */
+.lsp-cm-view .lsp-cursor-preview.is-error > .lsp-render-hover {
+  border-left: 2px solid var(--text-error);
+  opacity: 0.7;
+}
+
 /* Live preview (livePreview.ts): constructs rendered in the editor's own lines. Block
    widgets and theorem boxes never get vertical margins: CodeMirror's height map misses
    margins (measured: ArrowDown skipped visible lines and the gutter drifted), so their
@@ -305,8 +323,8 @@
   color: var(--text-normal);
   font-weight: var(--bold-weight, 700);
 }
-/* Theorem-like boxes: a BlockWrapper element around the lines. --lp-box-color defaults to
-   elegantbook's green scheme; a box may set it inline for another scheme. */
+/* Theorem-like boxes: a BlockWrapper element around the lines. The role classes carry
+   elegantbook's default (blue) scheme; a box sets --lp-box-color inline for its document's. */
 .lsp-cm-view .lsp-lp-box {
   --lp-box-color: var(--interactive-accent);
   margin: 0;
@@ -318,18 +336,23 @@
   background: color-mix(in srgb, var(--lp-box-color) 8%, transparent);
 }
 .lsp-cm-view .lsp-lp-box.is-main {
-  --lp-box-color: rgb(0, 120, 2);
+  --lp-box-color: rgb(0, 166, 82);
 }
 .lsp-cm-view .lsp-lp-box.is-second {
-  --lp-box-color: rgb(230, 90, 7);
+  --lp-box-color: rgb(255, 134, 24);
 }
 .lsp-cm-view .lsp-lp-box.is-third {
-  --lp-box-color: rgb(0, 160, 152);
+  --lp-box-color: rgb(0, 174, 247);
 }
 .lsp-cm-view .lsp-lp-box-title {
   color: var(--lp-box-color, var(--text-accent));
   font-family: var(--font-text);
   font-weight: 600;
+}
+/* A dark scheme colour (elegantbook's color=black) would be unreadable on a dark background:
+   the head keeps its hue, lightened; the border and background keep the colour itself. */
+.theme-dark .lsp-cm-view .lsp-lp-box-title {
+  color: oklch(from var(--lp-box-color, var(--text-accent)) max(l, 0.72) c h);
 }
 .lsp-cm-view .lsp-lp-qed {
   margin-left: 0.5em;

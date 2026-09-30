@@ -10,8 +10,19 @@
 //       the widgets' late styles arrived
 //   B5  the generated 5,700-line chapter (scripts/gen-perf-fixture.mjs): mount, typing (and,
 //       inside a revealed display block, until its preview re-rendered), cursor moves and
-//       scrolling within the design's budgets; the mouse held while the prefetch runs and the
-//       wheel scrolls leaves the page responsive
+//       scrolling within the design's budgets, also cursor moves inside a 190-line theorem box
+//       (the language's `reveals`); the mouse held while the prefetch runs and the wheel scrolls
+//       leaves the page responsive
+//   B6  theorem boxes (BlockWrapper, the shared box style): ArrowDown and ArrowUp move one line at
+//       a time through a box's head, body, display block and collapsed \end line, into a box
+//       right after it and out; every gutter number sits on its line (±1 px)
+//   B7  the pane's bottom edge: ArrowDown from the line above a block where CodeMirror's drawn
+//       viewport ends (it estimates the blank line after the block one line too far) stops on
+//       the block
+//   B8  the cursor preview (renderHover's cursorPreview) of an inline formula that soft-wraps
+//       hangs below the formula's last row, never over the row being typed, its left edge at the
+//       formula's start; near the window's bottom, a display's preview (source mode) flips above
+//       its first row, over none of its lines
 // The page bundles the real shared modules (keyArbiter first, live preview in its
 // compartment) with a LaTeX-like test language. Formulas render with MathJax 3.2.2 when the
 // `mathjax` dev dependency is installed (LaTeX Live, Obsidian's configuration; its glyph CSS
@@ -53,16 +64,25 @@ const OBSIDIAN_CONFIG =
 const ENTRY = String.raw`
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView, drawSelection, keymap, lineNumbers } from "@codemirror/view";
+import { Decoration, EditorView, drawSelection, keymap, lineNumbers } from "@codemirror/view";
 import { keyArbiter } from "./src/editor/shared/keyArbiter";
-import { liveInput, livePreview, livePreviewCompartment, renderConstruct, renderStats } from "./src/editor/shared/livePreview";
+import { TextWidget, liveInput, livePreview, livePreviewCompartment, renderConstruct, renderStats } from "./src/editor/shared/livePreview";
+import { cursorPreview } from "./src/editor/shared/renderHover";
 
 const MATH = /\\begin\{(align\*?|equation\*?|gather\*?)\}[\s\S]*?\\end\{\1\}|\$\$([\s\S]*?)\$\$|\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)|\$([^$\n]+)\$/g;
+
+// Theorem boxes as LaTeX Live draws them: \begin and \end alone on their lines.
+const BOX = /^\\begin\{(theorem|proof)\}(.*)$[\s\S]*?^\\end\{\1\}$/gm;
+const COLLAPSED = Decoration.replace({ block: true });
+
+/** Constructs decorated so far (B5: what a cursor move re-decorates). */
+let decorated = 0;
 
 const language = {
   scan(doc) {
     const text = doc.toString();
     const out = [];
+    for (const m of text.matchAll(BOX)) out.push({ from: m.index, to: m.index + m[0].length, box: m[1], title: m[2] });
     for (const m of text.matchAll(MATH)) {
       const from = m.index, to = from + m[0].length;
       const inline = m[4] !== undefined || m[5] !== undefined;
@@ -71,9 +91,20 @@ const language = {
       const block = !inline && !text.slice(a.from, from).trim() && !text.slice(to, b.to).trim();
       out.push({ from, to, block, src, display: !inline });
     }
-    return out;
+    return out.sort((x, y) => x.from - y.from);
   },
-  decorate: (c, ctx) => renderConstruct(ctx, c, ctx.request("math", c.src, c.display, c.from)),
+  // A box tests the selection on its \begin and \end lines only.
+  reveals: (c) => (c.box ? [[c.from, c.from], [c.to, c.to]] : null),
+  decorate(c, ctx) {
+    decorated++;
+    if (!c.box) return renderConstruct(ctx, c, ctx.request("math", c.src, c.display, c.from));
+    // The box over its lines, the head on the \begin line, the \end line collapsed; each line reveals.
+    const begin = ctx.state.doc.lineAt(c.from), end = ctx.state.doc.lineAt(c.to);
+    ctx.wrap(begin.from, end.to, { tagName: "div", attributes: { class: c.box === "proof" ? "lsp-lp-box is-third" : "lsp-lp-box is-second" } });
+    const head = c.box === "proof" ? "Proof." : "Theorem 1.1 (" + c.title.replace(/^\{|\}$/g, "") + ")";
+    if (!ctx.touchLines(begin.from, begin.from)) ctx.replace(begin.from, begin.to, Decoration.replace({ widget: new TextWidget(head, "lsp-lp-box-title") }));
+    if (!ctx.touchLines(end.from, end.from)) ctx.replace(end.from, end.to, COLLAPSED);
+  },
 };
 
 let styleTimer = 0;
@@ -100,10 +131,25 @@ const renderer = {
   },
 };
 
+/** The formula (inline, or a \[..\] display) around the main cursor, rendered as the live widgets are (B8). */
+const preview = cursorPreview({
+  enabled: () => true,
+  target(state) {
+    const pos = state.selection.main.head;
+    for (const m of state.doc.toString().matchAll(/\\\[([\s\S]*?)\\\]|\$([^$\n]+)\$/g)) {
+      const display = m[1] !== undefined;
+      if (m.index <= pos && pos <= m.index + m[0].length) return { from: m.index, to: m.index + m[0].length, src: display ? m[1] : m[2], display };
+    }
+    return null;
+  },
+  render: (t) => renderer.render({ src: t.src, display: t.display }).node,
+});
+
 window.__smoke = {
-  mount(doc, height = 700) {
+  mount(doc, height = 700, o = {}) {
     const host = document.getElementById("host");
     host.style.height = height + "px";
+    host.style.width = (o.width ?? 900) + "px";
     if (window.__view) window.__view.destroy();
     const view = new EditorView({
       parent: host,
@@ -117,7 +163,8 @@ window.__smoke = {
           lineNumbers(),
           EditorView.lineWrapping,
           liveInput(),
-          livePreviewCompartment.of(livePreview({ language, renderer })),
+          livePreviewCompartment.of(o.live === false ? [] : livePreview({ language, renderer })),
+          o.preview ? preview : [],
           keymap.of([...defaultKeymap, ...historyKeymap]),
         ],
       }),
@@ -126,6 +173,7 @@ window.__smoke = {
     return view;
   },
   stats: () => renderStats(window.__view),
+  decorated: () => decorated,
   EditorSelection,
 };
 window.__ready = true;
@@ -281,8 +329,8 @@ async function press(page, key, modifiers = 0) {
 }
 
 /** Mount `doc` and wait until every construct rendered and the late styles landed. */
-async function mount(evaluate, doc, height = 700) {
-  await evaluate(`__smoke.mount(${JSON.stringify(doc)}, ${height}), true`);
+async function mount(evaluate, doc, height = 700, o = {}) {
+  await evaluate(`__smoke.mount(${JSON.stringify(doc)}, ${height}, ${JSON.stringify(o)}), true`);
   await evaluate(`new Promise((ok) => { const t0 = Date.now(); (function wait() {
     if (!__smoke.stats().pending || Date.now() - t0 > 5000) ok(); else setTimeout(wait, 20); })(); })`);
   await evaluate("document.fonts.ready.then(() => true)");
@@ -535,6 +583,32 @@ async function b5({ page, evaluate }) {
   check("B5", "20-page scroll frame p90 <= 20 ms", perf.scrollFrameP90 <= 20, perf.scrollFrameP90);
   console.log("     B5", JSON.stringify(perf));
 
+  // A theorem box of 190 lines, three formulas each, in the middle of a 3,000-line chapter: a
+  // move inside it re-decorates the formulas on its lines, never the box and its whole body.
+  const inner = Array.from({ length: 190 }, (_, i) => String.raw`Inner line ${i} with $c_{${i}}$ and $d_{${i}}$ and $e_{${i}}$.`);
+  const boxed = latexChapter(1500) + ["\\begin{theorem}{Long}", ...inner, "\\end{theorem}"].join("\n") + "\n" + latexChapter(1500, 1001);
+  const inBox = await evaluate(`(async () => {
+    const v = __smoke.mount(${JSON.stringify(boxed)}, 700);
+    await new Promise((ok) => { const s = Date.now(); (function w() { if (!__smoke.stats().pending || Date.now() - s > 20000) ok(); else setTimeout(w, 50); })(); });
+    v.focus();
+    await new Promise((r) => setTimeout(r, 100));
+    const first = v.state.doc.toString().indexOf("Inner line 20 ");
+    const line = v.state.doc.lineAt(first).number;
+    v.dispatch({ selection: { anchor: first }, scrollIntoView: true });
+    await new Promise((r) => setTimeout(r, 100));
+    const times = [];
+    const d0 = __smoke.decorated();
+    for (let n = 0; n < 60; n++) {
+      const t = performance.now();
+      v.dispatch({ selection: { anchor: v.state.doc.line(line + (n % 30)).from + 3 } });
+      v.contentDOM.offsetHeight;
+      times.push(performance.now() - t);
+    }
+    times.sort((x, y) => x - y);
+    return { lines: v.state.doc.lines, p50: +times[30].toFixed(2), p95: +times[57].toFixed(2), decoratedPerMove: (__smoke.decorated() - d0) / 60 };
+  })()`);
+  check("B5", "cursor move inside a 190-line theorem box: p50 <= 1 ms, only its lines' formulas re-decorated", inBox.p50 <= 1 && inBox.decoratedPerMove <= 6, inBox);
+
   // The mouse goes down right after a mount, while most renders still wait for the idle
   // prefetch, and the wheel scrolls with the button held: the page must keep answering.
   // (Formulas of their own: none of them is in the cache yet.)
@@ -552,6 +626,151 @@ async function b5({ page, evaluate }) {
   }
   check("B5", "the mouse held during the prefetch while the wheel scrolls: the page responds", alive);
   if (alive) await page("Input.dispatchMouseEvent", { type: "mouseReleased", ...pressed, buttons: 0 });
+}
+
+/** Two boxes back to back between text, a display block in the first. */
+const B6_DOC = [
+  "Text before the box.", // 1
+  "\\begin{theorem}{Cauchy}", // 2
+  "Body with $x^2$ inline.",
+  "\\[",
+  "a^2 + b^2 \\ge 2ab",
+  "\\]",
+  "Last body line.",
+  "\\end{theorem}", // 8
+  "\\begin{proof}", // 9
+  "By AM-GM.",
+  "\\end{proof}", // 11
+  "Text after the boxes.",
+  "The end.",
+].join("\n");
+
+async function b6({ page, evaluate }) {
+  await mount(evaluate, B6_DOC, 1200);
+  await evaluate("__view.focus(), __view.dispatch({ selection: { anchor: 0 } }), true");
+  await sleep(100);
+  const lineOf = "__view.state.doc.lineAt(__view.state.selection.main.head).number";
+  const state = `(() => { const v = __view; return { line: ${lineOf}, boxes: v.contentDOM.querySelectorAll(".lsp-lp-box").length,
+    heads: v.contentDOM.querySelectorAll(".lsp-lp-box-title").length,
+    revealed: [...v.contentDOM.querySelectorAll(".lsp-lp-box > .cm-line")].map((l) => l.textContent).filter((t) => /^\\\\(begin|end)/.test(t)) }; })()`;
+  const down = [];
+  for (let i = 0; i < 12; i++) {
+    await press(page, "ArrowDown");
+    await sleep(50);
+    down.push(await evaluate(state));
+  }
+  check("B6", "ArrowDown moves one line at a time through the boxes", down.map((d) => d.line).join() === [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].join(), down.map((d) => d.line).join(" "));
+  const own = (d) => (d.line === 2 ? ["\\begin{theorem}{Cauchy}"] : d.line === 8 ? ["\\end{theorem}"] : d.line === 9 ? ["\\begin{proof}"] : d.line === 11 ? ["\\end{proof}"] : []);
+  check(
+    "B6",
+    "only the \\begin or \\end line under the cursor shows its source; the boxes stay",
+    down.every((d) => d.boxes === 2 && JSON.stringify(d.revealed) === JSON.stringify(own(d))),
+    down.map((d) => `${d.line}:${d.boxes}/${d.revealed.join("+") || "-"}`).join(" "),
+  );
+  const up = [];
+  for (let i = 0; i < 12; i++) {
+    await press(page, "ArrowUp");
+    await sleep(50);
+    up.push(await evaluate(lineOf));
+  }
+  check("B6", "ArrowUp moves one line at a time back", up.join() === [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1].join(), up.join(" "));
+  await evaluate("__view.contentDOM.blur(), true");
+  await sleep(300);
+  const drift = await evaluate(`(() => {
+    const v = __view;
+    const gutter = new Map();
+    for (const el of v.dom.querySelectorAll(".cm-lineNumbers .cm-gutterElement")) {
+      if (/^\\d+$/.test(el.textContent)) gutter.set(+el.textContent, el.getBoundingClientRect().top);
+    }
+    const rows = [];
+    for (const el of v.contentDOM.querySelectorAll(".cm-line")) {
+      const n = v.state.doc.lineAt(v.lineBlockAt(v.posAtDOM(el)).from).number;
+      if (gutter.has(n)) rows.push([n, Math.round(el.getBoundingClientRect().top - gutter.get(n))]);
+    }
+    return { lines: rows.map((r) => r[0]).join(" "), worst: Math.max(...rows.map((r) => Math.abs(r[1]))), off: rows.filter((r) => Math.abs(r[1]) > 1) };
+  })()`);
+  // Every visible text line (the display block and the collapsed \end lines have no number).
+  check("B6", "gutter numbers sit on their lines (±1 px) around and inside the boxes", drift.lines === "1 2 3 7 9 10 12 13" && drift.worst <= 1, drift);
+}
+
+/**
+ * 35 lines of text, line 36 right above a tall align (lines 37-53: CodeMirror estimates it at 40 px
+ * a line until it is drawn, far more than it measures), a blank line 54, then text.
+ */
+function b7Doc() {
+  const out = [];
+  for (let n = 1; n <= 35; n++) out.push(`Line ${n} of plain text before the tall block.`);
+  out.push("The line right above the block.");
+  out.push("\\begin{align}");
+  for (let k = 1; k <= 15; k++) out.push(`b_{${k}} &= \\sum_{i=1}^{${k}} c_i \\\\`);
+  out.push("\\end{align}", "");
+  for (let n = 55; n <= 100; n++) out.push(`Line ${n} after the block.`);
+  return out.join("\n");
+}
+
+async function b7({ page, evaluate }) {
+  // The first viewport CodeMirror drew (from its estimates) ends at the block; scrolled to line 36,
+  // which then sits at the pane's bottom edge, it keeps that viewport.
+  await mount(evaluate, b7Doc(), 700);
+  await evaluate("__view.focus(), __view.dispatch({ selection: { anchor: __view.state.doc.line(36).from }, scrollIntoView: true }), true");
+  await sleep(400);
+  const before = await evaluate(`(() => { const v = __view, d = v.state.doc, box = v.scrollDOM.getBoundingClientRect();
+    return { head: d.lineAt(v.state.selection.main.head).number, viewportEnd: d.lineAt(v.viewport.to).number,
+      blank: v.viewport.to < d.line(54).from ? "not drawn" : "drawn", edge: Math.round(box.bottom - v.coordsAtPos(v.state.selection.main.head).bottom) }; })()`);
+  await press(page, "ArrowDown");
+  await sleep(100);
+  const landed = await evaluate("__view.state.doc.lineAt(__view.state.selection.main.head).number");
+  check("B7", "the case under test: line 36 at the bottom edge, the drawn viewport ending at the block", before.head === 36 && before.viewportEnd === 53 && before.blank === "not drawn" && before.edge <= 30, before);
+  check("B7", "ArrowDown from line 36 stops on the block (line 37), not past the line after it", landed === 37, { ...before, landed });
+}
+
+async function b8({ page, evaluate }) {
+  const terms = Array.from({ length: 24 }, (_, i) => `a_{${i + 1}}`).join(" + ");
+  const doc = ["A formula that wraps: $" + terms + "$ and text after it.", "The next line."].join("\n");
+  await mount(evaluate, doc, 400, { preview: true, width: 420 });
+  const from = doc.indexOf("$");
+  const to = doc.indexOf("$", from + 1) + 1;
+  const rect = (pos, side = 1) => evaluate(`(() => { const c = __view.coordsAtPos(${pos}, ${side}); return c && { top: c.top, bottom: c.bottom, left: c.left }; })()`);
+  for (const [name, anchor] of [["its last row", to - 3], ["its first row", from + 3]]) {
+    // The cursor in the formula reveals its source (the live widget goes), which wraps.
+    await evaluate(`__view.focus(), __view.dispatch({ selection: { anchor: ${anchor} } }), true`);
+    await sleep(300);
+    const [start, end, head] = [await rect(from), await rect(to, -1), await rect(anchor)];
+    const tip = await evaluate(`(() => { const t = document.querySelector(".cm-tooltip.lsp-cursor-preview:not(.is-empty)");
+      if (!t) return null; const r = t.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left }; })()`);
+    check(
+      "B8",
+      `the cursor on ${name} of a formula wrapped over rows: the preview hangs below its last row, left edge at its start`,
+      end.top > start.bottom - 1 && !!tip && tip.top >= end.bottom - 0.5 && tip.top >= head.bottom - 0.5 && Math.abs(tip.left - start.left) <= 2,
+      { tip, head, start, end },
+    );
+  }
+
+  // A display whose last line sits just above the window's bottom (the pane's, in Obsidian):
+  // no room below, so CodeMirror flips the preview above, which must clear the display's first
+  // row, not only its last. Source mode: in live preview a revealed block has its own preview.
+  const filler = Array.from({ length: 13 }, (_, i) => `Filler line ${i + 1}.`);
+  const display = [...filler, "\\[", "  \\alpha + \\beta", "  + \\gamma", "\\]", "tail"].join("\n");
+  const open = display.indexOf("\\[");
+  const close = display.indexOf("\\]") + 2;
+  await mount(evaluate, display, 400, { preview: true, width: 420, live: false });
+  const band = { top: (await rect(open)).top, bottom: (await rect(close, -1)).bottom };
+  await page("Emulation.setDeviceMetricsOverride", { width: 1000, height: Math.ceil(band.bottom) + 4, deviceScaleFactor: 1, mobile: false });
+  try {
+    await sleep(100);
+    await evaluate(`__view.focus(), __view.dispatch({ selection: { anchor: ${display.indexOf("\\gamma") + 2} } }), true`);
+    await sleep(300);
+    const tip = await evaluate(`(() => { const t = document.querySelector(".cm-tooltip.lsp-cursor-preview:not(.is-empty)");
+      if (!t) return null; const r = t.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, above: t.classList.contains("cm-tooltip-above") }; })()`);
+    check(
+      "B8",
+      "a display near the window's bottom: the preview flips above its first row, over none of its lines",
+      !!tip && tip.above && tip.bottom <= band.top + 0.5 && tip.top >= 0,
+      { tip, band },
+    );
+  } finally {
+    await page("Emulation.setDeviceMetricsOverride", { width: 1000, height: 1300, deviceScaleFactor: 1, mobile: false });
+  }
 }
 
 // ---- main ------------------------------------------------------------------------------------------
@@ -591,6 +810,9 @@ try {
   if (run("B3")) await b3(cdp);
   if (run("B4")) await b4(cdp);
   if (run("B5")) await b5(cdp);
+  if (run("B6")) await b6(cdp);
+  if (run("B7")) await b7(cdp);
+  if (run("B8")) await b8(cdp);
 } catch (e) {
   check("--", "smoke run", false, e instanceof Error ? e.message : String(e));
 } finally {

@@ -143,7 +143,10 @@ export class Compiler {
         run.rawLog + run.output,
       )) {
       // A broken format must never cost a preview: disable it and retry.
-      if (this.format) this.format.state = "failed";
+      if (this.format) {
+        this.format.state = "failed";
+        await fsp.rm(`${this.format.fmtBase}.json`, { force: true });
+      }
       usedFormat = false;
       run = await this.runEngine(o, null);
       passes++;
@@ -283,9 +286,7 @@ export class Compiler {
   ): Promise<string | null> {
     const preamble = preambleOf(rootText);
     if (preamble === null || /\s/.test(basename(this.root))) return null;
-    const key = createHash("sha1")
-      .update(o.engine + "\0" + preamble)
-      .digest("hex");
+    const key = formatKey(o.engine, preamble);
     const f = this.format;
     if (f && f.key === key) {
       if (f.state !== "ready") return null;
@@ -305,7 +306,10 @@ export class Compiler {
       state: "building",
     };
     this.format = cache;
+    const stamp = `${fmtBase}.json`;
     try {
+      // Other runs (fragment compiles) take the format only while its stamp says it is ready.
+      await fsp.rm(stamp, { force: true });
       await this.exec(
         texTool(o.binDir, o.engine),
         [
@@ -339,6 +343,8 @@ export class Compiler {
         }
       }
       cache.state = "ready";
+      const written: FormatStamp = { key, inputs: [...cache.inputs] };
+      await fsp.writeFile(stamp, JSON.stringify(written));
     } catch {
       if (this.format === cache) cache.state = "failed";
     }
@@ -526,6 +532,41 @@ export async function readFls(
     }
   }
   return [...out];
+}
+
+/** What a ready preamble format was built for: `<job>-preamble.json` next to the `.fmt`. */
+interface FormatStamp {
+  key: string;
+  /** Project-local files the preamble read, with their mtimes at build. */
+  inputs: [string, number][];
+}
+
+/** The format cache key of a preamble (preambleOf) for an engine. */
+export function formatKey(engine: Engine, preamble: string): string {
+  return createHash("sha1").update(engine + "\0" + preamble).digest("hex");
+}
+
+/**
+ * The preamble format a compile of `root` left in `outDir`, when it is ready for `preamble`
+ * (preambleOf of the root's text): its stamp names the key, and the project files it read are
+ * unchanged. Its name for `-fmt` (found through `TEXFORMATS=<outDir>:`) and the `.fmt`'s mtime,
+ * or null. Fragment compiles use it; a stamp exists only while no build rewrites the format.
+ */
+export async function readyPreambleFormat(
+  outDir: string,
+  root: string,
+  engine: Engine,
+  preamble: string,
+): Promise<{ name: string; mtime: number } | null> {
+  const name = `${basename(root, extname(root))}-preamble`;
+  if (engine !== "pdflatex" || /\s/.test(basename(root))) return null;
+  try {
+    const stamp = JSON.parse(await fsp.readFile(join(outDir, `${name}.json`), "utf8")) as FormatStamp;
+    if (stamp.key !== formatKey(engine, preamble) || !(await inputsUnchanged(new Map(stamp.inputs)))) return null;
+    return { name, mtime: (await fsp.stat(join(outDir, `${name}.fmt`))).mtimeMs };
+  } catch {
+    return null;
+  }
 }
 
 async function inputsUnchanged(inputs: Map<string, number>): Promise<boolean> {

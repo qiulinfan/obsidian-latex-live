@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { readAuxLabels } from "../src/tex/aux";
+import { readAuxCheckpoints, readAuxLabels } from "../src/tex/aux";
 
 const AUX = resolve("tests/fixtures/aux");
 /** Each label as [key, number, page, kind]. */
@@ -47,6 +47,50 @@ test("T-L6 cleveref article: the twins' type (it wins over the anchor) and sort 
   assert.deepEqual([order("def:linear"), order("eq:bv-expand"), order("sec:intro"), order("fn:toy")], [[2, 1], [2, 1], [1], null]);
 });
 
+test("readAuxCheckpoints: each \\include'd file's counters as it ended, its chapter's number from hyperref's anchor", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ll-ckpt-"));
+  try {
+    mkdirSync(join(dir, "chapters"));
+    writeFileSync(join(dir, "main.aux"), "\\relax\n\\@input{chapters/ch4.aux}\n");
+    writeFileSync(
+      join(dir, "chapters", "ch4.aux"),
+      [
+        "\\relax ",
+        "\\@writefile{toc}{\\contentsline {chapter}{\\numberline {第四章}边界情形}{8}{chapter.4}\\protected@file@percent }",
+        "\\newlabel{thm:t-label}{{4.3}{8}{边界情形}{tcb@cnt@theorem.4.3}{}}",
+        "\\@setckpt{chapters/ch4}{",
+        "\\setcounter{page}{10}",
+        "\\setcounter{chapter}{4}",
+        "\\setcounter{tcb@cnt@theorem}{4}",
+        "\\setcounter{exam}{2}",
+        "}",
+      ].join("\n"),
+    );
+    // The first appendix: counter 1, anchor appendix.A; a starred chapter after it changes nothing.
+    writeFileSync(
+      join(dir, "chapters", "appendix.aux"),
+      [
+        "\\@writefile{toc}{\\contentsline {chapter}{\\numberline {A}记号表}{10}{appendix.A}\\protected@file@percent }",
+        "\\@writefile{toc}{\\contentsline {chapter}{后记}{11}{chapter*.3}\\protected@file@percent }",
+        "\\@setckpt{./chapters/appendix.tex}{",
+        "\\setcounter{chapter}{1}",
+        "}",
+      ].join("\n"),
+    );
+    // No hyperref: no anchor, no chapter number.
+    writeFileSync(join(dir, "chapters", "plain.aux"), "\\@writefile{toc}{\\contentsline {chapter}{\\numberline {3}Plain}{5}}\n\\@setckpt{chapters/plain}{\n\\setcounter{thm}{2}\n}\n");
+    const all = readAuxCheckpoints(dir);
+    assert.deepEqual([...all.keys()].sort(), ["chapters/appendix", "chapters/ch4", "chapters/plain"]);
+    const ch4 = all.get("chapters/ch4")!;
+    assert.deepEqual([ch4.chapter, [...ch4.counters]], ["4", [["page", 10], ["chapter", 4], ["tcb@cnt@theorem", 4], ["exam", 2]]]);
+    assert.equal(all.get("chapters/appendix")!.chapter, "A", "not the counter (1), not a starred chapter's anchor");
+    assert.equal(all.get("chapters/plain")!.chapter, null);
+    assert.equal(readAuxLabels(dir).get("thm:t-label")?.number, "4.3", "the labels as before");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("readAuxLabels: numbers, pages and anchors from every .aux under the build folder; broken lines skipped", () => {
   const dir = mkdtempSync(join(tmpdir(), "ll-aux-"));
   try {
@@ -70,6 +114,9 @@ test("readAuxLabels: numbers, pages and anchors from every .aux under the build 
         "\\newlabel{broken}{{1.4}",
       ].join("\n"),
     );
+    // A fragment compile's .aux in the snippets folder (fragment.ts) is none of the document's.
+    mkdirSync(join(dir, "snippets"));
+    writeFileSync(join(dir, "snippets", "frag-0123456789abcdef.aux"), "\\newlabel{eq:frag}{{9.9}{1}{}{equation.9.9}{}}\n");
     const labels = readAuxLabels(dir);
     assert.deepEqual([...labels.keys()].sort(), ["eq:e", "eq:var-def", "it:probe", "sec:plain", "thm:total-exp"]);
     assert.deepEqual(labels.get("sec:plain"), { number: "2.3", page: "7", title: "", anchor: "", kind: "", order: null }, "without hyperref or cleveref");

@@ -121,10 +121,7 @@ export class LatexPreviewView extends ItemView {
   }
 
   applyTheme(): void {
-    const invert =
-      this.plugin.settings.invertPreview === "dark-theme" &&
-      document.body.hasClass("theme-dark");
-    this.renderer?.setInverted(invert);
+    this.renderer?.setInverted(this.plugin.invertsPaper());
   }
 
   private attach(session: LatexSession | null): void {

@@ -1,5 +1,6 @@
 import { startCompletion } from "@codemirror/autocomplete";
 import { EditorView } from "@codemirror/view";
+import { readFile } from "fs/promises";
 import { isAbsolute, join, relative, sep } from "path";
 import {
   FileSystemAdapter,
@@ -18,6 +19,9 @@ import type { MathJaxLike } from "./editor/mathjaxProject";
 import { TexRender } from "./editor/texRender";
 import { TexView, VIEW_TYPE_TEX } from "./editor/texView";
 import { TexlabServer, resolveTexlab, texlabSettings } from "./lsp/texlab";
+import { CropService } from "./preview/blockCrop";
+import { FragmentService } from "./preview/fragments";
+import { openPdf, pdfPageImage } from "./preview/pdfRenderer";
 import { LatexPreviewView, VIEW_TYPE_PREVIEW } from "./preview/previewView";
 import { LatexSession, SessionEvent, outDirFor } from "./session";
 import {
@@ -40,6 +44,10 @@ export default class LatexLivePlugin extends Plugin {
   texlab!: TexlabServer;
   /** Project math for hover rendering (one private MathJax instance per root). */
   texRender!: TexRender;
+  /** PDF crops of blocks from the previewed sessions' last compiles (hover and live preview). */
+  crops!: CropService;
+  /** Fragment compiles for the hover: what MathJax and the crops cannot show (design 4.7). */
+  fragments!: FragmentService;
   private sessions = new Map<string, LatexSession>();
   private binDir: string | null | undefined;
   private texlabBin: string | null | undefined;
@@ -67,16 +75,26 @@ export default class LatexLivePlugin extends Plugin {
       settings: () => texlabSettings(this.activeRoot ? outDirFor(this.activeRoot) : null),
     });
 
+    this.crops = new CropService({
+      session: (root) => this.sessionFor(root),
+      binDir: () => this.texBinDir(),
+      openPdf,
+      inverted: () => this.invertsPaper(),
+      document,
+    });
+    this.fragments = new FragmentService({
+      binDir: () => this.texBinDir(),
+      engineSetting: () => this.settings.engine,
+      preambleCache: () => this.settings.preambleCache,
+      outDirFor,
+      buffers: () => this.editorBuffers(),
+      openPdf,
+      inverted: () => this.invertsPaper(),
+      document,
+    });
     this.texRender = new TexRender({
       outDirFor,
-      buffers: () => {
-        const out = new Map<string, string>();
-        for (const v of this.texViews()) {
-          const abs = v.absolutePath();
-          if (abs && v.editorView) out.set(abs, v.editorView.state.doc.toString());
-        }
-        return out;
-      },
+      buffers: () => this.editorBuffers(),
       documents: () => new Set(this.texViews().map((v) => v.containerEl.ownerDocument)),
       mathJax: {
         load: loadMathJax,
@@ -84,6 +102,17 @@ export default class LatexLivePlugin extends Plugin {
         finish: finishRenderMath,
         document,
       },
+      images: {
+        url: (abs) => {
+          const rel = this.vaultPath(abs);
+          return rel === null ? null : this.app.vault.adapter.getResourcePath(rel);
+        },
+        // pdf.js refuses a Buffer: a Uint8Array copy.
+        pdfPage: async (abs, maxHeight) => pdfPageImage(new Uint8Array(await readFile(abs)), maxHeight, window.devicePixelRatio || 1),
+      },
+      crops: this.crops,
+      fragments: this.fragments,
+      fragmentFallback: () => this.settings.texFragmentFallback,
     });
 
     this.registerView(VIEW_TYPE_TEX, (leaf) => new TexView(leaf, this));
@@ -176,8 +205,17 @@ export default class LatexLivePlugin extends Plugin {
 
     this.registerEvent(this.app.vault.on("modify", (f) => this.onModified(f)));
     this.registerEvent(
-      this.app.vault.on("rename", (f, old) => this.histories.rename(old, f.path)),
+      this.app.vault.on("rename", (f, old) => {
+        this.histories.rename(old, f.path);
+        this.texRender.filesChanged();
+      }),
     );
+    // Live preview's images resolve again (a figure saved, deleted or moved). After the layout
+    // is ready: the vault's initial scan creates every file.
+    this.app.workspace.onLayoutReady(() => {
+      this.registerEvent(this.app.vault.on("create", () => this.texRender.filesChanged()));
+      this.registerEvent(this.app.vault.on("delete", () => this.texRender.filesChanged()));
+    });
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => this.onActiveLeaf(leaf)),
     );
@@ -193,6 +231,8 @@ export default class LatexLivePlugin extends Plugin {
     for (const s of this.sessions.values()) s.dispose();
     this.sessions.clear();
     this.yolo.destroy();
+    this.crops.dispose();
+    this.fragments.dispose();
     this.texRender.dispose();
     window.clearTimeout(this.restartTimer);
     void this.texlab.dispose();
@@ -276,13 +316,43 @@ export default class LatexLivePlugin extends Plugin {
     if (--s.refs > 0) return;
     s.dispose();
     this.sessions.delete(s.root);
+    this.crops.release(s.root);
+    this.fragments.release(s.root);
+    this.texRender.cropsChanged(s.root);
     this.refreshDiagnostics();
   }
 
-  /** Called by sessions after every event: update editor diagnostics and label numbers. */
+  /** The session previewing `root`, if a preview holds one (PDF crops need it). */
+  sessionFor(root: string): LatexSession | null {
+    return this.sessions.get(root) ?? null;
+  }
+
+  /** The text of the open LaTeX editors by absolute path (unsaved edits included). */
+  private editorBuffers(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const v of this.texViews()) {
+      const abs = v.absolutePath();
+      if (abs && v.editorView) out.set(abs, v.editorView.state.doc.toString());
+    }
+    return out;
+  }
+
+  /** The files open in LaTeX editors (a compile's crop sources). */
+  openTexFiles(): string[] {
+    const out: string[] = [];
+    for (const v of this.texViews()) {
+      const abs = v.absolutePath();
+      if (abs) out.push(abs);
+    }
+    return out;
+  }
+
+  /** Called by sessions after every event: update editor diagnostics, label numbers and crops. */
   sessionChanged(s: LatexSession, e: SessionEvent): void {
     if (s.last) this.refreshDiagnostics();
     if (e === "result") this.texRender.compiled(s.root);
+    // A compile that ended: live crops of its new PDF, or those held back while it ran.
+    if (e !== "start") this.texRender.cropsChanged(s.root);
   }
 
   diagnosticsFor(file: string): TexDiagnostic[] {
@@ -295,6 +365,13 @@ export default class LatexLivePlugin extends Plugin {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PREVIEW)) {
       if (leaf.view instanceof LatexPreviewView) leaf.view.applyTheme();
     }
+    // Crops are paper cards: they follow the preview's inversion.
+    this.texRender.cropsChanged();
+  }
+
+  /** The preview inverts its colours (and crops their paper): the setting, in a dark theme. */
+  invertsPaper(): boolean {
+    return this.settings.invertPreview === "dark-theme" && document.body.hasClass("theme-dark");
   }
 
   /** Mod-E in the editor: close the preview if one is open, else open it. */

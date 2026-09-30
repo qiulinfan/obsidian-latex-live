@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Text } from "@codemirror/state";
-import { LatexConstruct, LatexMath, formulas, mathAt, scanLatex } from "../src/editor/latexScan";
+import { LatexConstruct, LatexEnv, LatexMath, blockAt, blocks, blocksAround, formulas, mathAt, scanLatex } from "../src/editor/latexScan";
 
 const BOOK = resolve("tests/fixtures/elegantbook");
 const doc = (s: string) => Text.of(s.split("\n"));
@@ -136,6 +136,12 @@ function describe(s: string, c: LatexConstruct): string {
       return `${c.command} ${c.prenote ?? "-"}|${c.postnote ?? "-"}|${c.keys.join(",")}`;
     case "label":
       return `label ${c.key}`;
+    case "env": {
+      const args = c.args.map((a) => (a.optional ? `[${s.slice(a.from, a.to)}]` : `{${s.slice(a.from, a.to)}}`)).join("");
+      return `env ${c.env}${args}${c.label === null ? "" : ` #${c.label}`}`;
+    }
+    case "image":
+      return `image ${c.path}`;
   }
 }
 const constructs = (s: string) => scanLatex(doc(s)).map((c) => describe(s, c));
@@ -148,6 +154,8 @@ test("scanLatex: ch1's text constructs in document order, around its formulas", 
   assert.deepEqual(shown, [
     "h1 概率与期望",
     "label chap:prob",
+    "env definition{概率空间 Probability space}{prob-space}",
+    "env theorem{全期望公式}{total-exp}",
     "eqref eq:var-short",
     "ref thm:total-exp",
     "cite -|第 2 章|zhang2020notes",
@@ -227,13 +235,100 @@ test("scanLatex: items carry the marker LaTeX typesets, by depth, short form, en
   assert.deepEqual(constructs("\\item outside a list"), []);
 });
 
-test("scanLatex: \\begin/\\end lines of lists and center alone on their lines (options included)", () => {
+test("scanLatex: \\begin/\\end lines of lists, center, figure and table alone on their lines (options included)", () => {
   assert.deepEqual(
     constructs("\\begin{enumerate}[label=(\\alph*)] % note\n\\item a\n  \\end{enumerate}\n\\begin{center}\nc\n\\end{center}"),
     ["begin \\begin{enumerate}[label=(\\alph*)]", "item (a)", "end \\end{enumerate}", "begin \\begin{center}", "end \\end{center}"],
   );
   assert.deepEqual(constructs("text \\begin{itemize} \\item a\n\\end{itemize} text"), ["item •"], "not alone: the list still counts");
-  assert.deepEqual(constructs("\\begin{figure}\n\\begin{theorem}\n\\end{theorem}\n\\end{figure}"), [], "P4's environments stay");
+  assert.deepEqual(
+    constructs("\\begin{figure}[htbp]\n\\begin{theorem}\n\\end{theorem}\n\\end{figure}\n\\begin{table*}[t] \\centering\n\\end{table*}"),
+    ["begin \\begin{figure}[htbp]", "env theorem", "end \\end{figure}", "end \\end{table*}"],
+    "figure and table (P4); a \\begin line with more on it stays",
+  );
+});
+
+test("scanLatex: environments alone on their lines are `env` constructs with their arguments and label (T-L9)", () => {
+  const text = [
+    "\\begin{theorem}{全期望公式 $\\E$}{total-exp} % elegantbook",
+    "  body $x$",
+    "\\end{theorem}",
+    "\\begin{lemma}[下降引理]\\label{lem:descent}",
+    "\\end{lemma}",
+    "\\begin{thm}[Cauchy]",
+    "  \\label{thm:cauchy}",
+    "  \\begin{proof}",
+    "    \\begin{remark}",
+    "    \\end{remark}",
+    "  \\end{proof}",
+    "\\end{thm}",
+    "\\begin{note} text on its line",
+    "\\end{note}",
+    "\\begin{custom}{性质}",
+    "\\end{custom} after",
+    "\\begin{proof}",
+    "\\begin{remark}",
+    "\\end{proof}",
+  ].join("\n");
+  const all = scanLatex(doc(text));
+  assert.ok(all.every((c, i) => i === 0 || all[i - 1].from <= c.from), "document order: an env before what is in it");
+  assert.deepEqual(all.map((c) => describe(text, c)), [
+    "env theorem{全期望公式 $\\E$}{total-exp}",
+    "math \\E",
+    "math x",
+    "env lemma[下降引理] #lem:descent",
+    "label lem:descent",
+    "env thm[Cauchy] #thm:cauchy",
+    "label thm:cauchy",
+    "env proof",
+    "env remark",
+    "env proof",
+  ], "a \\begin or \\end with text beside it, and an environment left open, are none");
+  const thm = all[0] as LatexEnv;
+  assert.deepEqual(
+    [text.slice(thm.from, thm.beginTo), text.slice(thm.endFrom, thm.to)],
+    ["\\begin{theorem}{全期望公式 $\\E$}{total-exp}", "\\end{theorem}"],
+  );
+  const lemma = all[3] as LatexEnv;
+  assert.equal(text.slice(lemma.from, lemma.beginTo), "\\begin{lemma}[下降引理]\\label{lem:descent}", "the \\label belongs to the \\begin line");
+  const long = `\\begin{proof}\n${"x\n".repeat(250)}\\end{proof}\n\\begin{proof}\n${"x\n".repeat(150)}\\end{proof}`;
+  assert.deepEqual(constructs(long), ["env proof"], "within 200 lines");
+});
+
+test("scanLatex: \\includegraphics alone on its line is an image (#13)", () => {
+  assert.deepEqual(
+    constructs(
+      [
+        "  \\includegraphics[width=0.3\\linewidth]{figures/grid.png} % a figure",
+        "\\includegraphics*[0,0][10,10]{ grid }",
+        "\\centerline{\\includegraphics{a.png}}",
+        "text \\includegraphics{b.png}",
+        "\\includegraphics{}",
+      ].join("\n"),
+    ),
+    ["image figures/grid.png", "image grid"],
+  );
+});
+
+test("scanLatex: formulas nested in text arguments any number of levels deep never overflow the stack (R6)", () => {
+  const deep = "$" + "a \\text{b $".repeat(20000) + "c" + "$ d} e".repeat(20000) + "$ and $f$";
+  const found = formulas(doc(deep));
+  assert.ok(found.length >= 1);
+  assert.equal(found[found.length - 1].src, "f", "the formula after it is found");
+  const nested = "$x = \\text{if $y = \\text{when $z$}$}$";
+  assert.deepEqual(formulas(doc(nested)).map((m) => m.src), ["x = \\text{if $y = \\text{when $z$}$}"], "a few levels: one formula");
+});
+
+test("scanLatex: text arguments that never close cost a few passes over their paragraph, not exponentially many (R4)", () => {
+  for (const n of [40, 160]) {
+    const t0 = performance.now();
+    const found = formulas(doc("\\text{$".repeat(n) + "\n\nafter $f$"));
+    const ms = performance.now() - t0;
+    assert.equal(found[found.length - 1].src, "f");
+    assert.ok(ms < 500, `${n} unclosed levels: ${ms.toFixed(1)} ms`);
+  }
+  // The same inside a formula that closes: a formula still pairs as before.
+  assert.deepEqual(formulas(doc("$a \\text{b $c$ d} e$ and $\\text{x $")).map((m) => m.src), ["a \\text{b $c$ d} e", "\\text{x "]);
 });
 
 test("scanLatex: references, citations with notes, and labels outside math", () => {
@@ -331,7 +426,7 @@ test("scanLatex: an \\item label with math or a reference stays in place, its co
   );
 });
 
-test("scanLatex: TikZ pictures are code until P5's crops: nothing in them is a construct (T-L3)", () => {
+test("scanLatex: TikZ pictures are code: nothing in them is a construct (T-L3)", () => {
   assert.deepEqual(
     constructs(
       [
@@ -346,6 +441,37 @@ test("scanLatex: TikZ pictures are code until P5's crops: nothing in them is a c
       ].join("\n"),
     ),
     ["math a", "math b", "math \\begin{tikzcd} C \\end{tikzcd}", "math c"],
+  );
+});
+
+test("scanLatex: elegantbook's problemset is an enumerate: numbered items, its [title] no list option, its lines collapse", () => {
+  assert.deepEqual(
+    constructs(
+      [
+        "\\begin{problemset}[本章练习]",
+        "  \\item 证明 $x$。",
+        "  \\item 计算：",
+        "    \\begin{enumerate}",
+        "      \\item a",
+        "    \\end{enumerate}",
+        "\\end{problemset}",
+        "\\begin{enumerate}[resume]",
+        "  \\item its enumerate ended inside problemset's group: resume starts over (XeLaTeX prints 1.)",
+        "\\end{enumerate}",
+      ].join("\n"),
+    ).filter((c) => !c.startsWith("math")),
+    [
+      "begin \\begin{problemset}[本章练习]",
+      "item 1.",
+      "item 2.",
+      "begin \\begin{enumerate}",
+      "item (a)",
+      "end \\end{enumerate}",
+      "end \\end{problemset}",
+      "begin \\begin{enumerate}[resume]",
+      "item 1.",
+      "end \\end{enumerate}",
+    ],
   );
 });
 
@@ -416,4 +542,51 @@ test("scanLatex: natbib's and biblatex's capitalized and alternative citation co
     constructs("\\Citet{a} \\Citep[p.~2]{b} \\citealt{c} \\citealp{d} \\Parencite{e} \\Textcite{f} \\Autocite{g} \\footcite{h} \\Cite{i}"),
     ["Citet -|-|a", "Citep -|p.~2|b", "citealt -|-|c", "citealp -|-|d", "Parencite -|-|e", "Textcite -|-|f", "Autocite -|-|g", "footcite -|-|h", "Cite -|-|i"],
   );
+});
+
+test("scanLatex: a TikZ picture alone on its lines is an env (a PDF crop, #14), still with nothing inside", () => {
+  const text = [
+    "\\begin{tikzpicture}[scale=1.4, >={Stealth[length=2mm]}]",
+    "  \\node at (0,0) {$x$};",
+    "\\end{tikzpicture}",
+    "  \\begin{tikzcd}",
+    "    A \\arrow[r, \"$f$\"] & B",
+    "  \\end{tikzcd}",
+    "\\begin{tikzpicture} \\draw (0,0); \\end{tikzpicture}",
+    "\\begin{tabular}{ll}",
+    "  $a$ & b \\\\",
+    "\\end{tabular}",
+  ].join("\n");
+  assert.deepEqual(constructs(text), ["env tikzpicture[scale=1.4, >={Stealth[length=2mm]}]", "env tikzcd", "env tabular{ll}", "math a"]);
+});
+
+test("blocks and blockAt: environments and floats around a position, the innermost first", () => {
+  const text = [
+    "\\begin{figure}[htbp]", // 1
+    "  \\centering",
+    "  \\begin{tikzpicture}", // 3
+    "    \\draw (0,0);",
+    "  \\end{tikzpicture}", // 5
+    "  \\caption{A $y$}",
+    "\\end{figure}", // 7
+    "\\begin{theorem}{T}{t}", // 8
+    "  body $z$",
+    "\\end{theorem}", // 10
+    "\\begin{figure}", // 11: never closed
+  ].join("\n");
+  const d = doc(text);
+  assert.deepEqual(
+    blocks(d).map((b) => `${b.env} ${d.lineAt(b.from).number}-${d.lineAt(b.to).number}`),
+    ["tikzpicture 3-5", "figure 1-7", "theorem 8-10"],
+  );
+  const all = () => true;
+  const pos = (line: number, col: number) => d.line(line).from + col;
+  assert.equal(blockAt(d, pos(4, 4), all)?.env, "tikzpicture");
+  assert.equal(blockAt(d, pos(4, 4), (b) => b.env !== "tikzpicture")?.env, "figure", "the next one out when refused");
+  assert.equal(blockAt(d, pos(6, 12), all)?.env, "figure", "the caption");
+  assert.equal(blockAt(d, pos(9, 3), all)?.env, "theorem");
+  assert.equal(blockAt(d, pos(11, 3), all), null);
+  const picture = blocks(d)[0];
+  assert.deepEqual(blocksAround(d, picture.from, picture.to).map((b) => b.env), ["figure"]);
+  assert.equal(blocks(d), blocks(d), "memoized per document");
 });

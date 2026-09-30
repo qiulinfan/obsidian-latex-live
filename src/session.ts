@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { readFileSync } from "fs";
 import { tmpdir } from "os";
-import { dirname, join } from "path";
+import { dirname, join, sep } from "path";
 import {
   BuildMode,
   CompileOptions,
@@ -10,9 +10,33 @@ import {
 } from "./tex/compiler";
 import { TexDiagnostic } from "./tex/logParser";
 import { detectEngine, Engine } from "./tex/project";
+import { synctexStamp } from "./tex/synctex";
 import type LatexLivePlugin from "./main";
 
 export type SessionEvent = "start" | "result" | "failure";
+
+/**
+ * A compile's PDF with the text of the editor files it read (design 4.6): PDF crops show a
+ * block only while its text is still the one compiled. Every result that wrote a PDF gets one.
+ */
+export interface CompiledPdf {
+  /** Unique across sessions: crops key on it. */
+  readonly seq: number;
+  readonly pdfPath: string;
+  readonly pdf: Uint8Array;
+  /**
+   * The project files open in editors, as they were on disk when the compile started (LF line
+   * breaks), by absolute path: usually one to three files, read in well under a millisecond.
+   */
+  readonly sources: ReadonlyMap<string, string>;
+  /**
+   * The mtime of the result's .synctex.gz when it landed (null without one): a later value is a
+   * later pass's, whose lines are not this PDF's (crops query SyncTeX while compiles run).
+   */
+  readonly synctex: number | null;
+}
+
+let compiledSeq = 0;
 
 /** Build output folder of a root document: `$TMPDIR/obsidian-latex-live/<hash>`. */
 export function outDirFor(root: string): string {
@@ -34,6 +58,10 @@ export class LatexSession {
   failure: string | null = null;
   engine: Engine = "pdflatex";
   refs = 0;
+  /** The last result that wrote a PDF, with the sources its compile read (crops). */
+  compiled: CompiledPdf | null = null;
+  /** The open editors' files as the running compile started. */
+  private sources = new Map<string, string>();
   private listeners = new Set<(e: SessionEvent) => void>();
 
   constructor(
@@ -44,6 +72,7 @@ export class LatexSession {
       onStart: (mode) => {
         this.compiling = mode;
         this.engine = this.detectEngine();
+        this.sources = this.readSources();
         this.emit("start");
       },
       onResult: (r) => {
@@ -51,6 +80,9 @@ export class LatexSession {
         this.last = r;
         this.failure = null;
         if (r.pdfData) this.lastPdf = r.pdfData;
+        if (r.pdfWritten && r.pdfData) {
+          this.compiled = { seq: ++compiledSeq, pdfPath: r.pdfPath, pdf: r.pdfData, sources: this.sources, synctex: synctexStamp(r.pdfPath) };
+        }
         this.emit("result");
       },
       onFailure: (err) => {
@@ -92,6 +124,24 @@ export class LatexSession {
   dispose(): void {
     this.compiler.dispose();
     this.listeners.clear();
+  }
+
+  /**
+   * The files of this project open in editors, from disk (what the compile reads): the root,
+   * the last compile's inputs and files under the root's folder.
+   */
+  private readSources(): Map<string, string> {
+    const out = new Map<string, string>();
+    const { deps, rootDir } = this.compiler;
+    for (const file of this.plugin.openTexFiles()) {
+      if (file !== this.root && !deps.has(file) && !file.startsWith(rootDir + sep)) continue;
+      try {
+        out.set(file, readFileSync(file, "utf8").replace(/\r\n/g, "\n"));
+      } catch {
+        // A file that is gone has nothing to crop.
+      }
+    }
+    return out;
   }
 
   private detectEngine(): Engine {

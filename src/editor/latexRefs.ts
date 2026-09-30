@@ -1,6 +1,7 @@
-import type { AuxLabel } from "../tex/aux";
+import type { AuxCheckpoint, AuxLabel } from "../tex/aux";
 import { BibEntry, citeLabel } from "../tex/bib";
 import { texText } from "../tex/texText";
+import { TheoremMap, theoremMap } from "../tex/theorems";
 
 // What references and citations show (design 4.4 #9, #10), for live preview's chips and for the
 // references inside formulas (prepareMath). Pure: no view, no Obsidian. The texts are what the
@@ -8,15 +9,17 @@ import { texText } from "../tex/texText";
 //   \ref -> `1.2`, \eqref -> `(1.2)`, \pageref -> the page, \nameref -> the title; `??` for an
 //   unknown label.
 //   \autoref -> hyperref's name for the anchor's type, then the number (`Equation 1.2`,
-//   `section 1`, `item 1.`); the number alone for a type without a name (elegantbook's tcolorbox
-//   theorems, an amsthm theorem with a counter of its own). The project's `\<type>autorefname`
-//   definitions replace the English defaults.
+//   `section 1`, `item 1.`), else hyperref's fallback `\<type>name` (listings; the theorem map's
+//   environments whose class names them: elegantbook's simple-mode `\autoref{def:x}` is
+//   `定义 1.1`); the number alone for a type without either (elegantbook's tcolorbox theorems
+//   `tcb@cnt@theorem`, `\newtheorem{thm}{Theorem}`'s `thm`: amsthm defines no `\thmname`). The
+//   project's `\<type>autorefname` definitions replace the English defaults.
 //   \cref, \Cref -> cleveref's text for the label types of the .aux twins: grouped by type in the
 //   order the types first appear, sorted, three or more consecutive numbers as a range, plural
 //   names (`eqs. (1) to (3) and (5)`, `Section 1 and Theorem 2.1`, `section 1, theorem 1.1, and
 //   fig. 1`), with the package options `capitalise` and `noabbrev`, `\crefname`/`\Crefname` and
-//   \newtheorem titles from the sources; `??` before a number whose type has no name (cleveref's
-//   warning), `??` for an unknown label.
+//   the titles of the project's \newtheorem's (the theorem map); `??` before a number whose type
+//   has no name (cleveref's warning: elegantbook's boxes), `??` for an unknown label.
 //   \cite and its relatives -> `[see Li et al. 2019, p. 3]` (keys without an entry as keys).
 
 /** A cleveref name: singular and plural (null when only a \newtheorem title gave the singular). */
@@ -41,6 +44,13 @@ export interface LatexRefs {
   readonly cites: ReadonlyMap<string, BibEntry>;
   /** The project's reference names (refNames of its sources). */
   readonly names: RefNames;
+  /** The project's theorem-like environments (theoremMap of its sources): live preview's boxes. */
+  readonly theorems: TheoremMap;
+  /**
+   * The \include'd files' checkpoints in the last compile's .aux (readAuxCheckpoints), by include
+   * name: the counts that number boxes without a label; the same object while they stay.
+   */
+  readonly checkpoints: ReadonlyMap<string, AuxCheckpoint>;
 }
 
 /** hyperref's English `\<type>autorefname`s (hyperref.sty's defaults). */
@@ -116,7 +126,6 @@ const ARG = String.raw`\{((?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*)\}`;
 const CLEVEREF_OPTIONS =
   /\\(?:usepackage|RequirePackage)\s*\[([^\]]*)\]\s*\{[^}]*\bcleveref\b[^}]*\}|\\PassOptionsToPackage\s*\{([^}]*)\}\s*\{[^}]*\bcleveref\b[^}]*\}/g;
 const CREFNAME = new RegExp(String.raw`\\(c|C)refname\s*\{\s*([^{}\s]+)\s*\}\s*${ARG}\s*${ARG}`, "g");
-const NEWTHEOREM = new RegExp(String.raw`\\newtheorem\s*\{\s*([^{}\s]+)\s*\}\s*(?:\[[^\]]*\]\s*)?${ARG}`, "g");
 const AUTOREFNAME = new RegExp(
   String.raw`\\((?:re)?newcommand|providecommand|DeclareRobustCommand|[gex]?def)\s*\*?\s*\{?\s*\\([A-Za-z@]+)autorefname\s*\}?\s*${ARG}`,
   "g",
@@ -127,18 +136,18 @@ const lowerFirst = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1)
 
 /**
  * The reference names of a project from its sources (comment-free, in document order): hyperref's
- * defaults with the `\<type>autorefname` definitions; cleveref's English names with its package
- * options, the \newtheorem titles (cleveref names a theorem type by its title: singular only) and
- * `\crefname`/`\Crefname` (the one not given follows the other: capitalized for \Cref, lower case
- * for \cref unless `capitalise`), a type without names taking its parent's (`subsection`).
+ * defaults with the `\<type>autorefname` definitions, then the `\<type>name` of the theorem map's
+ * environments that have one; cleveref's English names with its package options, the titles of
+ * the project's numbered \newtheorem's (cleveref names a theorem type by its title: singular only)
+ * and `\crefname`/`\Crefname` (the one not given follows the other: capitalized for \Cref, lower
+ * case for \cref unless `capitalise`), a type without names taking its parent's (`subsection`).
  */
-export function refNames(sources: readonly string[]): RefNames {
+export function refNames(sources: readonly string[], theorems: TheoremMap = theoremMap(sources)): RefNames {
   let capitalise = false;
   let abbrev = true;
   const autoref = new Map(Object.entries(AUTOREF_NAMES));
   const redefined = new Set<string>();
   const own = { cref: new Map<string, CrefName>(), Cref: new Map<string, CrefName>() };
-  const theorems = new Map<string, string>();
   for (const src of sources) {
     for (const m of src.matchAll(CLEVEREF_OPTIONS)) {
       const options = (m[1] ?? m[2]).split(",").map((o) => o.trim());
@@ -146,7 +155,6 @@ export function refNames(sources: readonly string[]): RefNames {
       if (options.includes("noabbrev")) abbrev = false;
     }
     for (const m of src.matchAll(CREFNAME)) own[m[1] === "c" ? "cref" : "Cref"].set(m[2], [texText(m[3]), texText(m[4])]);
-    for (const m of src.matchAll(NEWTHEOREM)) theorems.set(m[1], texText(m[2]));
     for (const m of src.matchAll(AUTOREFNAME)) {
       if (m[1] === "providecommand" && (autoref.has(m[2]) || redefined.has(m[2]))) continue;
       autoref.set(m[2], texText(m[3]));
@@ -157,6 +165,8 @@ export function refNames(sources: readonly string[]): RefNames {
     const name = autoref.get(type);
     if (!redefined.has(alias) && name !== undefined) autoref.set(alias, name);
   }
+  // hyperref falls back to `\<type>name` (elegantbook's simple mode anchors `definition.1.1`).
+  for (const [env, def] of theorems) if (def.nameMacro && !autoref.has(env)) autoref.set(env, def.name);
 
   // cleveref's preamble names: the defaults, then the theorem titles (their plural stays).
   const cref = new Map<string, CrefName>();
@@ -166,9 +176,10 @@ export function refNames(sources: readonly string[]): RefNames {
     const [one, many] = abbrev && Object.hasOwn(CREF_ABBREVIATIONS, type) ? CREF_ABBREVIATIONS[type] : names;
     cref.set(type, capitalise ? [one, many] : [lowerFirst(one), lowerFirst(many)]);
   }
-  for (const [env, title] of theorems) {
-    cref.set(env, [capitalise ? upperFirst(title) : lowerFirst(title), cref.get(env)?.[1] ?? null]);
-    Cref.set(env, [upperFirst(title), Cref.get(env)?.[1] ?? null]);
+  for (const [env, def] of theorems) {
+    if (!def.user || !def.numbered) continue;
+    cref.set(env, [capitalise ? upperFirst(def.name) : lowerFirst(def.name), cref.get(env)?.[1] ?? null]);
+    Cref.set(env, [upperFirst(def.name), Cref.get(env)?.[1] ?? null]);
   }
   // The document's own names win; one variant given makes the other.
   for (const [type, [one, many]] of own.cref) {

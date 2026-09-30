@@ -376,6 +376,7 @@ function fakeTexlab(calls: number[]): HoverTooltipSource {
 }
 
 const fakeRender = (rendered: LatexMath[]): TexHoverOptions["render"] => (m) => {
+  if (m.kind !== "math") return null;
   rendered.push(m);
   const el = document.createElement("span");
   el.className = "fake-math";
@@ -405,7 +406,7 @@ test("render hover: a formula's section, texlab quiet inside math, texlab elsewh
   done(c);
 });
 
-const NO_REFS = { numbers: new Map(), labels: new Map(), cites: new Map(), names: DEFAULT_REF_NAMES };
+const NO_REFS = { numbers: new Map(), labels: new Map(), cites: new Map(), names: DEFAULT_REF_NAMES, theorems: new Map(), checkpoints: new Map() };
 
 test("render hover: above the lint hover of a compile error; neither hover over a live widget", async () => {
   const rendered: LatexMath[] = [];
@@ -443,6 +444,49 @@ test("render hover: above the lint hover of a compile error; neither hover over 
   done(c);
 });
 
+test("cursor preview: inline math in both modes, display math in source mode; a live block keeps its own rendering", async () => {
+  // "inactive": live preview mounted on a document over its maxLines (it decorates nothing).
+  const renders: string[] = [];
+  let on = true;
+  const cursor = {
+    enabled: () => on,
+    render: (m: LatexMath) => (renders.push(m.src), Object.assign(document.createElement("span"), { textContent: m.src })),
+  };
+  const renderer: FragmentRenderer = {
+    epoch: 0,
+    render: (req) => ({ ok: true, node: Object.assign(document.createElement("span"), { textContent: req.src }) }),
+  };
+  const text = "Inline $x$ and \\(y\\).\n\\[\n  z\n\\]\nText \\[ w \\] here.\n|";
+  for (const mode of ["source", "live", "inactive"] as const) {
+    const live = mode !== "source";
+    const c = make(text, [], {
+      hover: { enabled: () => true, render: () => null, cursor },
+      live: live
+        ? livePreview({ language: latexLiveLanguage({ refs: () => NO_REFS }), renderer, maxLines: mode === "inactive" ? 1 : undefined })
+        : undefined,
+    });
+    const view = c.view;
+    await sleep(40);
+    const shown = () => view.dom.querySelector(".cm-tooltip.lsp-cursor-preview:not(.is-empty)")?.textContent ?? null;
+    const put = (needle: string, offset = 0) => view.dispatch({ selection: { anchor: view.state.doc.toString().indexOf(needle) + offset } });
+    put("$x$", 1);
+    assert.equal(shown(), "x", `inline $..$ (${mode})`);
+    put("\\(y", 3);
+    assert.equal(shown(), "y");
+    put("  z", 2);
+    assert.equal(shown(), mode === "live" ? null : "\n  z\n", "a display owning its lines: not over a live block");
+    put(" w ", 1);
+    assert.equal(shown(), " w ", "a display in running text");
+    put("here");
+    assert.equal(shown(), null);
+    on = false;
+    put("$x$", 1);
+    assert.equal(shown(), null, "the setting off");
+    on = true;
+    done(c);
+  }
+});
+
 test("render hover: the project's MathJax end to end, with MathJax's message on failure", async () => {
   const { window, MathJax } = await obsidianMathJax();
   const math = ProjectMath.create(MathJax, window.document, {
@@ -451,6 +495,7 @@ test("render hover: the project's MathJax end to end, with MathJax's message on 
   });
   const labels = new Map([["eq:var-def", "1.2"]]);
   const render: TexHoverOptions["render"] = (m, view) => {
+    if (m.kind !== "math") return null;
     try {
       return math.render(m.src, m.display, labels) as HTMLElement;
     } catch (e) {

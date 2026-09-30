@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,8 +10,9 @@ import {
   CompileResult,
   Compiler,
   readBibFiles,
+  readyPreambleFormat,
 } from "../src/tex/compiler";
-import { Engine } from "../src/tex/project";
+import { Engine, preambleOf } from "../src/tex/project";
 import { forwardSearch, inverseSearch } from "../src/tex/synctex";
 
 // Integration tests against the machine's TeX installation.
@@ -29,6 +30,7 @@ function project(files: Record<string, string>): string {
 
 interface Harness {
   compiler: Compiler;
+  outDir: string;
   starts: BuildMode[];
   next(): Promise<CompileResult>;
   /** The last result of a request, after any reference-settling pass. */
@@ -68,7 +70,7 @@ function harness(root: string, opts: Partial<CompileOptions> = {}): Harness {
     while (r.mode === "fast" && r.passes === 1 && r.log.rerun) r = await next();
     return r;
   };
-  return { compiler, starts, next, final };
+  return { compiler, outDir, starts, next, final };
 }
 
 const BODY = [
@@ -179,6 +181,12 @@ test("preamble cache: built in background, used, and invalidated", { skip }, asy
         r.durationMs < first.durationMs,
         `cached ${r.durationMs}ms vs cold ${first.durationMs}ms`,
       );
+      // Its stamp lets other runs (fragment compiles) take it, for this preamble only.
+      const text = readFileSync(join(dir, "main.tex"), "utf8");
+      const ready = await readyPreambleFormat(h.outDir, join(dir, "main.tex"), "pdflatex", preambleOf(text)!);
+      assert.equal(ready?.name, "main-preamble");
+      assert.equal(await readyPreambleFormat(h.outDir, join(dir, "main.tex"), "pdflatex", preambleOf(text)! + "%"), null);
+      assert.equal(await readyPreambleFormat(h.outDir, join(dir, "main.tex"), "xelatex", preambleOf(text)!), null);
       break;
     }
     assert.ok(i < 99, "preamble cache never became ready");
@@ -187,6 +195,8 @@ test("preamble cache: built in background, used, and invalidated", { skip }, asy
   // Touching a file the preamble reads invalidates the cache.
   await new Promise((res) => setTimeout(res, 20));
   writeFileSync(join(dir, "defs.tex"), "\\newcommand{\\R}{\\mathbf{R}}\n");
+  const preamble = preambleOf(readFileSync(join(dir, "main.tex"), "utf8"))!;
+  assert.equal(await readyPreambleFormat(h.outDir, join(dir, "main.tex"), "pdflatex", preamble), null, "a preamble input changed");
   h.compiler.request();
   assert.equal((await h.next()).usedPreambleCache, false);
   h.compiler.dispose();

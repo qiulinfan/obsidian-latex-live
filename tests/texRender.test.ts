@@ -13,7 +13,8 @@ import { EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { JSDOM } from "jsdom";
 import { mathAt } from "../src/editor/latexScan";
-import { TexRender } from "../src/editor/texRender";
+import { TexCrops, TexFragments, TexRender, fragmentBody } from "../src/editor/texRender";
+import { NOTE_CHANGED, NOTE_NO_PREVIEW } from "../src/preview/blockCrop";
 import { obsidianMathJax } from "./support/mathjax";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -42,7 +43,7 @@ async function countTexInputs(): Promise<{ count: number; restore(): void }> {
  * `finish` as Obsidian's finishRenderMath: its stylesheet goes into the main head (after 100 ms
  * when `debounced`). `documents`: the windows with LaTeX editors.
  */
-async function setup(opts: { debounced?: boolean; documents?: Document[] } = {}) {
+async function setup(opts: { debounced?: boolean; documents?: Document[]; crops?: TexCrops; fragments?: TexFragments; fallback?: () => boolean } = {}) {
   const { window: mw, MathJax } = await obsidianMathJax();
   const dir = mkdtempSync(join(tmpdir(), "ll-render-"));
   const book = join(dir, "book");
@@ -56,6 +57,9 @@ async function setup(opts: { debounced?: boolean; documents?: Document[] } = {})
     outDirFor: () => (calls.labels++, outDir),
     buffers: () => (calls.collect++, buffers),
     documents: () => opts.documents ?? [],
+    crops: opts.crops,
+    fragments: opts.fragments,
+    fragmentFallback: opts.fallback,
     mathJax: {
       load: async () => {
         calls.load++;
@@ -80,7 +84,8 @@ async function setup(opts: { debounced?: boolean; documents?: Document[] } = {})
     const m = mathAt(state.doc, pos);
     assert.ok(m, `a formula at ${pos}`);
     const view = { state, dom: { ownerDocument: doc } } as unknown as EditorView;
-    return render.hover(m, view, root);
+    // Formulas always render (MathJax or its message) without crops.
+    return render.hover(m, view, root) as HTMLElement | Promise<HTMLElement>;
   };
   const done = () => {
     render.dispose();
@@ -411,17 +416,259 @@ test("TexRender refs: labels with kinds, the project's bibliography and referenc
     edit("合成测试书", "合成测试书 typed");
     await sleep(600);
     assert.equal(heard, 2);
+    assert.equal(edited.theorems.get("theorem")?.name, "定理", "the theorem map: elegantbook lang=cn");
     edit("lang=cn", "lang=en");
     await sleep(600);
-    assert.equal(heard, 2, "a \\documentclass line is re-read, and its names did not change");
+    assert.equal(heard, 3, "a \\documentclass line is re-read: elegantbook's theorems are named in English now");
+    const english = t.render.refsOf(t.root);
+    assert.deepEqual([english.theorems.get("theorem")?.name, english.names.autoref.get("equation")], ["Theorem", "Equation"]);
+    edit("lang=cn", "lang=en ");
+    await sleep(600);
+    assert.equal(heard, 3, "nothing changed: nobody hears");
+    assert.equal(t.render.refsOf(t.root), english);
     edit("\\author{测试作者}", "\\author{测试作者}\\crefname{equation}{式}{式}");
     await sleep(600);
     assert.deepEqual(t.render.refsOf(t.root).names.cref.get("equation"), ["式", "式"], "a \\crefname line");
-    assert.equal(heard, 3);
+    assert.equal(heard, 4);
     t.render.fileModified(join(t.book, "elsewhere.tex"));
     await sleep(350);
-    assert.equal(heard, 3, "a file the project does not read");
+    assert.equal(heard, 4, "a file the project does not read");
     off();
+  } finally {
+    t.done();
+  }
+});
+
+test("TexRender hover: a block formula shows its PDF crop, else MathJax; a block its crop or why not; inline math never crops", async () => {
+  const asked: string[] = [];
+  let answer: HTMLElement | { note: string } = { note: NOTE_NO_PREVIEW };
+  const crops: TexCrops = {
+    locate: () => ({ note: NOTE_NO_PREVIEW }),
+    render: async () => ({ ok: false, message: "unused", quiet: true }),
+    hover: async (_root, file, text, line, kind, wait) => {
+      asked.push(`${file.split("/").pop()}:${line}:${kind}:${wait}:${text.split("\n")[0]}`);
+      return answer;
+    },
+  };
+  const t = await setup({ crops });
+  try {
+    await t.render.load();
+    const doc = [
+      "Inline $x$ here.", // 1
+      "\\[", // 2-4: a block formula
+      "  \\E[Q]{X}",
+      "\\]",
+      "\\begin{theorem}{Title}{t}", // 5-9: elegantbook's tcolorbox
+      "  Text with $y$.",
+      "  \\[ z \\]",
+      "\\end{theorem}",
+      "\\begin{tabular}{l}", // 9-11
+      "  a \\\\",
+      "\\end{tabular}",
+      "\\begin{minipage}{3cm}", // 12-14: crops nothing
+      "  m",
+      "\\end{minipage}",
+    ].join("\n");
+    const state = EditorState.create({ doc });
+    const view = { state, dom: { ownerDocument: t.mainDocument } } as unknown as EditorView;
+    const at = (line: number, col: number) => t.render.hoverTarget(state.doc, state.doc.line(line).from + col, t.root);
+    const file = join(t.book, "chapters", "ch1.tex");
+    const show = async (line: number, col: number) => {
+      const target = at(line, col);
+      return target && (await t.render.hover(target, view, t.root, file));
+    };
+
+    // A display formula owning its lines: the crop when there is one, else MathJax (no waiting).
+    const card = t.mainDocument.createElement("div");
+    card.className = "lsp-lp-paper ll-crop";
+    answer = card;
+    assert.equal(await show(3, 3), card);
+    answer = { note: NOTE_CHANGED };
+    assert.equal((await show(3, 3))!.nodeName, "MJX-CONTAINER");
+    assert.deepEqual(asked, ["ch1.tex:2:math:false:\\[", "ch1.tex:2:math:false:\\["]);
+    // Inline math, and math inside elegantbook's tcolorbox: MathJax, never a crop.
+    asked.length = 0;
+    assert.equal((await show(1, 8))!.nodeName, "MJX-CONTAINER");
+    assert.equal((await show(7, 5))!.nodeName, "MJX-CONTAINER");
+    assert.deepEqual(asked, []);
+
+    // Text in a theorem box or a table: the block's crop (waiting for a running compile), or the note.
+    assert.deepEqual(at(6, 3), { kind: "block", from: state.doc.line(5).from, to: state.doc.line(8).to, env: "theorem" });
+    answer = card;
+    assert.equal(await show(6, 3), card);
+    answer = { note: NOTE_CHANGED };
+    assert.equal((await show(10, 3))!.textContent, NOTE_CHANGED);
+    answer = { note: NOTE_NO_PREVIEW };
+    assert.equal(await show(10, 3), null, "no preview: no section (texlab's hover alone)");
+    assert.deepEqual(asked, ["ch1.tex:5:box:true:\\begin{theorem}{Title}{t}", "ch1.tex:9:picture:true:\\begin{tabular}{l}", "ch1.tex:9:picture:true:\\begin{tabular}{l}"]);
+    assert.equal(at(13, 1), null, "an environment without a crop");
+    assert.equal(at(1, 2), null, "plain text");
+  } finally {
+    t.done();
+  }
+});
+
+test("TexRender hover: what MathJax rejects goes to a fragment compile (not an unbalanced brace); blocks without a crop too", async () => {
+  const asked: { body: string; inline: boolean }[] = [];
+  let answer: HTMLElement | { error: string } | null = null;
+  const fragments: TexFragments = {
+    render: async (_root, body, inline) => (asked.push({ body, inline }), answer),
+  };
+  let crop: HTMLElement | { note: string } = { note: NOTE_CHANGED };
+  const crops: TexCrops = {
+    locate: () => ({ note: NOTE_NO_PREVIEW }),
+    render: async () => ({ ok: false, message: "unused", quiet: true }),
+    hover: async () => crop,
+  };
+  let fallback = true;
+  const t = await setup({ crops, fragments, fallback: () => fallback });
+  try {
+    await t.render.load();
+    const card = t.mainDocument.createElement("div");
+    card.className = "lsp-lp-paper ll-fragment";
+    const doc = [
+      "Inline $\\intertext{x}$ and $\\frac{a}{$ and $\\alpha$.", // 1
+      "\\begin{align}", // 2-5
+      "  a &= b \\label{eq:var-def} \\\\",
+      "  \\intertext{so} c &= d \\eqref{eq:var-def}",
+      "\\end{align}",
+      "\\begin{tabular}{l}", // 6-8
+      "  a \\\\",
+      "\\end{tabular}",
+    ].join("\n");
+    writeFileSync(join(t.outDir, "main.aux"), "\\newlabel{eq:var-def}{{1.2}{3}{}{equation.1.2}{}}\n");
+    const state = EditorState.create({ doc });
+    const view = { state, dom: { ownerDocument: t.mainDocument } } as unknown as EditorView;
+    const file = join(t.book, "chapters", "ch1.tex");
+    const show = async (line: number, col: number) => {
+      const target = t.render.hoverTarget(state.doc, state.doc.line(line).from + col, t.root);
+      return target && (await t.render.hover(target, view, t.root, file));
+    };
+    const message = (el: HTMLElement | null) => el?.querySelector(".lsp-render-hover-message")?.textContent;
+
+    // Inline math MathJax rejects: the fragment's card; a TeX failure or none shows MathJax's message.
+    answer = card;
+    assert.equal(await show(1, 9), card);
+    assert.deepEqual(asked, [{ body: "$\\intertext{x}$", inline: true }]);
+    answer = { error: "Undefined control sequence." };
+    assert.match(message(await show(1, 9)) ?? "", /intertext/, "MathJax's message, as without fragments");
+    answer = null;
+    assert.match(message(await show(1, 9)) ?? "", /intertext/);
+    // MathJax renders it, or an unbalanced brace: no fragment compile.
+    asked.length = 0;
+    assert.equal((await show(1, 50))!.nodeName, "MJX-CONTAINER");
+    assert.equal(message(await show(1, 30)), "Missing close brace");
+    assert.deepEqual(asked, []);
+    // The setting off: MathJax's message.
+    fallback = false;
+    assert.match(message(await show(1, 9)) ?? "", /intertext/);
+    assert.deepEqual(asked, []);
+    fallback = true;
+
+    // A numbered display: its starred form with the .aux's number; references stay for TeX.
+    answer = card;
+    assert.equal(await show(3, 3), card);
+    assert.deepEqual(asked, [
+      { body: "\\begin{align*}\n  a &= b  \\tag{1.2}\\\\\n  \\intertext{so} c &= d \\eqref{eq:var-def}\n\\end{align*}", inline: false },
+    ]);
+
+    // A block: its crop; changed since the compile, the fragment; TeX's message when that fails;
+    // the note when there is no fragment.
+    asked.length = 0;
+    crop = card;
+    assert.equal(await show(7, 3), card);
+    assert.deepEqual(asked, []);
+    crop = { note: NOTE_CHANGED };
+    const fragmentCard = t.mainDocument.createElement("div");
+    answer = fragmentCard;
+    assert.equal(await show(7, 3), fragmentCard);
+    assert.deepEqual(asked, [{ body: "\\begin{tabular}{l}\n  a \\\\\n\\end{tabular}", inline: false }]);
+    answer = { error: "Misplaced alignment tab character &." };
+    assert.equal(message(await show(7, 3)), "Misplaced alignment tab character &.");
+    answer = null;
+    assert.equal((await show(7, 3))!.textContent, NOTE_CHANGED);
+    crop = { note: NOTE_NO_PREVIEW };
+    assert.equal(await show(7, 3), null, "no preview, no fragment: no section");
+  } finally {
+    t.done();
+  }
+});
+
+test("fragmentBody: numbered displays starred with their .aux tags, boxes and floats numbered from their labels' anchors", async () => {
+  const t = await setup();
+  try {
+    writeFileSync(
+      join(t.outDir, "chapters", "ch1.aux"),
+      [
+        "\\newlabel{thm:total-exp}{{1.1}{2}{}{tcb@cnt@theorem.1.1}{}}",
+        "\\newlabel{eq:total-exp}{{1.1}{2}{}{equation.1.1}{}}",
+        "\\newlabel{tab:decomp}{{2.1}{5}{}{table.caption.4}{}}",
+        "",
+      ].join("\n"),
+    );
+    const refs = t.render.refsOf(t.root);
+    const doc = EditorState.create({
+      doc: [
+        "\\begin{theorem}{全期望公式}{total-exp}", // 1-6
+        "  若",
+        "  \\begin{equation}\\label{eq:total-exp}",
+        "    \\E{X} = \\E{\\E{X \\mid Y}}.",
+        "  \\end{equation}",
+        "\\end{theorem}",
+        "\\begin{table}[htbp]", // 7-11
+        "  \\centering",
+        "  \\begin{tabular}{ll} a & b \\end{tabular}",
+        "  \\caption{矩阵分解}\\label{tab:decomp}",
+        "\\end{table}",
+        "$x$ and \\begin{equation} y \\end{equation}", // 12
+        "\\begin{eqnarray}", // 13-15
+        "  a &=& b \\label{eq:total-exp}",
+        "\\end{eqnarray}",
+        "\\begin{equation}", // 16-19
+        "  y",
+        "  \\label{eq:total-exp}",
+        "\\end{equation}",
+      ].join("\n"),
+    }).doc;
+    const target = (line: number, col = 2) => t.render.hoverTarget(doc, doc.line(line).from + col, t.root)!;
+    assert.equal(
+      fragmentBody(doc, target(2), refs),
+      [
+        "\\expandafter\\def\\csname thetcb@cnt@theorem\\endcsname{1.1}\\begin{theorem}{全期望公式}{total-exp}",
+        "  若",
+        "  \\begin{equation*}",
+        "    \\E{X} = \\E{\\E{X \\mid Y}}.",
+        "  \\tag{1.1}\\end{equation*}",
+        "\\end{theorem}",
+      ].join("\n"),
+    );
+    assert.equal(
+      fragmentBody(doc, target(8), refs),
+      [
+        "\\expandafter\\def\\csname thetable\\endcsname{2.1}\\begin{minipage}{\\linewidth}\\expandafter\\def\\csname @captype\\endcsname{table}",
+        "  \\centering",
+        "  \\begin{tabular}{ll} a & b \\end{tabular}",
+        "  \\caption{矩阵分解}\\label{tab:decomp}",
+        "\\end{minipage}",
+      ].join("\n"),
+    );
+    assert.equal(fragmentBody(doc, target(12, 1), refs), "$x$");
+    assert.equal(fragmentBody(doc, target(12, 20), refs), "\\begin{equation*} y \\end{equation*}", "no label: no number");
+    assert.equal(fragmentBody(doc, target(14), refs), doc.sliceString(doc.line(13).from, doc.line(15).to), "eqnarray takes no \\tag");
+    assert.equal(fragmentBody(doc, target(17), refs), "\\begin{equation*}\n  y\n\\tag{1.1}\\end{equation*}", "no blank line (a paragraph break) where the label was");
+
+    // A box without a label in an \include'd chapter: its counted number (the head's), on its counter.
+    writeFileSync(
+      join(t.outDir, "chapters", "ch2.aux"),
+      "\\@writefile{toc}{\\contentsline {chapter}{\\numberline {第二章}线性代数}{2}{chapter.2}\\protected@file@percent }\n\\@setckpt{chapters/ch2}{\n\\setcounter{exam}{1}\n}\n",
+    );
+    t.render.compiled(t.root);
+    await sleep(20);
+    const chapter = EditorState.create({ doc: "\\chapter{线性代数}\n\\begin{example}[矩阵]\n  $A$\n\\end{example}" }).doc;
+    const example = t.render.hoverTarget(chapter, chapter.line(3).from, t.root)!;
+    const counted = t.render.refsOf(t.root);
+    assert.equal(fragmentBody(chapter, example, counted, "chapters/ch2"), `\\expandafter\\def\\csname theexam\\endcsname{2.1}${chapter.sliceString(chapter.line(2).from)}`);
+    assert.equal(fragmentBody(chapter, example, counted), chapter.sliceString(chapter.line(2).from), "without the file: no number (it prints 0.1)");
   } finally {
     t.done();
   }

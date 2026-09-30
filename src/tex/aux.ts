@@ -72,6 +72,72 @@ export function readAuxLabels(outDir: string): Map<string, AuxLabel> {
   return out;
 }
 
+/**
+ * Every `\newlabel{k}{..}` of the .aux files under `outDir` (cleveref's `k@cref` twins too) by
+ * key, its value as written with its braces (`{{1.2}{3}{Title}{equation.1.2}{}}`): a TeX run that
+ * defines `r@k` with it (`\global\@namedef{r@k}` and the value) resolves references as the
+ * compile did (fragment compiles).
+ */
+export function readAuxDefinitions(outDir: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const file of auxFiles(outDir, 0)) {
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    for (const m of text.matchAll(/\\newlabel\{([^{}]+)\}\{/g)) {
+      const fields = groups(text, (m.index ?? 0) + m[0].length);
+      if (fields.length) out.set(m[1], `{${fields.map((f) => `{${f}}`).join("")}}`);
+    }
+  }
+  return out;
+}
+
+/** An \include'd file's counters as it ended (its .aux's `\@setckpt`), and its chapter's number. */
+export interface AuxCheckpoint {
+  /** The checkpoint's `\setcounter{c}{n}`: `tcb@cnt@theorem` -> 4. */
+  readonly counters: ReadonlyMap<string, number>;
+  /**
+   * What `\thechapter` printed for the file's last numbered chapter, from its hyperref anchor
+   * (`chapter.4` -> `4`, `appendix.A` -> `A`; not the chapter counter, which is 1 in the first
+   * appendix, nor the toc's `\numberline`, `第四章` under elegantbook's `chinese`); null without one.
+   */
+  readonly chapter: string | null;
+}
+
+/**
+ * The checkpoints of the .aux files under `outDir` by their \include name as written
+ * (`chapters/ch4`): what each included file ended with (see AuxCheckpoint). Empty for a document
+ * that includes nothing.
+ */
+export function readAuxCheckpoints(outDir: string): Map<string, AuxCheckpoint> {
+  const out = new Map<string, AuxCheckpoint>();
+  for (const file of auxFiles(outDir, 0)) {
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    const at = text.indexOf("\\@setckpt");
+    if (at < 0) continue;
+    const [name, body] = groups(text, at + "\\@setckpt".length);
+    if (!name || body === undefined) continue;
+    const counters = new Map<string, number>();
+    for (const m of body.matchAll(/\\setcounter\{([^{}]+)\}\{(-?\d+)\}/g)) counters.set(m[1], Number(m[2]));
+    let chapter: string | null = null;
+    for (const m of text.matchAll(/\\contentsline\s*\{chapter\}/g)) {
+      const anchor = groups(text, (m.index ?? 0) + m[0].length)[2] ?? "";
+      const n = /^(?:chapter|appendix)\.([^.*]+)$/.exec(anchor.trim());
+      if (n) chapter = n[1];
+    }
+    out.set(name.trim().replace(/^\.\//, "").replace(/\.tex$/i, ""), { counters, chapter });
+  }
+  return out;
+}
+
 /** The cleveref type an anchor's counter stands for (see AuxLabel.kind). */
 function anchorKind(anchor: string): string {
   const counter = anchor.split(".", 1)[0].replace(/^tcb@cnt@/, "");
@@ -81,6 +147,7 @@ function anchorKind(anchor: string): string {
   return counter;
 }
 
+/** The .aux files under `dir`, without those of fragment compiles (`frag-<hash>.aux`, fragment.ts). */
 function auxFiles(dir: string, depth: number): string[] {
   let entries: Dirent[];
   try {
@@ -90,7 +157,7 @@ function auxFiles(dir: string, depth: number): string[] {
   }
   const out: string[] = [];
   for (const e of entries) {
-    if (e.isFile() && e.name.endsWith(".aux")) out.push(join(dir, e.name));
+    if (e.isFile() && e.name.endsWith(".aux") && !/^frag-[0-9a-f]{16}\.aux$/.test(e.name)) out.push(join(dir, e.name));
     else if (e.isDirectory() && depth < MAX_DEPTH) out.push(...auxFiles(join(dir, e.name), depth + 1));
   }
   return out;

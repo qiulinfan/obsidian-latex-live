@@ -121,12 +121,16 @@ class SyncRenderer implements FragmentRenderer {
   }
 }
 
-/** Asynchronous (tinymist-like): each render waits until the test settles it. */
+/**
+ * Asynchronous (tinymist-like): each render waits until the test settles it. Its nodes carry
+ * the request's key (`data-key`, the epoch first); `fails` decides which requests fail.
+ */
 class AsyncRenderer implements FragmentRenderer {
   epoch = 0;
   calls: string[] = [];
   inFlight = 0;
   maxInFlight = 0;
+  fails = (req: RenderRequest) => req.src.includes("bad");
   private waiting: { req: RenderRequest; resolve: (r: RenderResult) => void }[] = [];
   private listeners = new Set<() => void>();
   render(req: RenderRequest): Promise<RenderResult> {
@@ -140,7 +144,12 @@ class AsyncRenderer implements FragmentRenderer {
     const w = this.waiting.shift();
     if (!w) return null;
     this.inFlight--;
-    w.resolve(w.req.src.includes("bad") ? { ok: false, message: `cannot draw ${w.req.src}` } : { ok: true, node: node(w.req.src) });
+    if (this.fails(w.req)) w.resolve({ ok: false, message: `cannot draw ${w.req.src}` });
+    else {
+      const el = node(w.req.src);
+      el.setAttribute("data-key", w.req.key);
+      w.resolve({ ok: true, node: el });
+    }
     return w.req.src;
   }
   subscribe(f: () => void): () => void {
@@ -409,17 +418,21 @@ test("T-S5 a cursor move that neither enters nor leaves a construct keeps the de
   view.destroy();
 });
 
-test("T-S5 selection moves re-decorate only their lines, with the same result as a full build", async () => {
-  // "::: title" .. ":::" boxes (a wrapper, a title chip, the closing line collapsed) around
-  // math: constructs nest, so a move inside a box re-decorates the box and its formulas.
-  interface Node extends Construct {
-    kind: "box" | "math";
-    src: string;
-    display: boolean;
-    beginTo: number;
-    endFrom: number;
-  }
-  const nested: LiveLanguage<Node> = {
+// "::: title" .. ":::" boxes (a wrapper, a title chip, the closing line collapsed) around math:
+// constructs nest, so a move inside a box re-decorates the box and its formulas, unless the
+// language says with `reveals` that a box tests the selection on its first and last line only.
+interface Node extends Construct {
+  kind: "box" | "math";
+  src: string;
+  display: boolean;
+  beginTo: number;
+  endFrom: number;
+}
+
+function boxLanguage(reveals: boolean): LiveLanguage<Node> & { decorated: Node[] } {
+  const decorated: Node[] = [];
+  return {
+    decorated,
     scan(doc) {
       const out: Node[] = [];
       for (const m of scanMath(doc)) out.push({ ...m, kind: "math", beginTo: 0, endFrom: 0 });
@@ -431,27 +444,32 @@ test("T-S5 selection moves re-decorate only their lines, with the same result as
       }
       return out.sort((a, b) => a.from - b.from);
     },
+    reveals: reveals ? (c) => (c.kind === "box" ? [[c.from, c.from], [c.endFrom, c.endFrom]] : null) : undefined,
     decorate(c, ctx) {
+      decorated.push(c);
       if (c.kind === "math") return renderConstruct(ctx, c, ctx.request("math", c.src, c.display, c.from));
       ctx.wrap(c.from, c.to, { tagName: "div", attributes: { class: "lsp-lp-box is-main" } });
       if (!ctx.touchLines(c.from, c.from)) ctx.replace(c.from, c.beginTo, Decoration.replace({ widget: new TextWidget(c.src, "lsp-lp-box-title") }));
       if (!ctx.touchLines(c.endFrom, c.to)) ctx.replace(c.endFrom, c.to, Decoration.replace({ block: true }));
     },
   };
-  const lines: string[] = [];
-  for (let i = 0; i < 12; i++) {
-    lines.push(`Text ${i} with $a_${i}$ and $b_${i}$.`, "::: Theorem " + i, `Body $c_${i}$ here.`, "$$", `d_${i}`, "$$", ":::", "Plain line.");
-  }
-  const renderer = new SyncRenderer();
+}
+
+async function mountBoxes(doc: string, language: LiveLanguage<Node>): Promise<EditorView> {
   const view = new EditorView({
     state: EditorState.create({
-      doc: lines.join("\n"),
-      extensions: [liveInput(), livePreview({ language: nested, renderer }), EditorState.allowMultipleSelections.of(true)],
+      doc,
+      extensions: [liveInput(), livePreview({ language, renderer: new SyncRenderer() }), EditorState.allowMultipleSelections.of(true)],
     }),
     parent: document.body,
   });
   view.focus();
   await settle();
+  return view;
+}
+
+/** Random selection moves, each compared with a full build of the same state; how many patched. */
+function sameAsFullBuild(view: EditorView, moves: number): number {
   // What the view draws: the field's sets and the one-line replacements near the viewport.
   const sets = () => ({
     deco: view.state.facet(EditorView.decorations).map((d) => (typeof d === "function" ? d(view) : d)),
@@ -461,7 +479,7 @@ test("T-S5 selection moves re-decorate only their lines, with the same result as
   const rand = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2147483648) % n);
   const len = view.state.doc.length;
   let patched = 0;
-  for (let i = 0; i < 150; i++) {
+  for (let i = 0; i < moves; i++) {
     const a = rand(len + 1);
     const ranges = [EditorSelection.range(a, rand(4) === 0 ? rand(len + 1) : a)];
     if (rand(5) === 0) ranges.push(EditorSelection.cursor(rand(len + 1)));
@@ -474,8 +492,49 @@ test("T-S5 selection moves re-decorate only their lines, with the same result as
     assert.ok(RangeSet.eq(after.deco, full.deco), `decorations after move ${i}`);
     assert.ok(RangeSet.eq(after.wraps, full.wraps), `wrappers after move ${i}`);
   }
+  return patched;
+}
+
+const boxesDoc = (): string => {
+  const lines: string[] = [];
+  for (let i = 0; i < 12; i++) {
+    lines.push(`Text ${i} with $a_${i}$ and $b_${i}$.`, "::: Theorem " + i, `Body $c_${i}$ here.`, "$$", `d_${i}`, "$$", ":::", "Plain line.");
+  }
+  return lines.join("\n");
+};
+
+test("T-S5 selection moves re-decorate only their lines, with the same result as a full build", async () => {
+  const view = await mountBoxes(boxesDoc(), boxLanguage(false));
+  const patched = sameAsFullBuild(view, 150);
   assert.ok(patched > 50, `moves that re-decorated: ${patched}`);
   view.destroy();
+});
+
+test("T-S5 `reveals`: a move inside a long box re-decorates only its lines' constructs, one onto its first line the box", async () => {
+  const withReveals = await mountBoxes(boxesDoc(), boxLanguage(true));
+  const patched = sameAsFullBuild(withReveals, 150);
+  assert.ok(patched > 50, `moves that re-decorated: ${patched}`);
+  withReveals.destroy();
+
+  // A box of 300 body lines with two formulas each: more than a patch covers (PATCH_MAX).
+  const body = Array.from({ length: 300 }, (_, i) => `Line ${i} with $x_${i}$ and $y_${i}$.`);
+  const doc = ["Before.", "::: Long", ...body, ":::", "After $z$."].join("\n");
+  for (const reveals of [true, false]) {
+    const language = boxLanguage(reveals);
+    const view = await mountBoxes(doc, language);
+    const at = (line: number) => view.state.doc.line(line).from + 2;
+    move(view, at(100));
+    language.decorated.length = 0;
+    move(view, at(101));
+    const kinds = language.decorated.map((c) => (c.kind === "math" ? view.state.doc.lineAt(c.from).number : c.kind));
+    if (reveals) assert.deepEqual(kinds, [100, 100, 101, 101], "only the formulas on the lines moved over");
+    else assert.ok(kinds.length > 600, `without reveals the whole box and its body: ${kinds.length}`);
+    language.decorated.length = 0;
+    move(view, at(2));
+    assert.ok(language.decorated.some((c) => c.kind === "box"), "onto the box's first line: the box re-decorates");
+    assert.equal(view.contentDOM.querySelectorAll(".lsp-lp-box-title").length, 0, "its title revealed");
+    view.destroy();
+  }
 });
 
 // ---- T-S6 block decorations need a state field ---------------------------------------------
@@ -581,6 +640,54 @@ test("T-S7 enterBlocks: one-line steps over hidden lines stop on the block, othe
   jump(start.view, 0);
   assert.equal(head(start.view), 0, "Mod-Home");
   start.view.destroy();
+});
+
+test("T-S7 enterBlocks: a move one line past a block where the drawn viewport ends stops on the block", async () => {
+  // CodeMirror estimates the lines outside the viewport it drew by their characters: past a
+  // block the viewport ends at, a short line gets almost no height and a line move lands one
+  // line further (measured in Chrome). jsdom has no layout: the test says what was drawn.
+  const drawTo = (view: EditorView, from: number, to: number) => {
+    Object.defineProperty(view, "viewport", { configurable: true, get: () => ({ from, to }) });
+    view.dispatch({}); // the view reports what it drew at its next update
+  };
+  // 1 top, 2-4 block, 5 "" (right after it), 6 next, 7 end.
+  const down = await mount(["top", "$$", "a", "$$", "", "next", "end"].join("\n"));
+  const L = (n: number) => down.view.state.doc.line(n);
+  try {
+    drawTo(down.view, 0, L(4).to);
+    move(down.view, L(1).from);
+    step(down.view, L(6).from);
+    assert.equal(head(down.view), L(2).from, "stopped on the block");
+    // Line 5 drawn: CodeMirror placed it, so the move went over it (PageDown).
+    drawTo(down.view, 0, L(5).to);
+    move(down.view, L(1).from);
+    step(down.view, L(6).from);
+    assert.equal(head(down.view), L(6).from);
+    // Two lines past the block: a longer jump.
+    drawTo(down.view, 0, L(4).to);
+    move(down.view, L(1).from);
+    step(down.view, L(7).from);
+    assert.equal(head(down.view), L(7).from);
+  } finally {
+    delete (down.view as { viewport?: unknown }).viewport;
+    down.view.destroy();
+  }
+  // Up, the viewport starting at the block: 1 top, 2 "", 3-5 block, 6 bottom.
+  const up = await mount(["top", "", "$$", "b", "$$", "bottom"].join("\n"), { anchor: 0 });
+  const U = (n: number) => up.view.state.doc.line(n);
+  try {
+    drawTo(up.view, U(3).from, up.view.state.doc.length);
+    move(up.view, U(6).from);
+    step(up.view, U(1).from);
+    assert.equal(head(up.view), U(5).to, "stopped on the block's last line");
+    drawTo(up.view, 0, up.view.state.doc.length);
+    move(up.view, U(6).from);
+    step(up.view, U(1).from);
+    assert.equal(head(up.view), U(1).from);
+  } finally {
+    delete (up.view as { viewport?: unknown }).viewport;
+    up.view.destroy();
+  }
 });
 
 test("T-S7 enterBlocks leaves Select All, Mod-End/Home, Shift-Mod-End and Escape alone", async () => {
@@ -720,6 +827,34 @@ test("T-S9 an error next to a construct is not in it; an empty one at its edge i
   view.destroy();
 });
 
+test("T-S9 a revealed block with an error diagnostic keeps its rendering below; left, it stays source", async () => {
+  // Lines: 1 "p", 2 "$$", 3 "x^2", 4 "$$", 5 "q"; the cursor on line 3.
+  const { view } = await mount("p\n$$\nx^2\n$$\nq", { anchor: 5 });
+  assert.equal(below(view)!.textContent, "[x^2]");
+  // Typed into a failing state; then the error diagnostic lands (a typing pause).
+  const at = view.state.doc.line(3).from;
+  view.dispatch({ changes: { from: at, to: at + 3, insert: "bad" }, userEvent: "input.type" });
+  await sleep(0);
+  setTypingDiagnostics(view, [{ from: at, to: at + 3, severity: "error", message: "unknown" }]);
+  const shown = below(view);
+  assert.ok(shown, "the preview below stays");
+  assert.equal(shown.textContent, "[x^2]", "with the last rendering");
+  assert.ok(shown.classList.contains("is-error"), "marked: the new source fails");
+  assert.equal(view.contentDOM.querySelector(".lsp-lp-error"), null, "the lint underline shows, not the dotted one");
+  // The cursor leaves: never replaced while the error is in it, and no preview.
+  move(view, view.state.doc.length);
+  assert.equal(widgets(view), 0);
+  assert.equal(below(view), null);
+  assert.ok(text(view).includes("bad"));
+  // Fixed: rendered again.
+  view.dispatch({ changes: { from: at, to: at + 3, insert: "y^3" } });
+  setTypingDiagnostics(view, []);
+  await sleep(0);
+  assert.equal(widgets(view), 1);
+  assert.equal(text(view), "p[y^3]q");
+  view.destroy();
+});
+
 // ---- T-S10 mode toggle ---------------------------------------------------------------------------
 
 test("T-S10 the compartment toggle keeps doc, selection and history; HistoryCache restores the mode", async () => {
@@ -820,7 +955,7 @@ test("T-S11 an asynchronous renderer: one request in flight, in order; stale epo
   r.bump();
   r.settle();
   await settle();
-  assert.equal(widgets(view), 0, "the new epoch's keys miss: source");
+  assert.equal(widgets(view), 3, "the new epoch's keys miss: a, b and c keep their renderings, d is source");
   assert.equal(r.calls.at(-1), "a", "re-rendering from the top");
   for (let i = 0; i < 4; i++) {
     r.settle();
@@ -830,6 +965,100 @@ test("T-S11 an asynchronous renderer: one request in flight, in order; stale epo
   assert.equal(widgets(view), 4);
   assert.equal(r.maxInFlight, 1);
   view.destroy();
+});
+
+/** The epoch each rendered widget's node was rendered under, in document order (AsyncRenderer). */
+const epochs = (view: EditorView) =>
+  [...view.contentDOM.querySelectorAll(".lsp-lp-render:not(.is-below) .fake")].map((el) => el.getAttribute("data-key")?.split("|")[0]);
+
+test("T-S11 a new epoch: each construct keeps its rendering until its new render lands, or fails", async () => {
+  const r = new AsyncRenderer();
+  // "$a$" 0-3, "$b$" 4-7, a block over lines 2-4, "$e$" on line 5.
+  const { view } = await mount("$a$ $b$\n$$\nc\n$$\n$e$", { renderer: r, focus: false });
+  while (r.settle() !== null) await sleep(0);
+  await settle();
+  assert.deepEqual(epochs(view), ["0", "0", "0", "0"]);
+
+  // A template changed (a new epoch): every key misses, yet nothing flashes back to source.
+  r.bump();
+  await settle();
+  assert.equal(widgets(view), 4);
+  assert.deepEqual(epochs(view), ["0", "0", "0", "0"], "the renderings from before");
+  assert.equal(renderStats(view).pending, 4, "all rendering again");
+  assert.equal(view.contentDOM.querySelector(".is-pending, .is-error, .lsp-lp-error"), null, "shown as they were");
+  // Another epoch before any render landed: the renderings from before carry over.
+  r.bump();
+  assert.equal(r.settle(), "a"); // of epoch 1: dropped
+  await settle();
+  assert.deepEqual(epochs(view), ["0", "0", "0", "0"]);
+  assert.equal(r.settle(), "a"); // of epoch 2
+  await settle();
+  assert.deepEqual(epochs(view), ["2", "0", "0", "0"], "a's own render replaced its old one");
+
+  // A construct's own text changed: no rendering from before is its.
+  view.dispatch({ changes: { from: 5, insert: "b" } });
+  assert.ok(text(view).startsWith("[a] $bb$"), text(view));
+  assert.deepEqual(epochs(view), ["2", "0", "0"]);
+  // A new render that fails: the source with its error mark, not the rendering from before.
+  r.fails = (req) => req.src === "e";
+  while (r.settle() !== null) await sleep(0);
+  await settle();
+  assert.deepEqual(epochs(view), ["2", "2", "2"], "a, bb and the block");
+  assert.ok(text(view).endsWith("$e$"));
+  assert.equal(view.contentDOM.querySelector(".lsp-lp-error")?.textContent, "$e$");
+  const stats = renderStats(view);
+  assert.equal(stats.pending, 0);
+  assert.equal(stats.cached, 5, "epoch 2's a, b, bb, block and e; nothing from before left");
+  // Revealing is unchanged: peek never answers with an earlier epoch's rendering.
+  r.bump();
+  view.focus();
+  await settle();
+  move(view, 1);
+  assert.ok(text(view).startsWith("$a$ [bb]"), text(view));
+  view.destroy();
+});
+
+test("T-S11 renderings kept across epochs count against the cache's bound", async () => {
+  const w = window as unknown as { requestIdleCallback?: unknown };
+  const saved = w.requestIdleCallback;
+  w.requestIdleCallback = (f: (d: { didTimeout: boolean; timeRemaining(): number }) => void) =>
+    setTimeout(() => f({ didTimeout: false, timeRemaining: () => 10 }), 0);
+  try {
+    const lines = Array.from({ length: 2600 }, (_, i) => `$g_{${i}}$`);
+    const renderer = new SyncRenderer();
+    const { view } = await mount(lines.join("\n"), { renderer, focus: false });
+    let max = 0;
+    const done = async () => {
+      for (let i = 0; i < 300 && renderStats(view).pending; i++) {
+        max = Math.max(max, renderStats(view).cached);
+        await sleep(20);
+      }
+      assert.equal(renderStats(view).pending, 0);
+    };
+    try {
+      await done();
+      assert.equal(renderStats(view).cached, 2600);
+      renderer.bump();
+      await settle();
+      assert.equal(widgets(view) > 0 && widgets(view), view.contentDOM.querySelectorAll(".fake").length, "shown throughout");
+      max = 0;
+      await done();
+      assert.equal(renderer.calls.length, 5200, "each construct rendered once per epoch");
+      assert.equal(max, 2600, "held while rendering again: one rendering per construct");
+      assert.equal(renderStats(view).cached, 2600, "those from before went as the new ones landed");
+      // A new epoch, then other text: renderings nothing shows any more go first.
+      renderer.bump();
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: lines.join("\n").replace(/g_/g, "h_") } });
+      max = 0;
+      await done();
+      assert.equal(renderer.calls.length, 7800);
+      assert.ok(max <= 2600 + 200 && renderStats(view).cached <= 2600 + 200, `${max}, ${renderStats(view).cached}`);
+    } finally {
+      view.destroy();
+    }
+  } finally {
+    w.requestIdleCallback = saved;
+  }
 });
 
 test("T-S11 prefetch: constructs out of view render in idle chunks, then show without a rebuild miss", async () => {
@@ -981,6 +1210,111 @@ test("T-S11 renders that land re-decorate only the constructs waiting for them",
   const full = view.state.facet(EditorView.decorations).map((d) => (typeof d === "function" ? d(view) : d));
   assert.ok(RangeSet.eq(drawn, full), "the same decorations as a full build");
   view.destroy();
+});
+
+interface Mixed extends Math {
+  pic: boolean;
+}
+
+/**
+ * `$..$` formulas and `[[name]]` pictures: a slow kind (asynchronous, like a PDF page), epoch-free
+ * (the definitions do not change a picture).
+ */
+const mixedLanguage: LiveLanguage<Mixed> = {
+  scan: (doc) =>
+    [...doc.toString().matchAll(/\[\[(\w+)\]\]|\$([^$\n]+)\$/g)].map((m) => ({
+      from: m.index!,
+      to: m.index! + m[0].length,
+      src: m[1] ?? m[2],
+      display: false,
+      pic: m[1] !== undefined,
+    })),
+  decorate: (c, ctx) => renderConstruct(ctx, c, ctx.request(c.pic ? "pic" : "math", c.src, false, c.from, c.pic)),
+};
+
+/** MathJax-like formulas (`math`, a SyncRenderer), pictures answered when the test settles them. */
+class MixedRenderer implements FragmentRenderer {
+  readonly math = new SyncRenderer();
+  pics: { src: string; resolve: () => void }[] = [];
+  picCalls: string[] = [];
+  get epoch(): number {
+    return this.math.epoch;
+  }
+  subscribe(f: () => void): () => void {
+    return this.math.subscribe(f);
+  }
+  render(req: RenderRequest): RenderResult | Promise<RenderResult> {
+    if (req.kind !== "pic") return this.math.render(req);
+    this.picCalls.push(req.src);
+    return new Promise((ok) => this.pics.push({ src: req.src, resolve: () => ok({ ok: true, node: node(`pic ${req.src}`) }) }));
+  }
+  /** Answer the oldest picture. */
+  settlePic(): string | null {
+    const p = this.pics.shift();
+    p?.resolve();
+    return p?.src ?? null;
+  }
+}
+
+test("T-S11 a renderer mixing kinds: formulas render while a picture is in flight; pictures one at a time", async () => {
+  const r = new MixedRenderer();
+  const view = new EditorView({
+    state: EditorState.create({ doc: "[[p]] $a$ [[q]] $b$ $c$", extensions: [liveInput(), livePreview({ language: mixedLanguage, renderer: r })] }),
+    parent: document.body,
+  });
+  try {
+    await sleep(0);
+    assert.deepEqual(r.picCalls, ["p"], "one picture in flight");
+    assert.deepEqual(r.math.calls, ["a", "b", "c"], "the formulas after it did not wait");
+    assert.equal(text(view), "[[p]] [a] [[q]] [b] [c]");
+    assert.equal(r.settlePic(), "p");
+    await settle();
+    assert.deepEqual(r.picCalls, ["p", "q"], "then the next picture");
+    assert.equal(r.settlePic(), "q");
+    await settle();
+    assert.equal(text(view), "[pic p] [a] [pic q] [b] [c]");
+    // Typing a formula while a picture renders: the formula renders at once.
+    view.dispatch({ changes: { from: view.state.doc.length, insert: " [[s]] $d$" } });
+    await sleep(0);
+    assert.deepEqual(r.picCalls, ["p", "q", "s"]);
+    assert.equal(r.math.calls.at(-1), "d");
+    assert.ok(text(view).endsWith("[[s]] [d]"), text(view));
+    r.settlePic();
+    await settle();
+    assert.equal(renderStats(view).pending, 0);
+  } finally {
+    view.destroy();
+  }
+});
+
+test("T-S11 epoch-free requests keep their renders across a new epoch; the others render again", async () => {
+  const r = new MixedRenderer();
+  const view = new EditorView({
+    state: EditorState.create({ doc: "[[p]] $a$", extensions: [liveInput(), livePreview({ language: mixedLanguage, renderer: r })] }),
+    parent: document.body,
+  });
+  try {
+    await sleep(0);
+    r.settlePic();
+    await settle();
+    assert.equal(text(view), "[pic p] [a]");
+    r.math.bump();
+    await settle();
+    assert.deepEqual(r.math.calls, ["a", "a"], "the formula rendered again");
+    assert.deepEqual(r.picCalls, ["p"], "the picture did not");
+    assert.equal(text(view), "[pic p] [a]");
+    assert.equal(renderStats(view).pending, 0);
+    // A picture landing after the epoch moved is kept (the epoch does not change it).
+    view.dispatch({ changes: { from: view.state.doc.length, insert: " [[q]]" } });
+    await sleep(0);
+    r.math.bump();
+    r.settlePic();
+    await settle();
+    assert.deepEqual(r.picCalls, ["p", "q"]);
+    assert.equal(text(view), "[pic p] [a] [pic q]");
+  } finally {
+    view.destroy();
+  }
 });
 
 // ---- T-S12 keys ------------------------------------------------------------------------------------
@@ -1154,6 +1488,32 @@ test("a scanner that throws leaves the text as source and the editor usable (log
   view.dispatch({ changes: { from: 0, to: 10 } });
   await settle();
   assert.equal(text(view), "a [x] b", "rendered again");
+  view.destroy();
+});
+
+test("a `reveals` that throws: every construct tests its own lines (logged once)", async () => {
+  const errors: unknown[] = [];
+  const throwing: LiveLanguage<Math> = {
+    ...language,
+    reveals: () => {
+      throw new Error("reveals bug");
+    },
+  };
+  const view = new EditorView({
+    state: EditorState.create({
+      doc: "a $x$ b\nc $y$ d",
+      extensions: [liveInput(), livePreview({ language: throwing, renderer: new SyncRenderer() }), EditorView.exceptionSink.of((e) => errors.push(e))],
+    }),
+    parent: document.body,
+  });
+  view.focus();
+  await settle();
+  move(view, 3);
+  assert.equal(text(view), "a $x$ bc [y] d", "the formula at the cursor reveals");
+  move(view, view.state.doc.line(2).from + 3);
+  assert.equal(text(view), "a [x] bc $y$ d", "a move re-decorates both lines");
+  view.dispatch({ changes: { from: 0, insert: "e " } });
+  assert.equal(errors.length, 1, "logged once");
   view.destroy();
 });
 

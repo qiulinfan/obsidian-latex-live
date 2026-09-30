@@ -7,8 +7,8 @@ import { CITE_COMMANDS, MATH_ENVS, VERBATIM_ENVS, iffalseEnd, iffalseStarts } fr
 //   Where     after \begin{document} when the file has one (chapter files have none and are
 //             scanned whole), up to \end{document}; comments, verbatim environments (tcblisting
 //             and fancyvrb's too), \verb-like inline verbatim, the text an `\iffalse` first on its
-//             line skips (to its \fi or \else), and TikZ pictures (code until P5's crops: a
-//             calc coordinate `($(a)!(b)!(c)$)` is no formula) are skipped.
+//             line skips (to its \fi or \else), and the inside of TikZ pictures (code: a calc
+//             coordinate `($(a)!(b)!(c)$)` is no formula) are skipped.
 //   Math      formulas end at a paragraph break, as in TeX: a half-typed `$`, `$$`, `\[` or
 //             \begin{align} never pairs with a delimiter further down. Environments also
 //             close within MAX_LINES lines. Inline math steps over text arguments, whose `$`
@@ -17,13 +17,26 @@ import { CITE_COMMANDS, MATH_ENVS, VERBATIM_ENVS, iffalseEnd, iffalseStarts } fr
 //   Text      a construct's arguments close on its own line (a half-typed `\textbf{` is
 //             none): headings at the start of their line, text styles, the \item's of the
 //             lists open around them (with the marker LaTeX typesets, enumitem's resume and
-//             series and \setcounter{enumi} followed), the \begin/\end lines of lists and
-//             center alone on their lines, references, citations and labels. An \item[label]
-//             with math or a reference in it keeps its label in place, scanned on.
+//             series and \setcounter{enumi} followed; elegantbook's problemset is an
+//             enumerate), the \begin/\end lines of lists and center alone on their lines,
+//             references, citations and labels. An \item[label]
+//             with math or a reference in it keeps its label in place, scanned on. Figure and
+//             table \begin/\end lines alone on their lines collapse like lists (#8), an
+//             \includegraphics alone on its line is an image (#13).
 //             A heading's title and a style's content are scanned on: constructs nest, in
 //             document order. A definition (\newcommand, \def, \newenvironment, ...) is code:
 //             nothing in it is a construct (macro files have no \begin{document}).
-//   Cost      memoized per document (Text), like the highlighter's own state.
+//   Envs      any other environment whose \begin (with the arguments and \label on its line) and
+//             \end are alone on their lines, within MAX_LINES lines, is an `env` construct: the
+//             language decides with the project's theorem map whether it is a box (#12), or a
+//             PDF crop (#14: TikZ pictures, whose inside is skipped, and tables). The arguments
+//             are scanned on (a title's math); nested environments pair by name. `blockAt`
+//             finds them (and figure and table floats) for the render hover's crops.
+//   Cost      memoized per document (Text), like the highlighter's own state. Formulas inside
+//             text arguments inside formulas nest at most MAX_NESTING deep (deeper, a text
+//             argument reads as math), so no document overflows the stack; where a text argument
+//             ends is found once per position and nesting in a scan, so unclosed ones
+//             (`\text{$\text{$..`) cost a few passes over their paragraph, not exponentially many.
 // The highlighter keeps its own tokenizer; half-typed delimiters may differ there.
 
 /** A formula: `$..$`, `\(..\)`, `\[..\]`, `$$..$$` or a math environment. */
@@ -87,13 +100,55 @@ export interface LatexItem {
   readonly labelTo?: number;
 }
 
-/** A `\begin` or `\end` line of a list or center, alone on its line (#8). */
+/** A `\begin` or `\end` line of a list, center, figure or table, alone on its line (#8). */
 export interface LatexEnvLine {
   readonly kind: "envline";
   readonly from: number;
   readonly to: number;
   readonly env: string;
   readonly begin: boolean;
+}
+
+/** An argument on a \begin line: its content's range, `{..}` or `[..]`. */
+export interface LatexArg {
+  readonly optional: boolean;
+  readonly from: number;
+  readonly to: number;
+}
+
+/**
+ * An environment whose \begin and \end are alone on their lines (not a list, center, figure,
+ * table, formula or verbatim): a theorem-like box when the project defines it (#12), a PDF crop
+ * when it is a TikZ picture or a table (#14).
+ */
+export interface LatexEnv {
+  readonly kind: "env";
+  /** At `\begin`. */
+  readonly from: number;
+  /** After `\end{env}`. */
+  readonly to: number;
+  readonly env: string;
+  /** After `\begin{env}` and the arguments (and a \label) on its line. */
+  readonly beginTo: number;
+  /** At `\end{env}`. */
+  readonly endFrom: number;
+  /** The `{..}` and `[..]` arguments right after `\begin{env}`, on its line. */
+  readonly args: readonly LatexArg[];
+  /**
+   * The key of a \label right after the arguments (tcolorbox's `t\label`), or else first on the
+   * next line: the head's number. Null without one.
+   */
+  readonly label: string | null;
+}
+
+/** `\includegraphics[..]{file}` alone on its line (#13). */
+export interface LatexImage {
+  readonly kind: "image";
+  readonly from: number;
+  readonly to: number;
+  readonly block: true;
+  /** The file argument as written (`figures/grid.png`, `grid`). */
+  readonly path: string;
 }
 
 /** `\ref`, `\eqref`, `\pageref`, `\autoref`, `\cref`, `\Cref`, `\nameref` (starred too) (#9). */
@@ -126,21 +181,37 @@ export interface LatexLabel {
   readonly key: string;
 }
 
+/**
+ * An environment the render hover crops from the PDF (design 4.8): an `env` construct, or a
+ * figure or table float between its \begin and \end lines.
+ */
+export interface LatexBlock {
+  readonly kind: "block";
+  readonly from: number;
+  readonly to: number;
+  readonly env: string;
+}
+
 export type LatexConstruct =
   | LatexMath
   | LatexHeading
   | LatexStyle
   | LatexItem
   | LatexEnvLine
+  | LatexEnv
+  | LatexImage
   | LatexRef
   | LatexCite
   | LatexLabel;
 
-/** A math environment closes within this many lines, or it is not one (half-typed). */
+/** A math environment (or an `env`) closes within this many lines, or it is not one (half-typed). */
 const MAX_LINES = 200;
+/** Formulas in text arguments in formulas nest this deep at most (see Cost). */
+const MAX_NESTING = 8;
 
 const cache = new WeakMap<Text, readonly LatexConstruct[]>();
 const mathCache = new WeakMap<Text, readonly LatexMath[]>();
+const blockCache = new WeakMap<Text, readonly LatexBlock[]>();
 
 /** The constructs of a document in document order (nested ones after their parent; memoized per Text). */
 export function scanLatex(doc: Text): readonly LatexConstruct[] {
@@ -171,6 +242,41 @@ export function mathAt(doc: Text, pos: number): LatexMath | null {
   return null;
 }
 
+/** The environments and floats of a document (see LatexBlock; memoized per Text). */
+export function blocks(doc: Text): readonly LatexBlock[] {
+  let hit = blockCache.get(doc);
+  if (hit) return hit;
+  const out: LatexBlock[] = [];
+  const open: LatexEnvLine[] = [];
+  for (const c of scanLatex(doc)) {
+    if (c.kind === "env") out.push({ kind: "block", from: c.from, to: c.to, env: c.env });
+    else if (c.kind === "envline" && FLOATS.has(c.env)) {
+      if (c.begin) open.push(c);
+      else {
+        const at = open.map((o) => o.env).lastIndexOf(c.env);
+        if (at >= 0) out.push({ kind: "block", from: open[at].from, to: c.to, env: c.env });
+        open.length = Math.max(0, at);
+      }
+    }
+  }
+  blockCache.set(doc, (hit = out));
+  return hit;
+}
+
+/** The innermost block around `pos` (its \begin and \end included) that `accept` takes, or null. */
+export function blockAt(doc: Text, pos: number, accept: (b: LatexBlock) => boolean): LatexBlock | null {
+  let best: LatexBlock | null = null;
+  for (const b of blocks(doc)) {
+    if (b.from <= pos && pos <= b.to && (!best || b.to - b.from < best.to - best.from) && accept(b)) best = b;
+  }
+  return best;
+}
+
+/** The blocks around [from, to] (containing it, not equal to it). */
+export function blocksAround(doc: Text, from: number, to: number): LatexBlock[] {
+  return blocks(doc).filter((b) => b.from <= from && to <= b.to && (b.from !== from || b.to !== to));
+}
+
 const lineEnd = (s: string, i: number): number => {
   const e = s.indexOf("\n", i);
   return e < 0 ? s.length : e;
@@ -187,12 +293,19 @@ function paragraphBreak(s: string, i: number): boolean {
 const TEXT_ARG = /\\(?:text(?:rm|sf|tt|bf|md|it|sl|up|sc|normal)?|mbox|hbox|fbox)\s*\{/y;
 
 /**
+ * textEnd's answers during one scan by position and nesting (see Cost): without them, text
+ * arguments that never close (`\text{$\text{$..`) are read again for every formula around them,
+ * exponentially in their nesting.
+ */
+type TextEnds = Map<number, number>;
+
+/**
  * Offset of `close` after `from` in the same paragraph (skipping escapes and comments), or -1.
  * An inline formula steps over text arguments (`\text{if $x$ odd}`); one that does not close in
  * the paragraph is read as plain math, so a half-typed `$\text{a $` still pairs.
  */
-function findClose(s: string, from: number, close: string): number {
-  const inline = close === "$" || close === "\\)";
+function findClose(s: string, from: number, close: string, ends: TextEnds, nesting = 0): number {
+  const inline = (close === "$" || close === "\\)") && nesting < MAX_NESTING;
   let lines = 0;
   for (let j = from; j < s.length; j++) {
     const c = s[j];
@@ -200,7 +313,7 @@ function findClose(s: string, from: number, close: string): number {
       if (s.startsWith(close, j)) return j;
       if (inline) {
         TEXT_ARG.lastIndex = j;
-        const e = TEXT_ARG.exec(s) ? textEnd(s, TEXT_ARG.lastIndex) : -1;
+        const e = TEXT_ARG.exec(s) ? textEnd(s, TEXT_ARG.lastIndex, nesting + 1, ends) : -1;
         if (e >= 0) {
           j = e;
           continue;
@@ -218,18 +331,28 @@ function findClose(s: string, from: number, close: string): number {
   return -1;
 }
 
-/** Offset of the `}` ending a text argument whose content starts at s[i] (formulas in it skipped), or -1. */
-function textEnd(s: string, i: number): number {
+/**
+ * Offset of the `}` ending a text argument whose content starts at s[i] (formulas in it skipped,
+ * `nesting` text arguments deep), or -1; remembered in `ends`.
+ */
+function textEnd(s: string, i: number, nesting: number, ends: TextEnds): number {
+  const key = i * (MAX_NESTING + 1) + nesting;
+  let e = ends.get(key);
+  if (e === undefined) ends.set(key, (e = textArgEnd(s, i, nesting, ends)));
+  return e;
+}
+
+function textArgEnd(s: string, i: number, nesting: number, ends: TextEnds): number {
   for (let j = i, depth = 0; j < s.length; j++) {
     const c = s[j];
     if (c === "\\") {
       if (s[j + 1] === "(") {
-        const e = findClose(s, j + 2, "\\)");
+        const e = findClose(s, j + 2, "\\)", ends, nesting);
         if (e < 0) return -1;
         j = e + 1;
       } else j++;
     } else if (c === "$") {
-      const e = findClose(s, j + 1, "$");
+      const e = findClose(s, j + 1, "$", ends, nesting);
       if (e < 0) return -1;
       j = e;
     } else if (c === "{") {
@@ -262,6 +385,7 @@ const labelsIn = (src: string): string[] => [...src.matchAll(/\\label\s*\{([^{}]
 
 const COMMAND = /[A-Za-z@]+\*?/y;
 const ENV_ARG = /\s*\{([^{}\n]*)\}/y;
+const LABEL = /[ \t]*\\label\s*\{([^{}\n]*)\}/y;
 
 /** Index after inline verbatim (`\verb|..|`, `\lstinline{..}`) whose argument starts at s[i]. */
 function skipVerbatim(s: string, i: number, name: string): number {
@@ -299,9 +423,17 @@ const STYLES: Record<string, TextStyle> = {
   texttt: "tt",
   textsc: "sc",
 };
-const LISTS = new Set(["itemize", "enumerate", "description"]);
-/** Environments whose \begin and \end lines collapse (figure and table come with P4). */
-const COLLAPSED_ENVS = new Set([...LISTS, "center"]);
+type ListKind = "itemize" | "enumerate" | "description";
+/**
+ * The list environments (#7) and the list each one is. elegantbook's problemset (its exercises:
+ * an enumerate after a heading; no other class or package in TeX Live defines one) takes a
+ * [title], not list options.
+ */
+const LIST_KINDS: Readonly<Record<string, ListKind>> = { itemize: "itemize", enumerate: "enumerate", description: "description", problemset: "enumerate" };
+const LISTS = new Set(Object.keys(LIST_KINDS));
+const FLOATS = new Set(["figure", "figure*", "table", "table*"]);
+/** Environments whose \begin and \end lines collapse. */
+const COLLAPSED_ENVS = new Set([...LISTS, "center", ...FLOATS]);
 const REFS = new Set(["ref", "eqref", "pageref", "autoref", "cref", "Cref", "nameref"]);
 /** Commands whose arguments are code: a definition runs to its first line break outside braces. */
 const DEFINERS = new Set([
@@ -318,8 +450,11 @@ const DEFINERS = new Set([
 const TIKZ_ENVS = new Set(["tikzpicture", "tikzcd", "pgfpicture", "circuitikz"]);
 /** The counters of enumerate levels 1-4 (\setcounter{enumii}{3} inside a list). */
 const ENUM_COUNTERS: Record<string, number> = { enumi: 1, enumii: 2, enumiii: 3, enumiv: 4 };
-/** An \item label with math, a reference, a citation or a \label stays in place (a marker is text). */
-const hasConstructs = (label: string): boolean =>
+/**
+ * Text with math, a reference, a citation or a \label: an \item label or a theorem's title that
+ * stays in place (a marker or a head chip is text).
+ */
+export const hasConstructs = (label: string): boolean =>
   /\$|\\\(/.test(label) ||
   [...label.matchAll(/\\([A-Za-z]+)/g)].some((m) => REFS.has(m[1]) || CITE_COMMANDS.has(m[1]) || m[1] === "label");
 
@@ -377,6 +512,8 @@ type ListMarks = { bullet: string } | { counter: Counter; before: string; after:
 
 interface OpenList {
   env: string;
+  /** The list it is (elegantbook's problemset: an enumerate). */
+  kind: ListKind;
   marks: ListMarks | null;
   /** The next number (enumerate). */
   next: number;
@@ -546,6 +683,36 @@ function itemMarker(list: OpenList): string {
   return marks.before + counterText(marks.counter, list.next++) + marks.after;
 }
 
+/** An environment open in the scan (see LatexEnv); `at` is its place in the output, -1 when its \begin line is not alone. */
+interface OpenEnv {
+  env: string;
+  from: number;
+  beginTo: number;
+  args: LatexArg[];
+  label: string | null;
+  at: number;
+}
+
+/** The `{..}` and `[..]` arguments after `\begin{env}` (ending at s[j]) on its line, and where they end. */
+function beginArgs(s: string, j: number): { args: LatexArg[]; beginTo: number } {
+  const args: LatexArg[] = [];
+  let k = skipBlanks(s, j);
+  while (s[k] === "{" || s[k] === "[") {
+    const e = argEnd(s, k);
+    if (e < 0) break;
+    args.push({ optional: s[k] === "[", from: k + 1, to: e - 1 });
+    k = skipBlanks(s, e);
+  }
+  return { args, beginTo: args.length ? args[args.length - 1].to + 1 : j };
+}
+
+/** The line breaks in s[from, to). */
+function lineBreaks(s: string, from: number, to: number): number {
+  let count = 0;
+  for (let k = s.indexOf("\n", from); k >= 0 && k < to; k = s.indexOf("\n", k + 1)) count++;
+  return count;
+}
+
 /** The keys of a `{a, b}` argument. */
 const keysOf = (arg: string): string[] =>
   arg
@@ -557,13 +724,16 @@ const keysOf = (arg: string): string[] =>
 const note = (arg: string | undefined): string | null => (arg !== undefined && arg.trim() ? arg.trim() : null);
 
 function scanText(s: string): LatexConstruct[] {
-  const out: LatexConstruct[] = [];
+  // An `env` holds its place (null) from its \begin: constructs stay in document order.
+  const out: (LatexConstruct | null)[] = [];
+  const envs: OpenEnv[] = [];
+  const ends: TextEnds = new Map();
   const math = (from: number, to: number, display: boolean, env: string | null, src: string) => {
     if (!src.trim()) return;
     out.push({ kind: "math", from, to, display, block: display && aloneOnLines(s, from, to), env, src, labels: labelsIn(src) });
   };
   const lists: OpenList[] = [];
-  const depthOf = (env: string) => lists.reduce((d, l) => (l.env === env ? d + 1 : d), 0);
+  const depthOf = (kind: ListKind) => lists.reduce((d, l) => (l.kind === kind ? d + 1 : d), 0);
   /** enumitem's `resume` state: lists ended outside any list, and the series. */
   const topSaved = new Map<string, Resumable>();
   const series = new Map<string, Resumable>();
@@ -585,7 +755,7 @@ function scanText(s: string): LatexConstruct[] {
     }
     if (c === "$") {
       const open = s[i + 1] === "$" ? 2 : 1;
-      const close = findClose(s, i + open, open === 2 ? "$$" : "$");
+      const close = findClose(s, i + open, open === 2 ? "$$" : "$", ends);
       if (close < 0) {
         i += open;
         continue;
@@ -600,7 +770,7 @@ function scanText(s: string): LatexConstruct[] {
     }
     if (s[i + 1] === "(" || s[i + 1] === "[") {
       const display = s[i + 1] === "[";
-      const close = findClose(s, i + 2, display ? "\\]" : "\\)");
+      const close = findClose(s, i + 2, display ? "\\]" : "\\)", ends);
       if (close < 0) {
         i += 2;
         continue;
@@ -677,11 +847,26 @@ function scanText(s: string): LatexConstruct[] {
         continue;
       }
     }
+    if (base === "includegraphics") {
+      let k = arg;
+      for (let o = 0; o < 2 && s[k] === "["; o++) {
+        const e = argEnd(s, k);
+        if (e < 0) break;
+        k = skipBlanks(s, e);
+      }
+      const e = s[k] === "{" ? argEnd(s, k) : -1;
+      const path = e > 0 ? s.slice(k + 1, e - 1).trim() : "";
+      if (path && aloneOnLines(s, i, e)) {
+        out.push({ kind: "image", from: i, to: e, block: true, path });
+        i = e;
+        continue;
+      }
+    }
     if (name === "item" && lists.length) {
       const list = lists[lists.length - 1];
       const e = s[arg] === "[" ? argEnd(s, arg) : -1;
       const label = e > 0 ? s.slice(arg + 1, e - 1) : null;
-      const term = list.env === "description";
+      const term = list.kind === "description";
       if (label !== null && hasConstructs(label)) {
         // `\item[` and `]` hide; the label's text and its formulas and references render in place.
         out.push({ kind: "item", from: i, to: e, marker: "", term, labelFrom: arg + 1, labelTo: e - 1 });
@@ -697,7 +882,7 @@ function scanText(s: string): LatexConstruct[] {
     if ((base === "setcounter" || base === "addtocounter" || base === "stepcounter") && lists.length) {
       // An enumerate's counter set inside it: the next \item continues from there.
       const m = /^\{\s*(enumi{1,3}|enumiv)\s*\}(?:\s*\{\s*(-?\d+)\s*\})?/.exec(s.slice(arg, arg + 60));
-      const list = m ? lists.filter((l) => l.env === "enumerate")[ENUM_COUNTERS[m[1]] - 1] : undefined;
+      const list = m ? lists.filter((l) => l.kind === "enumerate")[ENUM_COUNTERS[m[1]] - 1] : undefined;
       if (m && list && (base === "stepcounter" || m[2] !== undefined)) {
         const v = Number(m[2]);
         list.next = base === "stepcounter" ? list.next + 1 : base === "setcounter" ? v + 1 : list.next + v;
@@ -721,6 +906,7 @@ function scanText(s: string): LatexConstruct[] {
             // enumitem saves the counter, and the keys unless the list only resumed them.
             const ended = lists[at];
             lists.length = at;
+            // A problemset's enumerate ends inside its group: what it saves is lost with it.
             const marks = ended.savesMarks ? ended.marks : (resumable(env)?.marks ?? ended.marks);
             (at > 0 ? lists[at - 1].saved : topSaved).set(env, { next: ended.next, marks });
             if (ended.series !== null) {
@@ -729,17 +915,38 @@ function scanText(s: string): LatexConstruct[] {
             }
           }
         }
-        if (COLLAPSED_ENVS.has(env) && aloneOnLines(s, i, j)) out.push({ kind: "envline", from: i, to: j, env, begin: false });
+        if (COLLAPSED_ENVS.has(env)) {
+          if (aloneOnLines(s, i, j)) out.push({ kind: "envline", from: i, to: j, env, begin: false });
+        } else {
+          // Environments pair by name; those left open inside it never close.
+          const at = envs.map((e) => e.env).lastIndexOf(env);
+          const open = envs[at];
+          if (open) {
+            envs.length = at;
+            if (open.at >= 0 && aloneOnLines(s, i, j) && lineBreaks(s, open.from, i) <= MAX_LINES) {
+              const { from, beginTo, args, label } = open;
+              out[open.at] = { kind: "env", from, to: j, env, beginTo, endFrom: i, args, label };
+            }
+          }
+        }
       } else if (VERBATIM_ENVS.has(env)) {
         const e = s.indexOf(`\\end{${env}}`, j);
         j = e < 0 ? n : e + env.length + 6;
       } else if (TIKZ_ENVS.has(env)) {
-        // A half-typed picture (no \end yet) hides nothing below it.
+        // A half-typed picture (no \end yet) hides nothing below it. One whose \begin (with
+        // its options) and \end are alone on their lines is an `env` (a PDF crop, #14).
         const e = s.indexOf(`\\end{${env}}`, j);
-        if (e >= 0) j = e + env.length + 6;
+        if (e >= 0) {
+          const to = e + env.length + 6;
+          const { args, beginTo } = beginArgs(s, j);
+          if (aloneOnLines(s, i, beginTo) && aloneOnLines(s, e, to) && lineBreaks(s, i, e) <= MAX_LINES) {
+            out.push({ kind: "env", from: i, to, env, beginTo, endFrom: e, args, label: null });
+          }
+          j = to;
+        }
       } else if (MATH_ENVS.has(env)) {
         const endTag = `\\end{${env}}`;
-        const e = findClose(s, j, endTag);
+        const e = findClose(s, j, endTag, ends);
         if (e >= 0) {
           const to = e + endTag.length;
           // `math` and `displaymath` are delimiters; MathJax reads the other environments whole.
@@ -752,15 +959,17 @@ function scanText(s: string): LatexConstruct[] {
         const optEnd = s[optAt] === "[" ? argEnd(s, optAt) : -1;
         if (optEnd > 0) j = optEnd;
         if (LISTS.has(env)) {
-          const o = listOptions(env, optEnd > 0 ? s.slice(optAt + 1, optEnd - 1) : null);
+          const kind = LIST_KINDS[env];
+          const o = listOptions(kind, optEnd > 0 && kind === env ? s.slice(optAt + 1, optEnd - 1) : null);
           // enumitem: `resume` continues the last list of this environment, `resume=s` a series,
           // `resume*` also takes its label; a series' name alone is `resume*=` it. `start=` wins.
           const named = o.bare.find((k) => series.has(k));
           const resume = o.resume ?? (named !== undefined ? { star: true, series: named } : null);
           const from = resume && (resume.series !== null ? series.get(resume.series) : resumable(env));
-          const marks = o.marks ?? (from && resume?.star ? from.marks : null) ?? defaultMarks(env, depthOf(env) + 1);
+          const marks = o.marks ?? (from && resume?.star ? from.marks : null) ?? defaultMarks(kind, depthOf(kind) + 1);
           lists.push({
             env,
+            kind,
             marks,
             next: o.start ?? from?.next ?? 1,
             series: o.series ?? resume?.series ?? null,
@@ -770,9 +979,24 @@ function scanText(s: string): LatexConstruct[] {
           });
         }
         if (aloneOnLines(s, i, j)) out.push({ kind: "envline", from: i, to: j, env, begin: true });
+      } else if (env !== "document") {
+        // A theorem-like candidate (#12): the arguments and a \label on its line (scanned on
+        // from `j`: a title's formulas are constructs), or a \label first on the next line.
+        const found = beginArgs(s, j);
+        const { args } = found;
+        let { beginTo } = found;
+        LABEL.lastIndex = beginTo;
+        let label = LABEL.exec(s);
+        if (label) beginTo = LABEL.lastIndex;
+        else {
+          LABEL.lastIndex = lineEnd(s, beginTo) + 1;
+          label = LABEL.lastIndex < n ? LABEL.exec(s) : null;
+        }
+        const at = aloneOnLines(s, i, beginTo) ? out.push(null) - 1 : -1;
+        envs.push({ env, from: i, beginTo, args, label: label ? label[1].trim() : null, at });
       }
     }
     i = j;
   }
-  return out;
+  return out.filter((c): c is LatexConstruct => c !== null);
 }

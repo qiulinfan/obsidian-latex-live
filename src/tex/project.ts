@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from "fs";
-import { dirname, extname, isAbsolute, join, resolve, sep } from "path";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "path";
 
 export type Engine = "pdflatex" | "xelatex" | "lualatex";
 export type EngineSetting = "auto" | Engine;
@@ -263,6 +263,14 @@ export function preambleFiles(root: string): Set<string> {
     }
   }
   return out;
+}
+
+/**
+ * The name `\include` reads `file` by in the project of `root`: its path from the root's folder
+ * without `.tex`, with forward slashes (`chapters/ch4`), as the .aux checkpoints name it.
+ */
+export function includeName(root: string, file: string): string {
+  return relative(dirname(root), file).split(sep).join("/").replace(/\.tex$/i, "");
 }
 
 /**
