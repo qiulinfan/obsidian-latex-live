@@ -9,11 +9,11 @@ import type { PdfDoc } from "./pdfRenderer";
 // compile's PDF. Free of the obsidian module: main.ts passes Obsidian's pdf.js in, and tests
 // run the SyncTeX part against real TeX.
 //   Fresh     a crop exists only while the block's text is the one compiled: the session keeps
-//             the editor files a compile read (CompiledPdf.sources, from disk at its start),
-//             and the block's text is searched there, the occurrence nearest to its current
-//             line giving the compiled lines (`compiledLines`; a search, not change mapping:
-//             lines inserted above must not pick the neighbouring block). Changed, not open
-//             when the compile started, no preview (no session): no crop.
+//             the files a compile read (CompiledPdf.source: from disk at its start, or later
+//             while unchanged since), and the block's text is searched there, the occurrence
+//             nearest to its current line giving the compiled lines (`compiledLines`; a search,
+//             not change mapping: lines inserted above must not pick the neighbouring block).
+//             Changed, a file written while the compile ran, no preview (no session): no crop.
 //   Lines     SyncTeX (`forwardSearchAll`, every record) over the block's lines without its
 //             \begin line (`queryLines`: at most QUERY_LINES inside, the first and last ones, and
 //             the \end line), plus the nearest lines above and below it that are not blank or a
@@ -337,7 +337,7 @@ export class CropService {
     if (!session) return { note: NOTE_NO_PREVIEW };
     const r = this.current(root, session);
     if (!r) return { note: session.compiling ? NOTE_COMPILING : NOTE_NOT_COMPILED };
-    const source = r.compiled.sources.get(file);
+    const source = r.compiled.source(file);
     if (source === undefined) return { note: NOTE_NOT_COMPILED };
     const memo = `${file}\u0000${line}\u0000${text}`;
     let lines = r.lines.get(memo);
@@ -505,7 +505,7 @@ export class CropService {
   /** SyncTeX's records for the block's lines (see Lines), as a region (see Geometry). */
   private async query(r: RootCrops, file: string, from: number, to: number, kind: CropKind): Promise<CropRegion | null> {
     const binDir = this.host.binDir();
-    const source = r.compiled.sources.get(file);
+    const source = r.compiled.source(file);
     if (!binDir || source === undefined || r.compiled.synctex === null) return null;
     const lines = queryLines(source, from, to);
     const ask = (line: number | null): Promise<PdfBox[]> =>

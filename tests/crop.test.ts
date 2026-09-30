@@ -164,7 +164,7 @@ test("cropRegion: what a page shipped out while the block was read is dropped, a
 test("locate: identical blocks each crop from their own occurrence, whichever is asked first", () => {
   const block = "\\begin{equation}\n  E = mc^2\n\\end{equation}";
   const source = ["text", block, "more", "text", "", "again", "", "x", block, "end"].join("\n");
-  const compiled: CompiledPdf = { seq: 7, pdfPath: "/p/main.pdf", pdf: new Uint8Array(), sources: new Map([["/p/ch.tex", source]]), synctex: 1 };
+  const compiled: CompiledPdf = { seq: 7, pdfPath: "/p/main.pdf", pdf: new Uint8Array(), source: (f) => (f === "/p/ch.tex" ? source : undefined), synctex: 1 };
   const crops = new CropService({
     session: () => ({ compiling: null, compiled, onEvent: () => () => {} }),
     binDir: () => null,
@@ -279,7 +279,7 @@ test("T-L10: SyncTeX's records give each block of the compiled fixture its own r
 
 /** A session for the crop service over a compile of the fixture, `sources` as its snapshot. */
 function fakeSession(result: CompileResult, sources: Map<string, string>, seq = 1): CropSession & { compiling: unknown; compiled: CompiledPdf | null } {
-  const compiled: CompiledPdf = { seq, pdfPath: result.pdfPath, pdf: result.pdfData!, sources, synctex: synctexStamp(result.pdfPath) };
+  const compiled: CompiledPdf = { seq, pdfPath: result.pdfPath, pdf: result.pdfData!, source: (f) => sources.get(f), synctex: synctexStamp(result.pdfPath) };
   return { compiling: null, compiled, onEvent: () => () => {} };
 }
 
@@ -326,7 +326,7 @@ test("T-L11: a block keeps its compiled lines when lines are inserted above it; 
 
     const changed = alignText.replace("\\Var(X)", "\\Var(Y)");
     assert.deepEqual(crops.locate(t.root, t.ch1, changed, 20, "math"), { note: NOTE_CHANGED });
-    assert.deepEqual(crops.locate(t.root, t.ch2, "\\begin{tabular}", 25, "picture"), { note: NOTE_NOT_COMPILED }, "a file not open at the compile's start");
+    assert.deepEqual(crops.locate(t.root, t.ch2, "\\begin{tabular}", 25, "picture"), { note: NOTE_NOT_COMPILED }, "a file the compile's sources do not know");
     // The align's region is asked for (the drawing needs pdf.js, which fails here quietly).
     assert.equal((await crops.render(t.root, where.src)).ok, false);
     session.compiling = "fast";
@@ -411,7 +411,7 @@ test("a SyncTeX query that fails fails its crop, asked again next time (never a 
     chmodSync(join(bin, "synctex"), 0o755);
     writeFileSync(flag, "");
     const pdfPath = join(dir, "main.pdf");
-    const compiled: CompiledPdf = { seq: 1, pdfPath, pdf: new Uint8Array(readFileSync(pdfPath)), sources: new Map([[root, text]]), synctex: synctexStamp(pdfPath) };
+    const compiled: CompiledPdf = { seq: 1, pdfPath, pdf: new Uint8Array(readFileSync(pdfPath)), source: (f) => (f === root ? text : undefined), synctex: synctexStamp(pdfPath) };
     const crops = new CropService({
       session: () => ({ compiling: null, compiled, onEvent: () => () => {} }),
       binDir: () => bin,
@@ -496,7 +496,7 @@ test("T-L12: no synctex or xelatex process is left after the crop service and th
   }
 });
 
-test("sessions keep the open project files as each compile starts, on results that write a PDF", { skip: !binDir && "no TeX installation found", timeout: 60_000 }, async () => {
+test("sessions know what each compile read: open project files as it starts, others while unchanged since; on results that write a PDF", { skip: !binDir && "no TeX installation found", timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "ll-snap-"));
   const root = join(dir, "main.tex");
   const chapter = join(dir, "chapters", "one.tex");
@@ -505,6 +505,11 @@ test("sessions keep the open project files as each compile starts, on results th
   writeFileSync(root, "\\documentclass{article}\n\\begin{document}\n\\input{chapters/one}\n\\end{document}\n");
   writeFileSync(chapter, "Hello $x$.\r\nSecond line.\r\n");
   writeFileSync(elsewhere, "not this project");
+  // Project files not open in an editor.
+  const later = join(dir, "chapters", "later.tex");
+  const rewritten = join(dir, "chapters", "rewritten.tex");
+  writeFileSync(later, "Later $y$.\n");
+  writeFileSync(rewritten, "Before.\n");
   const events: SessionEvent[] = [];
   const plugin = {
     settings: { engine: "auto", preambleCache: false, shellEscape: false },
@@ -525,15 +530,23 @@ test("sessions keep the open project files as each compile starts, on results th
     const s = await compile();
     const c = s.compiled!;
     assert.ok(c.pdf.length > 0 && c.pdfPath.endsWith("main.pdf"));
-    assert.deepEqual([...c.sources.keys()].sort(), [chapter, root].sort(), "the project's open files, not another folder's");
-    assert.equal(c.sources.get(chapter), "Hello $x$.\nSecond line.\n", "LF line breaks, as the editor holds them");
+    assert.equal(c.source(chapter), "Hello $x$.\nSecond line.\n", "LF line breaks, as the editor holds them");
+    assert.equal(c.source(elsewhere), undefined, "the project's files, not another folder's");
+    // A project file not open at the compile's start is read from disk while unchanged since.
+    writeFileSync(rewritten, "After.\n");
+    assert.equal(c.source(later), "Later $y$.\n");
+    assert.equal(c.source(rewritten), undefined, "written after the compile started: unknown");
+    // An open file keeps the text the compile read.
+    writeFileSync(chapter, "Saved later.\n");
+    assert.equal(c.source(chapter), "Hello $x$.\nSecond line.\n");
     // A later compile: a new snapshot and a new number, unique across sessions too.
     writeFileSync(chapter, "Changed.\n");
     s.request("fast");
     await waitFor(() => events.includes("result") && !s.compiling, 30_000);
     events.length = 0;
     assert.ok(s.compiled!.seq > c.seq);
-    assert.equal(s.compiled!.sources.get(chapter), "Changed.\n");
+    assert.equal(s.compiled!.source(chapter), "Changed.\n");
+    assert.equal(s.compiled!.source(rewritten), "After.\n", "a new compile knows it again");
     const other = await compile();
     assert.ok(other.compiled!.seq > s.compiled!.seq);
     // A compile that writes no PDF keeps the last one's.

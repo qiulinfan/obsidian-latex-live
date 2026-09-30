@@ -303,8 +303,8 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
       有了 `BlockWrapper` 的类型，测试跑在运行时同版本的 CodeMirror 上）；无进展看门狗；
       ctex/中文 elegant* 文档类选 XeLaTeX；pdf.js 的 cMap 等资源地址（中文字形）；
       完整构建用能跑的 biber；`.bib` 和只被导言区格式读过的文件进依赖。
-- [ ] P1 悬停渲染（源码模式，2026-09-29）：项目宏的私有 MathJax 实例、数学扫描、悬停在 texlab 之前。
-      无头部分已完成并测试；这一阶段以 scratch vault 里的 GUI 检查 H1–H4 结束，还没做。
+- [x] P1 悬停渲染（源码模式，2026-09-29）：项目宏的私有 MathJax 实例、数学扫描、悬停在 texlab 之前。
+      GUI 检查 H1–H4 在 Obsidian 里做过（2026-09-29，courses vault 的 elegantbook 合成书）。
   - [x] 共享的 `renderHover`（`src/editor/shared/renderHover.ts`）：渲染段排在 texlab 的悬停段之前
         （`Prec.high`），300 ms 悬停；鼠标停下 400 ms 后渲染还没完成就显示转圈；CodeMirror 重启悬停时
         同一次渲染只做一次；失败用 `hoverError` 显示；样式 `.lsp-render-hover` 在 `editor.css`。
@@ -340,8 +340,9 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
         会展开公式；紧挨着构造的错误不再让它保持源码；展开的块下方的预览不再显示别的块的渲染；扫描器抛错时
         保持源码；渲染落地后只重画等它的构造；行内替换只画视口附近的（密集文档的光标移动 1.2 ms → 0.3 ms）；
         标签在标题行里不再跟着变大变粗；`scripts/gen-perf-fixture.mjs` 生成 B5 用的长章节。
-  - [ ] GUI 检查 L1–L9、L14–L16（scratch vault）。
-- [ ] P3 文本构造：标题、强调、列表、`\ref`/`\cite` 标签（aux、bib）。
+  - [ ] GUI 检查 L1–L9、L14–L16（scratch vault）。模式切换、视图状态、公式和块的渲染在 P7 的 Obsidian 实测里看过；
+        输入法、拖拽、3000 行章节这几项留给 beta 试用（无头和浏览器冒烟已覆盖）。
+- [x] P3 文本构造：标题、强调、列表、`\ref`/`\cite` 标签（aux、bib）。
   - [x] LaTeX 的文本构造 #5–#11（2026-09-29，无头部分；见下文“LaTeX 的实时预览：文本构造（P3）”）：
         `latexScan.ts` 的标题、强调、`\item`（标记按层级、enumerate 简写和 enumitem `label=`/`start=`）、列表和
         center 的 `\begin`/`\end` 行、引用、引用文献、`\label`，定义体不再扫描；`latexRefs.ts`（标签和公式里引用的
@@ -356,8 +357,8 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
         TikZ 图不再装饰；根文档在 `\begin{document}` 前读入的文件（拆开的导言区）没有构造；enumitem 的
         `resume`/`resume*`/`series` 和列表里的 `\setcounter`；tcblisting、fancyvrb、filecontents 和行首
         `\iffalse` 块跳过；`\Citet`、`\citealp`、`\footcite` 等也是文献标签。
-  - [ ] GUI 检查 L11（scratch vault）。
-- [ ] P4 定理框（BlockWrapper）和图片。
+  - [x] GUI 检查 L11（2026-09-29，Obsidian：elegantbook 合成书 ch2 的 `式~(1.4)`、`第~1 章`、`[王五 2022]`）。
+- [x] P4 定理框（BlockWrapper）和图片。
   - [x] LaTeX 的定理框、图表行和图片（2026-09-29，无头部分；见下文“LaTeX 的实时预览：定理框与图片（P4）”）：
         定理表 `src/tex/theorems.ts`（amsthm 的 proof、`\newtheorem`/`\newtheorem*`、`\elegantnewtheorem`、elegantbook
         的内置表：标签前缀、defstyle/thmstyle/prostyle、五种配色、lang=cn 的中文名，和装好的 elegantbook.cls 对过），
@@ -375,8 +376,8 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
   - [x] 光标在很长的环境里移动不再整篇重建（R1，2026-09-29，无头部分；见下文“P4–P6 的审查修复（LaTeX Live）”）：共享核心的
         `LiveLanguage.reveals`，除裁剪外的 `env` 只在 `\begin`、`\end` 两行看光标；3192 行章节里 190 行的环境中移动 p50
         0.3–0.4 ms、每次 6 次 decorate（以前 7.0–7.4 ms、6571 次）。测试 T-S5 的新用例、T-L9 的长框用例，浏览器冒烟 B5 的长框。
-  - [ ] GUI 检查 L12（scratch vault）。
-- [ ] P5 从上次编译的 PDF 裁剪（SyncTeX + pdf.js）。
+  - [x] GUI 检查 L12（2026-09-29，Obsidian：ch1 的 `定义 1.1 (概率空间 Probability space)`、`笔记` 框按配色、编号来自 .aux）。
+- [x] P5 从上次编译的 PDF 裁剪（SyncTeX + pdf.js）。
   - [x] LaTeX 的 PDF 裁剪（2026-09-29，无头部分；见下文“LaTeX 的 PDF 裁剪（P5）”）：`synctex.ts` 的 `forwardSearchAll`
         （一行的全部记录）；会话在编译开始时读打开的本项目文件，写出 PDF 的结果带着这份快照（`session.compiled`）；
         `src/preview/blockCrop.ts`（按文本找回编译时的行号，SyncTeX 记录按量出来的规则合成区域，最多 4 个 synctex、
@@ -387,8 +388,10 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
   - [x] P5 的审查修复（2026-09-29，无头部分；见下文“P4–P6 的审查修复（LaTeX Live）”）：编译进行时照样裁上一次结果
         （第二遍和排队的编译期间裁剪不再退回源码，悬停不再等）；跨页的 tcolorbox 定理框不再带上整页；公式的 `\begin`
         行当作前一行（段落最后一行不再露进裁剪顶边）；相同文本的块各自取最近的一处；SyncTeX 超时不再当成没有记录。
-  - [ ] GUI 检查 H5、H6、L13（scratch vault）。
-- [ ] P6 真实 TeX 片段编译兜底、光标处预览。
+  - [x] GUI 检查 H5、H6、L13（2026-09-29，Obsidian）：源码模式悬停 tikz-cd 是 PDF 裁剪，改动保存后重新编译、悬停跟着变；
+        ch3 定理 3.1 的悬停裁剪带框、中文标题、编号 (3.2)；实时模式的 tikz-cd 和表格是裁剪块。实测发现并修好：编译开始时
+        没打开的章节（之后才打开）一直没有裁剪，见 P7。
+- [x] P6 真实 TeX 片段编译兜底、光标处预览。
   - [x] LaTeX 的片段编译和光标处预览（2026-09-29，无头部分；见下文“片段编译与光标处预览（P6）”）：`src/tex/fragment.ts`
         （pdfLaTeX 用编译留下的导言区格式，`-fmt=<job>-preamble` 加 `TEXFORMATS`，格式旁的戳记说明它对哪个导言区就绪；
         XeLaTeX/LuaLaTeX 或没有格式时读整个导言区，带看门狗；preview 宏包 `active,tightpage,auctex`；片段用到的 `.aux` 标签
@@ -398,7 +401,8 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
         片段一步（MathJax 失败且没有新鲜裁剪时；设置 “Compile what the hover cannot render”，`texFragmentFallback`，默认开），
         光标处预览（共享的 `cursorPreview`，设置 “Preview the formula at the cursor”，`cursorPreview`，默认关）。测试 T-L13、T-L14
         （`tests/fragment.test.ts`，真实 pdfLaTeX 和 XeLaTeX）和源码、日志、定义、队列、悬停链、片段正文、光标处预览的新用例。
-  - [ ] GUI 检查 H11、H13（scratch vault）。
+  - [x] GUI 检查 H11、H13（2026-09-29，Obsidian）：article 的 `\intertext` align 悬停显示排版好的块和编号 (4)；
+        打开光标处预览后在 `$y^2_k+1$` 里打字，下方的渲染跟着更新。
   - [x] P6 的审查修复（2026-09-29，无头部分；见下文“P4–P6 的审查修复（LaTeX Live）”）：插件卸载或预览关闭时正在等格式检查的
         悬停不再启动 TeX；片段读的 `\input` 文件和图片改了会重新编译；中止或起不来的运行不留文件，`frag-*.aux` 不当成文档的
         标签；“Render formulas on hover” 的说明写全裁剪和片段编译。
@@ -409,7 +413,14 @@ YOLO 自己的按键映射被过滤掉，只保留渲染，触发走 YOLO 自己
         一行；深色主题下 `color=black` 的框头看得清。测试 T-S7、T-S9、T-S11、T-S13 的新用例、T-L9 的新断言，浏览器冒烟 B7、B8。
         之后（TY-R1 的第二种情况）：CodeMirror 因为下面放不下把光标处预览翻到上面时，浮层在构造第一行的上面，不再盖住
         显示公式的下半部分和正在打的那一行；B8 加了这种情况。
-- [ ] P7 复杂环境（多文件、elegantbook 模板）上的完整验证和实测数字。
+- [x] P7 复杂环境（多文件、elegantbook 模板）上的验证（2026-09-29，Obsidian 1.13.7，courses vault 的
+      `_editor-test/` 合成项目：elegantbook 多文件书（XeLaTeX、中文）、article（pdfLaTeX、cleveref、natbib）、
+      Typst 模板书）。上面各阶段的 GUI 检查加上：实时模式和悬停在三个项目里都没有控制台错误；Typst 的实时模式、
+      纸面悬停（见 obsidian-tinymist 的 roadmap）。实测数字见各阶段的无头和浏览器冒烟记录。
+  - [x] 实测修复：会话只在编译开始时读打开着的本项目文件，之后才打开的章节找不到编译时的文本，实时模式和悬停
+        一直没有裁剪，直到下次编译。`CompiledPdf.source(file)`（`compiledSources`）：打开的文件照旧在开始时读，
+        其余本项目文件第一次用到时从磁盘读，前提是编译开始后没写过（写过就不知道，下次编译再有）。测试在
+        `tests/crop.test.ts` 的会话用例里。
 
 ## 环境问题：XeLaTeX 找不到 TeX Live 自带的中文字体
 

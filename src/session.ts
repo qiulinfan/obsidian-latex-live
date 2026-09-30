@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { readFileSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join, sep } from "path";
 import {
@@ -25,10 +25,10 @@ export interface CompiledPdf {
   readonly pdfPath: string;
   readonly pdf: Uint8Array;
   /**
-   * The project files open in editors, as they were on disk when the compile started (LF line
-   * breaks), by absolute path: usually one to three files, read in well under a millisecond.
+   * The text a project file had when the compile started (LF line breaks), or undefined when
+   * that is not known: see compiledSources.
    */
-  readonly sources: ReadonlyMap<string, string>;
+  source(file: string): string | undefined;
   /**
    * The mtime of the result's .synctex.gz when it landed (null without one): a later value is a
    * later pass's, whose lines are not this PDF's (crops query SyncTeX while compiles run).
@@ -37,6 +37,43 @@ export interface CompiledPdf {
 }
 
 let compiledSeq = 0;
+
+/**
+ * A compile's sources (CompiledPdf.source): the project files open in editors, read as the
+ * compile started (`snapshot`: usually one to three files, well under a millisecond), and any
+ * other project file read from disk on first use when it has not been written since the compile
+ * started at `startedAt` (a chapter opened after the compile). A file written since is unknown:
+ * its blocks get no crop until the next compile.
+ */
+export function compiledSources(
+  snapshot: ReadonlyMap<string, string>,
+  startedAt: number,
+  isProject: (file: string) => boolean,
+): (file: string) => string | undefined {
+  const read = new Map(snapshot);
+  const unknown = new Set<string>();
+  // Date.now() is whole milliseconds; a write within that millisecond still precedes TeX's read
+  // of the file (the engine starts after it).
+  const unchanged = (file: string) => statSync(file).mtimeMs < startedAt + 1;
+  return (file) => {
+    const known = read.get(file);
+    if (known !== undefined || unknown.has(file) || !isProject(file)) return known;
+    try {
+      if (unchanged(file)) {
+        const text = readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+        // Written between the stat and the read: unknown after all.
+        if (unchanged(file)) {
+          read.set(file, text);
+          return text;
+        }
+      }
+    } catch {
+      // A file that is gone has nothing to crop.
+    }
+    unknown.add(file);
+    return undefined;
+  };
+}
 
 /** Build output folder of a root document: `$TMPDIR/obsidian-latex-live/<hash>`. */
 export function outDirFor(root: string): string {
@@ -60,8 +97,9 @@ export class LatexSession {
   refs = 0;
   /** The last result that wrote a PDF, with the sources its compile read (crops). */
   compiled: CompiledPdf | null = null;
-  /** The open editors' files as the running compile started. */
+  /** The open editors' files as the running compile started, and when it started. */
   private sources = new Map<string, string>();
+  private startedAt = 0;
   private listeners = new Set<(e: SessionEvent) => void>();
 
   constructor(
@@ -72,6 +110,7 @@ export class LatexSession {
       onStart: (mode) => {
         this.compiling = mode;
         this.engine = this.detectEngine();
+        this.startedAt = Date.now();
         this.sources = this.readSources();
         this.emit("start");
       },
@@ -81,7 +120,13 @@ export class LatexSession {
         this.failure = null;
         if (r.pdfData) this.lastPdf = r.pdfData;
         if (r.pdfWritten && r.pdfData) {
-          this.compiled = { seq: ++compiledSeq, pdfPath: r.pdfPath, pdf: r.pdfData, sources: this.sources, synctex: synctexStamp(r.pdfPath) };
+          this.compiled = {
+            seq: ++compiledSeq,
+            pdfPath: r.pdfPath,
+            pdf: r.pdfData,
+            source: compiledSources(this.sources, this.startedAt, (f) => this.inProject(f)),
+            synctex: synctexStamp(r.pdfPath),
+          };
         }
         this.emit("result");
       },
@@ -132,9 +177,8 @@ export class LatexSession {
    */
   private readSources(): Map<string, string> {
     const out = new Map<string, string>();
-    const { deps, rootDir } = this.compiler;
     for (const file of this.plugin.openTexFiles()) {
-      if (file !== this.root && !deps.has(file) && !file.startsWith(rootDir + sep)) continue;
+      if (!this.inProject(file)) continue;
       try {
         out.set(file, readFileSync(file, "utf8").replace(/\r\n/g, "\n"));
       } catch {
@@ -142,6 +186,12 @@ export class LatexSession {
       }
     }
     return out;
+  }
+
+  /** The root, the last compile's inputs and files under the root's folder. */
+  private inProject(file: string): boolean {
+    const { deps, rootDir } = this.compiler;
+    return file === this.root || deps.has(file) || file.startsWith(rootDir + sep);
   }
 
   private detectEngine(): Engine {
