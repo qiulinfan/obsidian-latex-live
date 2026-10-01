@@ -3,7 +3,7 @@ import { createHash } from "crypto";
 import { promises as fsp, readFileSync, statSync } from "fs";
 import { delimiter, dirname, join } from "path";
 import { texEnv, texTool } from "./binaries";
-import { killTree } from "./compiler";
+import { killTree } from "./run";
 import { parseLog } from "./logParser";
 import { definitionStatements, projectDefinitions } from "./macros";
 import { findGraphics, graphicsPaths } from "./graphics";

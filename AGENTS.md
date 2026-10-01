@@ -32,14 +32,21 @@
     with `logicalMapper` before comparing with vault paths.
   - Spawn TeX with `max_print_line=10000` and `-file-line-error`; the log
     parser depends on both.
-  - Every TeX run goes through `Compiler.exec` (a new kind of spawn uses
-    `watchStall` from `src/tex/watchdog.ts` the same way): no log or output
-    growth and under 2 % CPU of the process group for 30 s kills the group and
-    adds `stallMessage` as an error. XeLaTeX on macOS blocks forever in a
-    CoreText font download (ctex's default fontset) otherwise.
+  - Every TeX run goes through `runTex` (`src/tex/run.ts`: its own process
+    group, the stall watchdog, a timeout, an `AbortSignal` that kills the group;
+    `Compiler.exec` uses it; `fragment.ts` still spawns with
+    the same rules): no log or output growth and under 2 % CPU of the process
+    group for 30 s kills the group and adds `stallMessage` as an error. XeLaTeX
+    on macOS blocks forever in a CoreText font download (ctex's default fontset)
+    otherwise.
   - latexmk takes biber from PATH, bin dir first; full builds pass
     `-e $biber=...` when that biber does not run (`workingBiber`; MacTeX
     2026's universal biber only prints lipo's usage on this Mac).
+    The public `after_xlatex_analysis` hook removes only the exact physical
+    build-dir/job `.run.xml` dependency confirmed as a recorder OUTPUT, with
+    logreq's header and exclusively biblatex request owners. Preserve existing
+    hooks and every other XML input/package; return 0 on success. Real TeX
+    regressions cover XML and bibliography edits and foreign logreq owners.
   - Recompile dependencies are the `.fls` inputs plus what it never lists: the
     files only the preamble format read and the `.bib` files (`.bcf`, `.aux`).
     A changed `.bib` requests a full build.

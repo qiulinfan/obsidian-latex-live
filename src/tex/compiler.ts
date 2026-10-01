@@ -1,11 +1,11 @@
-import { ChildProcess, spawn } from "child_process";
 import { createHash } from "crypto";
 import { existsSync, promises as fsp } from "fs";
 import { basename, delimiter, dirname, extname, join, resolve, sep } from "path";
 import { texEnv, texTool, workingBiber } from "./binaries";
 import { ParsedLog, parseLog } from "./logParser";
 import { Engine, logicalMapper, preambleOf } from "./project";
-import { groupCpuSeconds, stallMessage, STALL_MS, watchStall } from "./watchdog";
+import { runTex, type TexRunResult } from "./run";
+import { stallMessage, STALL_MS } from "./watchdog";
 
 export type BuildMode = "fast" | "full";
 
@@ -48,9 +48,6 @@ interface FormatCache {
   state: "building" | "ready" | "failed";
 }
 
-const RUN_TIMEOUT_MS = 5 * 60_000;
-const OUTPUT_TAIL = 64 * 1024;
-
 /**
  * Compiles one root document into a private output directory. At most one
  * compile runs at a time; requests arriving meanwhile coalesce into a single
@@ -67,7 +64,8 @@ export class Compiler {
   private pending: BuildMode | null = null;
   private busy = false;
   private disposed = false;
-  private children = new Set<ChildProcess>();
+  /** Aborted on dispose: every running TeX tool's process group is killed. */
+  private readonly abort = new AbortController();
   private format: FormatCache | null = null;
 
   constructor(
@@ -97,8 +95,7 @@ export class Compiler {
   dispose(): void {
     this.disposed = true;
     this.pending = null;
-    for (const child of this.children) killTree(child);
-    this.children.clear();
+    this.abort.abort();
   }
 
   private async drain(): Promise<void> {
@@ -180,6 +177,11 @@ export class Compiler {
       "-synctex=1",
       "-recorder",
       `-outdir=${o.outDir}`,
+      // logreq's generated request ledger reads its old checksum and writes new bookkeeping
+      // at the end of a biblatex run. Its active flag alone otherwise causes one extra TeX pass
+      // after aux/bbl/out/bcf have converged. The public latexmk hook removes only this job's
+      // recorder-confirmed generated ledger, preserving every real XML input and existing hook.
+      "-e", logreqDependencyHook(await fsp.realpath(o.outDir), this.jobName),
       ...(o.shellEscape ? ["-shell-escape"] : []),
       ...(biber && biber !== texTool(o.binDir, "biber")
         ? ["-e", `$biber = q{"${biber}" %O %S}`]
@@ -406,71 +408,33 @@ export class Compiler {
   }
 
   /**
-   * Run a TeX tool in its own process group and resolve with its output.
-   * The stall watchdog kills a run whose `log` and output stop growing while
-   * it uses no CPU (XeLaTeX waiting for a macOS font download never returns)
-   * instead of waiting for the 5-minute timeout; `finish` reports it.
+   * Run a TeX tool from the root's folder (runTex: its own process group, the stall watchdog,
+   * the timeout) and resolve with its output; `finish` reports a stalled run. Rejects once the
+   * compiler is disposed (the run's group is killed).
    */
-  private exec(
+  private async exec(
     cmd: string,
     args: string[],
     o: CompileOptions,
     log: string,
     extraEnv: NodeJS.ProcessEnv = {},
   ): Promise<{ output: string; stalled: boolean }> {
-    return new Promise((resolvePromise, reject) => {
-      if (this.disposed) {
-        reject(new Error("compiler disposed"));
-        return;
-      }
-      const child = spawn(cmd, args, {
+    if (this.disposed) throw new Error("compiler disposed");
+    let run: TexRunResult;
+    try {
+      run = await runTex(cmd, args, {
         cwd: this.rootDir,
         env: { ...texEnv(o.binDir), ...extraEnv },
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: process.platform !== "win32",
-        windowsHide: true,
+        log,
+        stallMs: o.stallMs,
+        signal: this.abort.signal,
       });
-      this.children.add(child);
-      let output = "";
-      let outputBytes = 0;
-      const collect = (chunk: Buffer) => {
-        outputBytes += chunk.length;
-        output = (output + chunk.toString("utf8")).slice(-OUTPUT_TAIL);
-      };
-      child.stdout?.on("data", collect);
-      child.stderr?.on("data", collect);
-      const timer = setTimeout(() => killTree(child), RUN_TIMEOUT_MS);
-      let stalled = false;
-      const stopWatch = watchStall(
-        {
-          progress: () =>
-            fsp.stat(log).then(
-              (st) => outputBytes + st.size,
-              () => outputBytes,
-            ),
-          cpu: () =>
-            child.pid ? groupCpuSeconds(child.pid) : Promise.resolve(null),
-        },
-        () => {
-          stalled = true;
-          killTree(child);
-        },
-        o.stallMs ?? STALL_MS,
-      );
-      child.on("error", (err) => {
-        clearTimeout(timer);
-        stopWatch();
-        this.children.delete(child);
-        reject(err);
-      });
-      child.on("close", () => {
-        clearTimeout(timer);
-        stopWatch();
-        this.children.delete(child);
-        if (this.disposed) reject(new Error("compiler disposed"));
-        else resolvePromise({ output, stalled });
-      });
-    });
+    } catch (err) {
+      if (this.disposed) throw new Error("compiler disposed");
+      throw err;
+    }
+    if (this.disposed) throw new Error("compiler disposed");
+    return { output: run.output, stalled: run.stalled };
   }
 }
 
@@ -480,6 +444,30 @@ interface EngineRun {
   log: ParsedLog;
   /** The stall watchdog stopped the run. */
   stalled: boolean;
+}
+
+/** A public latexmk dependency hook, bounded to this build's generated biblatex request ledger. */
+function logreqDependencyHook(outDir: string, job: string): string {
+  // This is a Perl argument to spawn, not shell code. Single-quoted Perl strings keep $ and @
+  // literal; TeX and Perl both accept forward slashes on Windows.
+  const literal = (p: string) => `'${p.replace(/\\/g, "/").replace(/'/g, "\\'")}'`;
+  const ledger = literal(join(outDir, `${job}.run.xml`));
+  const recorder = literal(join(outDir, `${job}.fls`));
+  return `add_hook('after_xlatex_analysis', sub {
+    my $ledger = ${ledger};
+    my $recorder = ${recorder};
+    return unless open(my $rf, '<', $recorder);
+    my $fls = do { local $/; <$rf> }; close $rf;
+    return unless $fls =~ /^OUTPUT \\Q$ledger\\E\\r?$/m;
+    return unless open(my $xf, '<', $ledger);
+    my $xml = do { local $/; <$xf> }; close $xf;
+    return unless $xml =~ /<!-- logreq request file -->/;
+    my @owners = ($xml =~ /<(?:internal|external)\\s+package="([^"]+)"/g);
+    return unless @owners && !grep { $_ ne 'biblatex' } @owners;
+    rdb_remove_files($rule, $ledger);
+    # Public latexmk hooks report success with zero.
+    return 0;
+  });`;
 }
 
 /**
@@ -584,20 +572,4 @@ function isInside(p: string, dir: string): boolean {
   const a = resolve(p);
   const d = resolve(dir);
   return a === d || a.startsWith(d.endsWith(sep) ? d : d + sep);
-}
-
-/** Kill a spawned TeX tool and its children (latexmk runs the engine). */
-export function killTree(child: ChildProcess): void {
-  if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
-  try {
-    if (process.platform === "win32") {
-      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        windowsHide: true,
-      });
-    } else {
-      process.kill(-child.pid, "SIGTERM");
-    }
-  } catch {
-    child.kill("SIGTERM");
-  }
 }
