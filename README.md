@@ -48,7 +48,7 @@ For enhanced editing, install [texlab](https://github.com/latex-lsp/texlab) sepa
 
 ### Community directory
 
-Use the [community listing](https://community.obsidian.md/plugins/latex-live) after it is published. During initial review, the GitHub release provides the manual installation path.
+Open the [LaTeX Live community listing](https://community.obsidian.md/plugins/latex-live), choose **Add to Obsidian**, then enable **LaTeX Live**.
 
 ### Manual installation
 

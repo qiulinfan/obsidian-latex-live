@@ -48,7 +48,7 @@
 
 ### 社区目录
 
-上架后可使用[社区插件页面](https://community.obsidian.md/plugins/latex-live)。首次审核期间，可从 GitHub Release 手动安装。
+打开 [LaTeX Live 社区页面](https://community.obsidian.md/plugins/latex-live)，点击 **Add to Obsidian**，然后启用 **LaTeX Live**。
 
 ### 手动安装
 
