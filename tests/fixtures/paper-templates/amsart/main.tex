@@ -1,0 +1,63 @@
+\documentclass{amsart}
+\usepackage{graphicx,hyperref}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+\numberwithin{equation}{section}
+\begin{document}
+\title[Synthetic audit]{Synthetic AMS compatibility audit}
+\author{Alpha Author}
+\address{Department Alpha, Synthetic Institute One}
+\curraddr{Current Department Alpha, Synthetic Institute One}
+\email{alpha@example.invalid}
+\thanks{Synthetic support statement for Alpha.}
+\author{Beta Author}
+\address{Department Beta, Synthetic Institute Two}
+\email{beta@example.invalid}
+\thanks{Synthetic support statement for Beta.}
+\subjclass[2020]{Primary 05C50; Secondary 15A18}
+\keywords{bounded graph, spectral inequality}
+\date{}
+\dedicatory{Dedicated to synthetic examples}
+\begin{abstract}
+We prove a synthetic bound for a two-vertex graph. This abstract is original audit text.
+\end{abstract}
+\maketitle
+\section{The bound}\label{sec:bound}
+\begin{definition}[Graph]\label{def:graph}
+Let $G$ have two vertices and one edge.
+\end{definition}
+\begin{theorem}[Energy]\label{thm:energy}
+For $x,y\in\mathbb{R}$, $(x-y)^2\geq 0$.
+\end{theorem}
+\begin{proof}
+Expand the square in equation~\eqref{eq:energy}.
+\end{proof}
+\begin{align}
+E(x,y)&=(x-y)^2\label{eq:energy}\\
+&=x^2-2xy+y^2.\label{eq:expand}
+\end{align}
+\begin{lemma}\label{lem:zero}
+If $x=y$, the energy vanishes.
+\end{lemma}
+\begin{remark}
+This is a synthetic example, cited as~\cite{synthetic}.
+\end{remark}
+\begin{figure}[ht]
+\centering\includegraphics[width=25mm]{audit.png}
+\caption{Synthetic two-color audit image}\label{fig:image}
+\end{figure}
+\begin{table}[ht]
+\caption{Synthetic values}\label{tab:values}
+\centering\begin{tabular}{lc}\hline Case&Energy\\\hline Equal&0\\Distinct&1\\\hline\end{tabular}
+\end{table}
+By Theorem~\ref{thm:energy} and Lemma~\ref{lem:zero}, see Figure~\ref{fig:image} and Table~\ref{tab:values}.
+\appendix
+\section{Additional identity}\label{sec:appendix}
+\begin{equation}\label{eq:appendix}1+1=2.\end{equation}
+\bibliographystyle{amsplain}
+\bibliography{references}
+\end{document}

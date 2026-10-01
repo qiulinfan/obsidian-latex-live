@@ -497,6 +497,28 @@
   Cards are `lsp-lp-paper ll-fragment` (`is-inverted` as crops), drawn as PNG data URLs.
 - HTML export (`src/export/`, docs/design.md "HTML 导出"): pure Node-compatible source,
   math, probe, fragments and page pipeline. Tests use `tests/support/exportHost.ts`.
+  - Paper template coverage and receipts live in `docs/template-compatibility.md`
+    and `tests/fixtures/paper-templates/`. Test semantic content independently
+    of warning counts: titles, every author/affiliation, abstracts and keywords
+    can be silently lost. Publisher classes remain unchanged test dependencies.
+    `scripts/fetch-paper-templates.mjs` verifies the external Springer files in
+    ignored cache; never vendor its restricted standalone class. A generated
+    current ACM class must retain its original dtx/ins source.
+  - `frontmatter.ts` collects source declarations and real author relationships,
+    including body declarations and AASTeX701's first-section title trigger.
+    Preserve source file/visit provenance, star/short-name/ORCID meanings and
+    native anonymous flags. PLOS's handwritten header stays ordinary content.
+    Consume only represented title/author/abstract TOC roles through the title's
+    read-ahead point; ordinary numbered sections remain untouched.
+  - The parser uses `Definitions.declarations` for complete effective public
+    interfaces, including readers inside atletter scopes. Its provide/order
+    semantics match source execution; MathJax still receives only its original
+    filtered statement stream and bounded unsupported-definition messages.
+  - Citation defaults and punctuation come from TeX: natbib cite aliases, active
+    cite-package delimiters/dashes/options, and the native equation-label side.
+    Bibliography wrapper vocabulary is scoped to bibliography content; ACM's
+    explicit article-title override wins. Native PDF comparisons cover these
+    publisher behaviors, not only values inferred from earlier HTML output.
   - Flush the current project input graph from editor buffers, bibliographies,
     recorded dependencies and same-root views, including files outside the root
     folder. A requested build must see a subsequent full `start` before accepting

@@ -1,0 +1,53 @@
+% Original synthetic content exercising the unmodified REVTeX4-2 class.
+\documentclass[aip,jcp,reprint,author-year,superscriptaddress,amsmath,amssymb]{revtex4-2}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\newcommand{\mean}[1]{\langle #1\rangle}
+\newtheorem{proposition}{Proposition}
+\begin{document}
+\title{Synthetic two-column physics audit}
+\author{Ada Audit}
+\email{ada@example.invalid}
+\affiliation{Department of Physics, Synthetic University}
+\author{Ben Check}
+\affiliation{Institute of Model Systems, Synthetic Laboratory}
+\date{September 30, 2026}
+\begin{abstract}
+A synthetic manuscript checks energy conservation, figure captions, cross references, and author metadata.
+\end{abstract}
+\maketitle
+\section{Dynamics}\label{sec:dynamics}
+The conserved energy is $E = \mean{H}$. Equation~\eqref{eq:energy} and Fig.~\ref{fig:one} describe the system.
+Prior synthetic work is cited numerically or by author and year~\cite{audit2024}; the textual form is \citet{check2025}.
+\begin{equation}
+E(t)=\frac{m v(t)^2}{2}+\frac{k x(t)^2}{2}.\label{eq:energy}
+\end{equation}
+\begin{widetext}
+\begin{align}
+x(t)&=A\cos(\omega t),\label{eq:x}\\
+v(t)&=-A\omega\sin(\omega t).\label{eq:v}
+\end{align}
+\end{widetext}
+\begin{proposition}[Conservation]\label{prop:one}
+For $m\omega^2=k$, the energy is constant.
+\end{proposition}
+\begin{figure}
+\includegraphics[width=.8\columnwidth]{signal.png}
+\caption{Synthetic oscillator signal.}\label{fig:one}
+\end{figure}
+\begin{table}
+\caption{Synthetic measured values.}\label{tab:one}
+\begin{ruledtabular}
+\begin{tabular}{cc}
+Quantity & Value\\
+Mass & 1\\
+Spring & 4
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+Table~\ref{tab:one} supplies parameters; Proposition~\ref{prop:one} supplies the claim.
+\begin{acknowledgments}
+This is an original compatibility fixture and contains no real research findings.
+\end{acknowledgments}
+\bibliography{refs}
+\end{document}

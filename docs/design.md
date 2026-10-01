@@ -1586,3 +1586,13 @@ XeLaTeX 四遍占主要时间，Biber 约 0.43 s。现在通过 latexmk 公开�
 真实 65 页生产样本三遍 XeLaTeX，冷导出 11.335 s（构建 8.240 s、探针 2.463 s）；新鲜构建 2.931 s，
 HTML 完全相同、零报告项。65 页冷态 10 s 目标仍未达到，不能以 warm-only 数据替代。
 用户明确决定将 10 s 作为后续优化目标，先进入功能研发。
+
+### 跨领域论文模板（2026-09-30）
+
+以 PLOS、Springer Nature、REVTeX APS/AIP、AASTeX、AMS、LNCS、ACM（含当前 2.20）和 IEEE 的原生类/样式做校准，
+原创短稿的 11 配置完整内容验收通过，零警告。补齐正文与导言区前置信息、多作者/机构关系、摘要/关键词/分类、
+AASTeX 隐式标题、LNCS 定理、原生编号左右侧、出版者文献包装和引用默认/标点；ACM 匿名/公开两配置按 PDF 核对。
+解析器保留完整有效公开声明，MathJax 输入与错误消息仍按原边界过滤。完整测试 688/688、零跳过，构建通过。
+
+来源、版本、许可证、校验值、回归命令及实际显示检查边界见 [template-compatibility.md](template-compatibility.md)。
+HTML 仍是可重排阅读版；原生 PDF 保留投稿版式。实时 citation chips 的作者年份摘要仍是已有边界。

@@ -1,0 +1,43 @@
+% Original synthetic content using the unmodified IEEEtran conference class.
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath,amssymb,graphicx,cite,hyperref}
+\newcommand{\mean}[1]{\overline{#1}}
+\newtheorem{claim}{Claim}[section]
+\title{Synthetic computer science compatibility audit}
+\author{\IEEEauthorblockN{Ada Audit}\IEEEauthorblockA{Department of Computing\\Synthetic University\\ada@example.invalid}\and\IEEEauthorblockN{Ben Check}\IEEEauthorblockA{Systems Institute\\Synthetic Laboratory\\ben@example.invalid}}
+\begin{document}
+\maketitle
+\begin{abstract}
+An original synthetic manuscript checks template metadata, formulas, references, figures and tables.
+\end{abstract}
+\begin{IEEEkeywords}
+synthetic, compatibility, estimator
+\end{IEEEkeywords}
+\section{Synthetic estimator}\label{sec:one}
+A synthetic estimator has mean $\mean{x}$. See Equation~\eqref{eq:one}, Figure~\ref{fig:one}, Table~\ref{tab:one}, and Claim~\ref{cl:one}. Our synthetic comparison cites~\cite{audit2024,check2025}.
+\begin{equation}
+\mean{x} = \frac{1}{n}\sum_{i=1}^n x_i.\label{eq:one}
+\end{equation}
+\begin{claim}[Bound]\label{cl:one}
+If $0\leq x_i\leq 1$, then $0\leq\mean{x}\leq 1$.
+\end{claim}
+
+\begin{figure}
+\includegraphics[width=.75\columnwidth]{signal.png}
+\caption{Synthetic experiment signal.}\label{fig:one}
+\end{figure}
+\begin{table}
+\caption{Synthetic input counts.}\label{tab:one}
+\begin{tabular}{cc}
+Dataset & Count\\
+\hline
+Alpha & 8\\
+Beta & 16
+\end{tabular}
+\end{table}
+\appendix
+\section{Synthetic supplement}\label{sec:supplement}
+This supplement gives no real scientific claim. Return to Section~\ref{sec:one}.
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+\end{document}

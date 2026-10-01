@@ -1,0 +1,41 @@
+{
+  "retrieved": "2026-09-30",
+  "plos": {
+    "official_page": "https://journals.plos.org/plosone/s/latex",
+    "download": "https://journals.plos.org/plosone/s/file?id=1457/PLOS_latex_template.zip",
+    "archive_sha256": "ea3a8a0fdbac77f95de47639541b09ef1583e059ace6783367490af9fa0b9a60",
+    "version": "3.8 Apr 2026",
+    "vendored": {
+      "plos2025.bst": {
+        "sha256": "8470ef5e547189a61d8eef2cfd7a65fbb84b77b881ccb42ed6815da86a04c490",
+        "license": "LPPL-1.3-or-later",
+        "license_evidence": "file header lines 22-28"
+      }
+    },
+    "template_license": "No file-specific license; official sample .tex excluded from publishable candidate; current terms other-content clause is recorded only as background."
+  },
+  "springer": {
+    "official_page": "https://www.springernature.com/gp/authors/campaigns/latex-author-support",
+    "download": "https://cms-resources.apps.public.k8s.springernature.io/springer-cms/rest/v1/content/18782940/data/v12",
+    "archive_sha256": "812e76dcaa9c28dc1bff1fb6065d51729b67d4ea140552a05088317414a3ecae",
+    "version": "template 3.1 December 2024; class internal 2019/11/18 v0.1",
+    "external": {
+      "sn-jnl.cls": {
+        "sha256": "36d0c3273a59d48dc6a9c7b080dfa1ec50dc10229d8751568d1f2e490ffa5ecc",
+        "license": "LPPL-1.3c-or-later",
+        "additional_notice": "File says distribute only together with a copy of the LaTeX base system; not vendored.",
+        "line_endings": "CR only; kept original bytes"
+      },
+      "sn-vancouver-num.bst": {
+        "sha256": "7fa6df12ec8e8945c86958a50fb703d181522745adcf72bf95a86f3633540e8a",
+        "license": "LPPL-1.3-or-later",
+        "version": "2024/07/19 v1.1"
+      }
+    }
+  },
+  "peerj": {
+    "official_page": "https://www.overleaf.com/latex/templates/latex-template-for-peerj-journal-submissions/ptdwfrqxqzbn",
+    "gallery_license": "CC BY 4.0",
+    "not_selected": "Official class download requires authenticated template creation. A GPL-3 rticles copy was inspected only, not used as official evidence."
+  }
+}

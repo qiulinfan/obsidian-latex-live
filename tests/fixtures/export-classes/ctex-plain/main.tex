@@ -1,0 +1,18 @@
+\documentclass[fontset=fandol,scheme=plain]{ctexart}
+\usepackage{amsthm,hyperref}
+\newtheorem{theorem}{Theorem}[section]
+\title{Synthetic Plain Scheme}
+\author{Author C}
+\date{2026-09-30}
+\begin{document}
+\maketitle
+\begin{abstract}中文内容。\end{abstract}
+\tableofcontents
+\section{Basics}\label{sec:intro}
+\begin{theorem}[Finite]\label{thm:one}
+A theorem body.
+\end{theorem}
+\begin{proof}A proof body.\end{proof}
+\begin{figure}\centering\caption{Synthetic Figure}\label{fig:one}\end{figure}
+See \ref{thm:one} and \ref{fig:one}.
+\end{document}

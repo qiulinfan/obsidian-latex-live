@@ -1,0 +1,39 @@
+% Original short compatibility manuscript. Upstream sn-jnl class is unmodified.
+\documentclass[pdflatex,sn-vancouver-num]{sn-jnl}
+\usepackage{graphicx,amsmath,amssymb,amsthm,booktabs}
+\theoremstyle{thmstyleone}
+\newtheorem{theorem}{Theorem}
+\begin{document}
+\title[Cell-growth compatibility]{Synthetic cell-growth manuscript for template compatibility}
+\author*[1]{\fnm{Ada} \sur{Botanist}}\email{ada@example.invalid}
+\author[2]{\fnm{Ben} \sur{Biologist}}\email{ben@example.invalid}
+\affil*[1]{\orgdiv{Department of Biology},\orgname{Synthetic University},\orgaddress{\city{Example City},\country{Exampleland}}}
+\affil[2]{\orgdiv{Institute of Ecology},\orgname{Synthetic University},\orgaddress{\city{Example City},\country{Exampleland}}}
+\abstract{This synthetic study measures cell growth in two culture conditions. This is original test text and describes no real experiment.}
+\keywords{cell growth, template compatibility, synthetic data}
+\maketitle
+\section{Introduction}\label{sec:intro}
+We compare a dimensionless cell population $N(t)$ and cite a synthetic baseline \cite{synthetic}.
+\section{Methods}\label{sec:methods}
+A logistic model is
+\begin{equation}\label{eq:growth}
+\frac{dN}{dt}=rN\left(1-\frac{N}{K}\right).
+\end{equation}
+Equation~\eqref{eq:growth} describes the model; Section~\ref{sec:methods} defines the experiment.
+\begin{theorem}[Nonnegative population]\label{thm:positive}
+For positive initial populations the synthetic model preserves positivity.
+\end{theorem}
+\begin{figure}[ht]
+\centering
+\includegraphics[width=.45\linewidth]{cells.png}
+\caption{Synthetic culture marker.}\label{fig:cells}
+\end{figure}
+\begin{table}[ht]
+\centering
+\caption{Synthetic population values.}\label{tab:counts}
+\begin{tabular}{lr}\toprule Condition & Count \\\midrule Control & 10 \\ Treated & 20 \\\bottomrule\end{tabular}
+\end{table}
+\section{Results}
+Figure~\ref{fig:cells} and Table~\ref{tab:counts} present the synthetic observations.
+\bibliography{refs}
+\end{document}

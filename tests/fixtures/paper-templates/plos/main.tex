@@ -1,0 +1,61 @@
+% Original synthetic regression manuscript, inspired by the PLOS 3.8 package.
+% This source is authored for obsidian-latex-live; it contains no paper text.
+\documentclass[10pt,letterpaper]{article}
+\usepackage[top=.85in,left=2.75in,footskip=.75in]{geometry}
+\usepackage{amsmath,amssymb,changepage,textcomp,marvosym,cite,nameref,hyperref}
+\usepackage[right]{lineno}
+\usepackage[nopatch=eqnum]{microtype}
+\DisableLigatures[f]{encoding=*,family=*}
+\usepackage[table]{xcolor}
+\usepackage{array,graphicx,lastpage,fancyhdr,epstopdf}
+\usepackage[aboveskip=1pt,labelfont=bf,labelsep=period,justification=raggedright,singlelinecheck=off]{caption}
+\renewcommand{\figurename}{Fig}
+\bibliographystyle{plos2025}
+\raggedright
+\setlength{\parindent}{.5cm}
+\setlength{\textwidth}{5.25in}
+\setlength{\textheight}{8.75in}
+\makeatletter
+\renewcommand{\@biblabel}[1]{\quad#1.}
+\makeatother
+\pagestyle{fancy}
+\fancyhf{}
+\rfoot{\thepage/\pageref{LastPage}}
+\lfoot{\today}
+\renewcommand{\headrulewidth}{0pt}
+\begin{document}
+\begin{flushleft}
+{\Large\textbf{Synthetic cell-growth manuscript for template compatibility}}
+\\
+Ada Botanist\textsuperscript{1,*}, Ben Biologist\textsuperscript{2}
+\\
+\textbf{1} Department of Biology, Synthetic University, Example City
+\\
+\textbf{2} Institute of Ecology, Synthetic University, Example City
+\\
+* ada@example.invalid
+\end{flushleft}
+\section*{Abstract}
+This synthetic study measures cell growth in two culture conditions. This is original test text and describes no real experiment.
+\section{Introduction}\label{sec:intro}
+We compare a dimensionless cell population $N(t)$ and cite a synthetic baseline \cite{synthetic}.
+\section{Methods}\label{sec:methods}
+A logistic model is
+\begin{equation}\label{eq:growth}
+\frac{dN}{dt}=rN\left(1-\frac{N}{K}\right).
+\end{equation}
+Equation~\eqref{eq:growth} describes the model; Section~\ref{sec:methods} defines the experiment.
+\begin{figure}[ht]
+\centering
+\includegraphics[width=.45\linewidth]{cells.png}
+\caption{Synthetic culture marker.}\label{fig:cells}
+\end{figure}
+\begin{table}[ht]
+\centering
+\caption{Synthetic population values.}\label{tab:counts}
+\begin{tabular}{lr}\hline Condition & Count \\\hline Control & 10 \\ Treated & 20 \\\hline\end{tabular}
+\end{table}
+\section{Results}
+Figure~\ref{fig:cells} and Table~\ref{tab:counts} present the synthetic observations.
+\bibliography{refs}
+\end{document}

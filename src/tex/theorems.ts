@@ -154,6 +154,13 @@ const ELEGANT_HEADS: readonly (readonly [env: string, role: TheoremRole, counter
   ["custom", "third", null, "name"],
 ];
 
+/** llncs.cls 2.26's native \spnewtheorem environments (not amsthm). */
+const LNCS_ENVS = ["theorem", "claim", "proof", "case", "conjecture", "corollary", "definition", "example", "exercise", "lemma", "note", "problem", "property", "proposition", "question", "solution", "remark"];
+const LNCS_NAMES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  fr: { claim: "Prétention", conjecture: "Hypothèse", corollary: "Corollaire", definition: "Définition", example: "Exemple", exercise: "Exercice", lemma: "Lemme", note: "Remarque", problem: "Problème", proof: "Preuve", property: "Caractéristique", remark: "Remarque", theorem: "Théorème" },
+  de: { claim: "Behauptung", conjecture: "Hypothese", corollary: "Korollar", example: "Beispiel", exercise: "Übung", note: "Anmerkung", proof: "Beweis", property: "Eigenschaft", question: "Frage", remark: "Anmerkung", solution: "Lösung" },
+};
+
 const STYLE_ROLES: Record<string, TheoremRole> = { defstyle: "main", thmstyle: "second", prostyle: "third" };
 const ROLES: readonly TheoremRole[] = ["main", "second", "third"];
 
@@ -168,6 +175,8 @@ const ELEGANTNEWTHEOREM = new RegExp(
   String.raw`\\elegantnewtheorem\s*\{\s*([^{}\s]+)\s*\}\s*${ARG}\s*\{\s*([A-Za-z]*)\s*\}(?:\s*\{\s*([^{}\s]*)\s*\})?(?:\s*\[\s*([^\]\s]*)\s*\])?`,
   "g",
 );
+/** Springer's numbered/shared or starred theorem: env, shared, caption, within, head, body. */
+const SPNEWTHEOREM = new RegExp(String.raw`\\spnewtheorem(\*?)\s*\{\s*([^{}\s]+)\s*\}\s*(?:\[\s*([^\]\s]*)\s*\]\s*)?${ARG}\s*(?:\[\s*([^\]\s]*)\s*\]\s*)?${ARG}\s*${ARG}`, "g");
 
 const rgb = ([r, g, b]: Rgb): string => `rgb(${r}, ${g}, ${b})`;
 
@@ -193,10 +202,11 @@ export function theoremMap(sources: readonly string[]): TheoremMap {
   const className = cls?.[2] ?? "";
   const options = classOptions(cls?.[1]);
   const elegant = className === "elegantbook";
+  const elegantArticle = className === "elegantnote" || className === "elegantpaper";
   // elegantbook: `lang=cn` or a bare `cn`, `mode=simple` or a bare `simple`, `color=..` or a bare scheme name.
   const pick = (key: string, values: readonly string[], fallback: string) =>
     options.get(key) || values.find((v) => options.has(v)) || fallback;
-  const lang = pick("lang", ["cn", "en", "it", "fr", "nl", "hu", "de", "mn", "pt", "jp"], "en") === "cn" ? "cn" : "en";
+  const lang = pick("lang", ["cn", "en", "it", "fr", "nl", "hu", "de", "mn", "pt", "jp"], className === "elegantnote" ? "cn" : "en") === "cn" ? "cn" : "en";
   const tcb = elegant && pick("mode", ["fancy", "simple"], "fancy") !== "simple";
   const scheme = ELEGANT_SCHEMES[pick("color", Object.keys(ELEGANT_SCHEMES), "blue")] ?? null;
   // elegantbook numbers its theorems within `thmcnt` (chapter, or a bare `section`), on one shared
@@ -205,7 +215,7 @@ export function theoremMap(sources: readonly string[]): TheoremMap {
   const sameCounter = options.has("usesamecnt") && options.get("usesamecnt") !== "false";
   // elegantbook's simple mode loads amsthm, but its heads (and the theorem style it leaves
   // current) print no period.
-  const amsthm = packages.has("amsthm") || /^ams(?:art|book|proc)$/.test(className) || (elegant && !tcb);
+  const amsthm = packages.has("amsthm") || /^ams(?:art|book|proc)$/.test(className) || (elegant && !tcb) || elegantArticle;
   const period = amsthm && !elegant ? "." : "";
   const ctex = /^ctex(?:art|rep|book|beamer)$/.test(className) || (packages.has("ctex") && !/scheme\s*=\s*plain/.test(packages.get("ctex")!));
   const colour = (role: TheoremRole | null): string | null => (role && scheme ? rgb(scheme[ROLES.indexOf(role)]) : null);
@@ -214,7 +224,18 @@ export function theoremMap(sources: readonly string[]): TheoremMap {
   const counterOf = (shared: string): string | null => out.get(shared)?.counter ?? null;
 
   if (amsthm || ctex) {
-    out.set("proof", { ...base, name: ctex ? "证明" : "Proof", numbered: false, spec: "o", title: "replace", punct: period, qed: amsthm ? "□" : null });
+    out.set("proof", { ...base, name: ctex || (elegantArticle && lang === "cn") ? "证明" : "Proof", numbered: false, spec: "o", title: "replace", punct: period, qed: amsthm ? "□" : null });
+  }
+  if (className === "llncs") {
+    const names = LNCS_NAMES[options.has("deutsch") ? "de" : options.has("francais") ? "fr" : "en"] ?? {};
+    for (const env of LNCS_ENVS) out.set(env, {
+      ...base, name: names[env] ?? env[0].toUpperCase() + env.slice(1),
+      numbered: env !== "proof" && env !== "claim", spec: "o", title: "paren", punct: ".", nameMacro: true,
+      // envcountsame uses alias counters: TeX steps the environment's own name. LNCS does
+      // not satisfy live preview's chapter-qualified auto-number evidence; labelled heads
+      // use the real .aux. Proof is unnumbered, accepts `(title)` and has no automatic QED.
+      counter: null, qed: null,
+    });
   }
   /** elegantbook's theorems (built in or \elegantnewtheorem'd): tcolorboxes, or amsthm ones in simple mode. */
   const elegantTheorem = (env: string, name: string, prefix: string, role: TheoremRole | null, shared = "") => {
@@ -246,6 +267,13 @@ export function theoremMap(sources: readonly string[]): TheoremMap {
       const [, star, env, shared, title, within] = m;
       const counter = star ? null : shared ? counterOf(shared) : within === "chapter" ? env : null;
       out.set(env, { ...base, name: texText(title), numbered: !star, spec: "o", punct: period, user: true, counter });
+    }
+    for (const m of src.matchAll(SPNEWTHEOREM)) {
+      const [, star, env, , caption, , head, body] = m;
+      // Native declarations have a simple caption and these verified font contracts. A
+      // custom typesetter/font remains source in live mode and a real TeX export fragment.
+      if (/[\\$]/.test(caption) || !["\\bfseries", "\\itshape"].includes(head.replace(/\s+/g, "")) || !["\\itshape", "\\rmfamily"].includes(body.replace(/\s+/g, ""))) continue;
+      out.set(env, { ...base, name: texText(caption), numbered: !star, spec: "o", title: "paren", punct: ".", nameMacro: true, user: true, counter: null });
     }
     if (!elegant) continue;
     for (const m of src.matchAll(ELEGANTNEWTHEOREM)) elegantTheorem(m[1], texText(m[2]), m[4] || m[1], STYLE_ROLES[m[3]] ?? null, m[5]);

@@ -1,0 +1,45 @@
+{
+  "retrieved": "2026-09-30",
+  "templates": [
+    {
+      "name": "amsart-template",
+      "url": "https://mirrors.ctan.org/macros/latex/required/amscls/amsart-template.tex",
+      "license": "LPPL 1.3c or later",
+      "version": "template 1.1 (2014-07-24)",
+      "sha256": "be065f863d2b4b1e17ced203583641c6b59a2b9d33053203f9ae6582806a1345",
+      "bytes": 1982,
+      "classModified": false,
+      "source_file": "amsart-template.tex",
+      "vendored": false
+    },
+    {
+      "name": "amsart-class",
+      "url": "https://ctan.org/pkg/amscls",
+      "license": "LPPL 1.3c or later",
+      "version": "class 2.20.6 (2020-05-29)",
+      "sha256": "c8bf939ae935d62d4ced49e4e8f9f4f5ff3dd4a4bc8e0abd4991f5737caee4f7",
+      "bytes": 61881,
+      "classModified": false,
+      "source_file": "amsart.cls",
+      "vendored": false
+    },
+    {
+      "name": "llncs-class",
+      "url": "https://ctan.org/pkg/llncs",
+      "license": "CC BY 4.0 or later",
+      "version": "class 2.26 (2025-02-25)",
+      "sha256": "e9894c92191fcd195eef3120a36d2f75b52030eadcbdc3ce1463179746526e6a",
+      "bytes": 43405,
+      "classModified": false,
+      "source_file": "llncs.cls",
+      "vendored": false
+    }
+  ],
+  "remote_calibration": {
+    "url": "https://mirrors.ctan.org/macros/latex/required/amscls.zip",
+    "member": "amscls/doc/amsart-template.tex",
+    "sha256": "be065f863d2b4b1e17ced203583641c6b59a2b9d33053203f9ae6582806a1345",
+    "matchesInstalledTemplate": true
+  },
+  "lncs_demo_boundary": "Official llncsdoc sample requires llncsdoc.sty, absent from this installed package; original full demo not claimed as calibrated. Original synthetic manuscript on unchanged llncs2.26 passed."
+}

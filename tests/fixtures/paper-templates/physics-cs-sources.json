@@ -1,0 +1,174 @@
+{
+  "retrieved": "2026-09-30",
+  "scope": "Original short synthetic manuscripts; unmodified class files. Templates are research/test dependencies; no TeX engine bundled.",
+  "revtex": {
+    "version": "4.2f",
+    "class_date": "2022/06/05",
+    "official_page": "https://journals.aps.org/revtex",
+    "package": "https://ctan.org/pkg/revtex",
+    "license": "LPPL-1.3c",
+    "installed_package": "TeX Live revtex",
+    "class_sha256": "58727044fa47fff2663615774f8f24baab978944bbc55f84f8dc08ef91f67358",
+    "fixtures": [
+      "revtex-aps",
+      "revtex-aip"
+    ],
+    "original_demo_calibration": {
+      "file": "apssamp.tex",
+      "pages": 7,
+      "error_diagnostics": 0
+    },
+    "class_vendored": false
+  },
+  "aastex": {
+    "version": "7.0.1",
+    "class_date": "2025/05/09",
+    "official_page": "https://journals.aas.org/aastex-package-for-manuscript-preparation/",
+    "package": "https://ctan.org/pkg/aastex",
+    "repository": "https://github.com/AASJournals/AASTeX7",
+    "license": "LPPL-1.3c-or-later",
+    "installed_package": "TeX Live aastex",
+    "class_sha256": "c1bb436807f8bb37eb5203056db5a5a60e1c9ae6a3feb6501d7c414b9b08b062",
+    "fixtures": [
+      "aastex"
+    ],
+    "original_demo_calibration": {
+      "file": "aastex701-sample.tex",
+      "pages": 8,
+      "error_diagnostics": 0
+    },
+    "class_vendored": false,
+    "version_boundary": "Publisher currently advertises 7.0.2; this installed-version test covers 7.0.1 only."
+  },
+  "acmart_installed": {
+    "version": "2.16",
+    "class_date": "2025/08/27",
+    "official_page": "https://www.acm.org/publications/proceedings-template",
+    "package": "https://ctan.org/pkg/acmart",
+    "maintainer": "https://github.com/borisveytsman/acmart",
+    "license": "LPPL-1.3-or-later",
+    "installed_package": "TeX Live acmart",
+    "class_sha256": "6895475b24fe526c12831f5cc1d16f37218ce5d65161f811dde4bce8dc4551b9",
+    "source_dtx_sha256": "cea16056a131d0c48f997a9c25524c1b9093cdc3d5d3a2bdcb8f2b56c3de4298",
+    "fixtures": [
+      "acmart-sigconf",
+      "acmart-small"
+    ],
+    "original_demo_calibration": {
+      "file": "sample-sigconf.tex",
+      "pages": 6,
+      "error_diagnostics": 0
+    },
+    "class_vendored": false,
+    "distribution_condition": "Generated cls must be distributed with original dtx source. Runtime tests use the installed package."
+  },
+  "acmart_current": {
+    "version": "2.20",
+    "class_date": "2026/08/16",
+    "package": "https://ctan.org/pkg/acmart",
+    "download": "https://mirrors.ctan.org/macros/latex/contrib/acmart.zip",
+    "archive_sha256": "93933ce58fbeffa13e23398bb523fcb68275ecc73369c6bc73b421eeef2c10de",
+    "class_sha256": "784c4f2fb07a70d8a797ee9d1c63f441c10fbd2f915c9c615d28cda35c0b742a",
+    "source_dtx_sha256": "e29efd327f5c759f3d1f2e99dc8588c6a05b734c142f89c3e348161b893e44ff",
+    "license": "LPPL-1.3-or-later",
+    "class_vendored": false,
+    "reproduction": "Fetch only when the archive SHA256 matches; generate unchanged acmart.ins with local runTex; use fixture-local cls with paired dtx and original BST. Set PAPER_TEMPLATE_ACM_CURRENT_DIR; no global install or default-test download.",
+    "original_demo_calibration": {
+      "file": "sigconf.tex generated unchanged from samples.dtx/samples.ins",
+      "pages": 6,
+      "error_diagnostics": 0
+    }
+  },
+  "ieeetran": {
+    "version": "1.8b",
+    "class_date": "2015/08/26",
+    "package": "https://ctan.org/pkg/ieeetran",
+    "maintainer": "https://www.michaelshell.org/tex/ieeetran/",
+    "license": "LPPL-1.3",
+    "installed_package": "TeX Live ieeetran",
+    "class_sha256": "da751920a317ed318b7b5cd7fa585a6cc7d28502d457856382e9be24b10a3bd7",
+    "fixtures": [
+      "ieee-conference"
+    ],
+    "original_demo_calibration": {
+      "file": "bare_conf.tex",
+      "pages": 1,
+      "error_diagnostics": 0
+    },
+    "class_vendored": false
+  },
+  "synthetic_files": {
+    "revtex-aps/main.tex": {
+      "sha256": "b09ad4fac9d53e5a1cf8276d3cc7df20cb863b50654c9b56f101b76c6e279c30",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "revtex-aps/refs.bib": {
+      "sha256": "488ac2d934d0361fa04d4481648e017f81889fbfa5722951d3b7d0a05b47b1ab",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "revtex-aps/signal.png": {
+      "sha256": "7aef2d2b821eb1104f0c6e36d893ef7031c9d9cf672585a7b1ebbff71371b218",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "revtex-aip/main.tex": {
+      "sha256": "3e42ad1f7fd100cbea459945c0fc25ffb3de2cfa1f561290d422ecb1eb317c91",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "revtex-aip/refs.bib": {
+      "sha256": "488ac2d934d0361fa04d4481648e017f81889fbfa5722951d3b7d0a05b47b1ab",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "revtex-aip/signal.png": {
+      "sha256": "7aef2d2b821eb1104f0c6e36d893ef7031c9d9cf672585a7b1ebbff71371b218",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "aastex/main.tex": {
+      "sha256": "fdc8af6785ed76bd6509de270e34999058e6d9e9532810f7a9dc8ac5de6e61fb",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "aastex/refs.bib": {
+      "sha256": "488ac2d934d0361fa04d4481648e017f81889fbfa5722951d3b7d0a05b47b1ab",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "aastex/signal.png": {
+      "sha256": "7aef2d2b821eb1104f0c6e36d893ef7031c9d9cf672585a7b1ebbff71371b218",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "acmart-sigconf/main.tex": {
+      "sha256": "f4aa4e0d8dcd6d74edce3be8c78c4c821e2ca33da28428ae3f080d605f71f9c2",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "acmart-sigconf/refs.bib": {
+      "sha256": "bb3dc4ebe60f322e7393ab38fc4f85f6d51858cea9d31eba4c8c6a326ad29f0d",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "acmart-sigconf/signal.png": {
+      "sha256": "7aef2d2b821eb1104f0c6e36d893ef7031c9d9cf672585a7b1ebbff71371b218",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "acmart-small/main.tex": {
+      "sha256": "5796af53df2ba9d0254dc9cd4417527c486dd35100a87c00991695ac1f9ac658",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "acmart-small/refs.bib": {
+      "sha256": "bb3dc4ebe60f322e7393ab38fc4f85f6d51858cea9d31eba4c8c6a326ad29f0d",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "acmart-small/signal.png": {
+      "sha256": "7aef2d2b821eb1104f0c6e36d893ef7031c9d9cf672585a7b1ebbff71371b218",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "ieee-conference/main.tex": {
+      "sha256": "faefd1e80f96a6993ab06946fbdba7b0762655876faff5f0806644c91e1bcc77",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "ieee-conference/refs.bib": {
+      "sha256": "bb3dc4ebe60f322e7393ab38fc4f85f6d51858cea9d31eba4c8c6a326ad29f0d",
+      "authority": "original synthetic content generated for compatibility testing"
+    },
+    "ieee-conference/signal.png": {
+      "sha256": "7aef2d2b821eb1104f0c6e36d893ef7031c9d9cf672585a7b1ebbff71371b218",
+      "authority": "original synthetic content generated for compatibility testing"
+    }
+  }
+}
