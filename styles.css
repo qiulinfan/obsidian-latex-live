@@ -750,3 +750,25 @@
   white-space: pre-wrap;
   user-select: text;
 }
+
+/* The HTML export's progress and completion Notices, its report. */
+.ll-export-cancel {
+  margin-left: 8px;
+}
+.ll-export-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.ll-export-report {
+  width: min(760px, 90vw);
+}
+.ll-export-summary {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  user-select: text;
+  word-break: break-word;
+}
+.ll-export-report .ll-problem {
+  padding-left: 0;
+}

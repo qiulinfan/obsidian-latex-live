@@ -1156,7 +1156,7 @@ algorithm + algpseudocode、`\setcounter{tocdepth}{2}`、`chinesefont=nofont`，
 - [x] S6 浮动体、图片、表格（2026-09-30，见下）：图注（`\caption*`、subcaption 的 `(a)`、`\captionof`）、PNG/JPG/GIF/SVG 图片、
       PDF 图片和 `\includepdf` 的页面（宿主的 `pdfImages`：Obsidian 的 pdf.js）、tabular（l/c/r/p/m/b、竖线、`\hline`、booktabs、
       `\cline`/`\cmidrule`、`\multicolumn`；multirow、colortbl 交给 TeX）、`\lstinputlisting`、algorithm 浮动体。
-- [ ] S7a 界面（2026-09-30，见下）：报告弹窗（按严重程度分组，位置可点）、Open/Reveal（Electron 的 shell）、`exportFolder`
+- [x] S7a 界面（2026-09-30，见下）：报告弹窗（按严重程度分组，位置可点）、Open/Reveal（Electron 的 shell）、`exportFolder`
       设置、会话内记住每个主文件的目标、`.tex` 文件的右键菜单。S7b（以后）：文件夹打包。
 - [x] S8 首版加固：elegantnote/elegantpaper/ctex 配置、`\newenvironment` 展开、`\import`/`\subfile`、带空格和 Unicode 的路径。
       用户以当前验证为基线进入功能研发；65 页冷导出 11.335 s、构建新鲜时 2.931 s，10 s 保留为后续优化目标。
@@ -1560,6 +1560,34 @@ algorithm + algpseudocode、`\setcounter{tocdepth}{2}`、`chinesefont=nofont`，
   没有 dvisvgm 时的降级只看过代码路径，没有测试（要一个有引擎却没有 dvisvgm 的 TeX 目录）；XeLaTeX 片段里的图片；带编号的
   显示公式片段按墨迹框居中，编号不在正文右边（TeX 的行宽和左边距没有传给 SVG）。
 
+### S7a：界面（2026-09-30）
+
+- **完成的 Notice**：摘要（`Exported main.html (大小, 时间): n TeX fragments, n warnings`）下面三个按钮，停留 15 s：Open（Electron 的
+  `shell.openPath`，用系统的浏览器打开；失败时一条 Notice）、Reveal（`shell.showItemInFolder`）、Report。
+- **报告弹窗 `ExportReportModal`**：文件、大小、引擎、配置、总时间和各阶段的时间，数量（标题、公式、定理、片段、图片、文献条目），
+  Open/Reveal 按钮；条目按 错误/警告/说明 分组，每条是预览问题列表的 `ll-problem` 行（位置、`[种类] 消息 (×次数)`，没有位置的写种类）；
+  vault 里的位置可以点，关掉弹窗并 `plugin.openLocation(文件, 行)`，vault 外的只显示。`report.json` 仍留在工作目录。
+- **`exportFolder` 设置**（设置页新的 “HTML export” 标题下）：vault 里的文件夹，空是主文件旁边；对话框建议 `<文件夹>/<主文件名>.html`。
+  写入时缺的文件夹会建（vault 里用适配器的 `exists`/`mkdir`，外面用 `fs.mkdir`）。
+- **记住目标**：会话里每个主文件对话框返回的路径（导出失败也记），下次导出建议它，优先于 `exportFolder`。
+- **文件菜单**：`.tex` 文件的右键菜单里 “Export to HTML”（图标 file-output），导出它所属的文档（`rootFor`）。命令仍只在 `.tex` 的
+  LaTeX 编辑器里出现。
+- `ExportIo` 多了 `openPath`、`showItemInFolder`（Electron 的 `shell`），测试可以换。数学的宿主用 MathJax 启动时的文档
+  （`MathJax.startup.document.document`，Obsidian 里就是主窗口的 `document`）：MathJax 的 HTML 处理器只接受自己窗口的文档。
+
+验证（2026-09-30）：
+
+- `tests/exportCommand.test.ts` 2 个，在 Obsidian 替身上（`tests/support/obsidian.ts` 加了：`Notice` 的 `noticeEl`、`setMessage`、`hide`，
+  `Modal`，Obsidian 的 DOM 小工具 `createEl`/`createDiv`/`createSpan`/`empty`/`setText`/`addClass`，`loadPdfJs`）：命令只在 `.tex` 的编辑器
+  里可用；右键菜单只给 `.tex` 文件；取消对话框什么也不写、没有进度；`exportFolder` 的建议；对话框答过的路径下次再建议；构建失败的
+  Notice；没有对话框时写到建议的路径并提示；没有 TeX 时不弹对话框。第二个（有 TeX）：文章夹具的新拷贝（加一个 `\ref{no:such}`），
+  替身会话用插件的 `Compiler` 做完整构建，jsdom 里的 Obsidian MathJax，字体从 MathJax 的字体地址取（测试里的 `fetch` 读 node_modules）；
+  写经 vault 适配器到 `exports/main.html`（先建了 `exports`），`report.json` 在工作目录；完成的 Notice 是 `Exported main.html (… KB, … s): 4 TeX
+  fragments, 1 warning`，Open、Reveal 把目标交给 shell，Report 打开弹窗（`Warnings (1)`、`sections/intro.tex:行 [ref] \ref{no:such}: not in the .aux`），
+  点这一行关掉弹窗并打开那个文件的那一行。第一个 0.3 s，第二个 4.1 s（含完整构建）。
+- 还没做：在真的 Obsidian 里点一次（保存对话框、进度的 Cancel、Open/Reveal、弹窗、写进 vault）；这次不碰任何 vault，`command.ts`
+  的 Obsidian 部分当时只在替身上测过；后续真实保存、报告、Open/Reveal 见下节。S7b（文件夹打包）仍在以后。
+
 
 ## 2026-09-30：首版收尾与后续开发
 
@@ -1596,3 +1624,30 @@ AASTeX 隐式标题、LNCS 定理、原生编号左右侧、出版者文献包�
 
 来源、版本、许可证、校验值、回归命令及实际显示检查边界见 [template-compatibility.md](template-compatibility.md)。
 HTML 仍是可重排阅读版；原生 PDF 保留投稿版式。实时 citation chips 的作者年份摘要仍是已有边界。
+
+### 命令与取消的收尾
+
+导出先保存当前缓冲区输入图、文献、已编译依赖与同主文件编辑器，目录外的章节也覆盖，独立项目不保存。
+等待本次请求之后的 full start，避免采用此前在跑的完整构建结果。外部 HTML 先写临近临时文件，成功且未取消才 rename；
+部分写入失败和取消保留旧文件。vault 内保留 Obsidian adapter.write。
+PDF 的读取和 pdf.js loading/render task 接收信号，取消不用等当前页绘制或 PNG 编码结束，后续页不再启动。
+命令新增 6 个回归（共 8/8），PDF 宿主 4/4；完整测试 573/573、零跳过，构建通过。
+三个基准项目与六个类配置的最终浏览器检查 243/243，包含更新后的日期/字体、明暗主题和窄屏；
+hook 的显式成功返回值补丁另经原生定向回归 2/2。
+
+### 功能研发：代码清单语法着色
+
+`\lstinline`、`lstlisting`、`\lstinputlisting` 复用 Obsidian 公开的 `loadPrism()` 和 `tokenize`。
+探针在 listings 的 `Init` 记录实际语言/方言与关键字、注释、字符串样式，全局 `\lstset`、`style=`、局部选项、
+分组恢复和 class 默认设置都由 TeX 决定。记录按 probe visit 和同行执行顺序消费，SVG 内的代码不重复处理；
+输入子文件之后同一行的父文件 inline 也保留自己的记录。
+
+纯 `listings.ts` 自己转义 token，并核对全文逐字不变；不用 Prism HTML hooks，不把 Prism 打进插件或导出页面。
+支持标准 grammar 的三类 token、简单字体开关和 `\color`，不重实现 listings 的自定义 lexer、`literate`、`escapeinside`。
+不可用的 grammar、复杂样式和不保留源码的 token 流保留完整代码并报告；没有 tokenizer 的 Node 宿主保持既有纯代码输出。
+代码标题、标签、编号及外部文件的 `firstline/lastline` 不变，宿主模块加载等待可以取消。
+
+新增探针 4/4、纯渲染 7/7、入口/取消集成 2/2；完整测试 586/586、零跳过，构建通过。
+使用 Obsidian 1.13.7 自带的原始 `prism.min.js`，三个基准项目的浏览器检查 82/82：关键字、注释、字符串均有 token，
+中文注释保持，明暗主题、窄屏、编号和字体检查通过。`PRISM_JS=/path/to/host/prism.min.js node scripts/export-smoke.mjs`。
+新构建已在 courses 重载，LaTeX 源码改动仍在本地。

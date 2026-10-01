@@ -18,6 +18,7 @@ import { YoloBridge } from "./editor/shared/yoloBridge";
 import type { MathJaxLike } from "./editor/mathjaxProject";
 import { TexRender } from "./editor/texRender";
 import { TexView, VIEW_TYPE_TEX } from "./editor/texView";
+import { registerExport } from "./export/command";
 import { TexlabServer, resolveTexlab, texlabSettings } from "./lsp/texlab";
 import { CropService } from "./preview/blockCrop";
 import { FragmentService } from "./preview/fragments";
@@ -179,6 +180,8 @@ export default class LatexLivePlugin extends Plugin {
         return true;
       },
     });
+
+    registerExport(this);
 
     this.addCommand({
       id: "trigger-completion",

@@ -495,8 +495,14 @@
   `\the<counter>` from its head's number (`boxNumber`), a float's from its label's .aux entry, a float
   as a minipage with `\@captype`.
   Cards are `lsp-lp-paper ll-fragment` (`is-inverted` as crops), drawn as PNG data URLs.
-- HTML export (`src/export/`, docs/design.md "HTML 导出"): pure Node-compatible source,
-  math, probe, fragments and page pipeline. Tests use `tests/support/exportHost.ts`.
+- HTML export (`src/export/`, docs/design.md "HTML 导出"): every module is free of the
+  `obsidian` module except `command.ts` (the command and the .tex files' context menu entry, the
+  save dialog through Electron's `remote` and Open/Reveal through its `shell`, both behind the
+  `ExportIo` wrapper tests replace, the progress and completion Notices, `ExportReportModal`, the
+  `exportFolder` setting and the root's last target in the session, the build through the root's
+  session), so the whole pipeline runs under Node tests against real TeX
+  (`tests/support/exportHost.ts`); `tests/exportCommand.test.ts` runs the command on the Obsidian
+  stand-in. Conventions measurements established:
   - Paper template coverage and receipts live in `docs/template-compatibility.md`
     and `tests/fixtures/paper-templates/`. Test semantic content independently
     of warning counts: titles, every author/affiliation, abstracts and keywords
@@ -519,6 +525,15 @@
     Bibliography wrapper vocabulary is scoped to bibliography content; ACM's
     explicit article-title override wins. Native PDF comparisons cover these
     publisher behaviors, not only values inferred from earlier HTML output.
+  - Code listings use the host's public `loadPrism()` tokenizer, never a bundled
+    lexer or Prism HTML hooks. TeX's listings `Init` hook records the effective
+    language/dialect and unexpanded keyword/comment/string styles after options
+    apply. `StepQueue.takeListing` consumes per probe visit, in source order,
+    excluding fragment records. Inline/block/external code share the pure
+    `listings.ts` renderer; it checks the token stream preserves every character,
+    escapes its own HTML, and reports unavailable grammars/unsupported styles.
+    The host is optional for Node consumers; without it the existing plain-code
+    output remains. `PRISM_JS` lets export-smoke use the exact host script.
   - Flush the current project input graph from editor buffers, bibliographies,
     recorded dependencies and same-root views, including files outside the root
     folder. A requested build must see a subsequent full `start` before accepting

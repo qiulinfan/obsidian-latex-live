@@ -1,5 +1,6 @@
 import { loadPdfJs } from "obsidian";
 import type { PdfBox } from "../tex/synctex";
+import { abortError } from "../tex/run";
 
 // The slice of the pdf.js API (bundled with Obsidian) used here and by PDF crops.
 export interface Viewport {
@@ -35,6 +36,7 @@ interface PdfJs {
     iccUrl?: string;
   }): {
     promise: Promise<PdfDoc>;
+    destroy(): Promise<void>;
   };
 }
 
@@ -82,6 +84,69 @@ export async function pdfPageImage(data: Uint8Array, maxHeight: number, dpr: num
     return { url: canvas.toDataURL("image/png"), width: css.width * fit };
   } finally {
     void doc.destroy();
+  }
+}
+
+/**
+ * Pages of a PDF (the HTML export's images, `\includepdf`) as PNG bytes drawn at `scale` times
+ * their CSS size: `want` picks the pages from the page count. Each comes with its size in PDF
+ * points. The data buffer is transferred to pdf.js (pass a copy). Cancellation stops the
+ * loading/render task and rejects without waiting for pending page or encoding promises.
+ */
+export async function pdfPagePngs(
+  data: Uint8Array,
+  want: (count: number) => number[],
+  scale: number,
+  signal?: AbortSignal,
+): Promise<{ page: number; png: Uint8Array; width: number; height: number }[]> {
+  if (signal?.aborted) throw abortError("The export was cancelled.");
+  let loading: ReturnType<PdfJs["getDocument"]> | null = null;
+  let rendering: RenderTask | null = null;
+  let destroyed = false;
+  const destroy = () => {
+    if (loading && !destroyed) {
+      destroyed = true;
+      void loading.destroy().catch(() => undefined);
+    }
+  };
+  let onAbort: () => void = () => {};
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      rendering?.cancel();
+      destroy();
+      reject(abortError("The export was cancelled."));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  const wait = <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, cancelled]);
+  try {
+    const pdfjs = (await wait(loadPdfJs())) as PdfJs;
+    if (signal?.aborted) throw abortError("The export was cancelled.");
+    loading = pdfjs.getDocument({ data, isEvalSupported: false, ...PDFJS_ASSETS });
+    const doc = await wait(loading.promise);
+    const out: { page: number; png: Uint8Array; width: number; height: number }[] = [];
+    for (const n of want(doc.numPages)) {
+      if (signal?.aborted) throw abortError("The export was cancelled.");
+      const page = await wait(doc.getPage(n));
+      if (signal?.aborted) throw abortError("The export was cancelled.");
+      const size = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: CSS_PER_PT * scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("No canvas to draw the PDF on.");
+      rendering = page.render({ canvasContext: ctx, canvas, viewport });
+      await wait(rendering.promise);
+      rendering = null;
+      const blob = await wait(new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png")));
+      if (!blob) throw new Error(`Page ${n} could not be encoded.`);
+      out.push({ page: n, png: new Uint8Array(await wait(blob.arrayBuffer())), width: size.width, height: size.height });
+    }
+    return out;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+    destroy();
   }
 }
 

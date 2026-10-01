@@ -35,6 +35,8 @@ export interface LatexLiveSettings {
   cursorPreview: boolean;
   /** The mode of newly opened LaTeX editors; each view keeps its own in its view state. */
   editingMode: EditingMode;
+  /** Vault folder "Export to HTML" proposes; empty: next to the root .tex file. */
+  exportFolder: string;
 }
 
 export const DEFAULT_SETTINGS: LatexLiveSettings = {
@@ -51,6 +53,7 @@ export const DEFAULT_SETTINGS: LatexLiveSettings = {
   texFragmentFallback: true,
   cursorPreview: false,
   editingMode: "source",
+  exportFolder: "",
 };
 
 export class LatexLiveSettingTab extends PluginSettingTab {
@@ -266,6 +269,25 @@ export class LatexLiveSettingTab extends PluginSettingTab {
           .setValue(s.editingMode)
           .onChange((v) => {
             s.editingMode = v === "live" ? "live" : "source";
+            save();
+          }),
+      );
+
+    new Setting(containerEl).setName("HTML export").setHeading();
+
+    new Setting(containerEl)
+      .setName("Export folder")
+      .setDesc(
+        "Vault folder where \"Export to HTML\" proposes to save the page (created when missing). Leave " +
+          "empty to save it next to the root .tex file. Within a session, each document proposes the " +
+          "file it was last exported to.",
+      )
+      .addText((t) =>
+        t
+          .setPlaceholder("next to the root file")
+          .setValue(s.exportFolder)
+          .onChange((v) => {
+            s.exportFolder = v.trim();
             save();
           }),
       );

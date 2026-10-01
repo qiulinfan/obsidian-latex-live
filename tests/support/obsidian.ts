@@ -3,7 +3,10 @@
 // not Obsidian's implementation: TextFileView.requestSave debounces save(), and save() writes
 // getViewData() through vault.modify when it changed since the last load or save (save(true),
 // on unload, also calls clear()); FileView's state is `{ file }`, and setState opens that file;
-// addAction prepends a header button whose icon and tooltip setIcon / setTooltip change.
+// addAction prepends a header button whose icon and tooltip setIcon / setTooltip change. A
+// Notice's message (a string or a fragment) is in its noticeEl, setMessage replaces it and hide
+// hides it; a Modal calls onOpen on open and onClose on close. Obsidian's DOM helpers (createEl,
+// createDiv, createSpan, empty, setText, addClass) are installed on elements and fragments.
 
 type Callback = (...args: unknown[]) => unknown;
 
@@ -30,13 +33,121 @@ export const MarkdownRenderer = {
   },
 };
 
-/** Messages of every Notice shown, in order. */
+type DomInfo = string | { cls?: string | string[]; text?: string; attr?: Record<string, string | number | boolean> };
+type Helpers = {
+  createEl(tag: string, o?: DomInfo, cb?: (el: HTMLElement) => void): HTMLElement;
+  createDiv(o?: DomInfo, cb?: (el: HTMLElement) => void): HTMLElement;
+  createSpan(o?: DomInfo, cb?: (el: HTMLElement) => void): HTMLElement;
+  empty(): void;
+};
+
+/** Obsidian's DOM helpers, as far as the plugin uses them (once; the globals of tests/support/dom). */
+function installDomHelpers(): void {
+  const el = HTMLElement.prototype as unknown as Partial<Helpers> & { setText(t: string): void; addClass(...c: string[]): void };
+  if (el.createEl) return;
+  for (const proto of [el as Helpers, DocumentFragment.prototype as unknown as Helpers]) {
+    proto.createEl = function (this: Node, tag, o = {}, cb) {
+      const child = document.createElement(tag);
+      const info = typeof o === "string" ? { cls: o } : o;
+      if (info.cls) child.className = [info.cls].flat().join(" ");
+      if (info.text !== undefined) child.textContent = info.text;
+      for (const [k, v] of Object.entries(info.attr ?? {})) child.setAttribute(k, String(v));
+      this.appendChild(child);
+      cb?.(child);
+      return child;
+    };
+    proto.createDiv = function (this: Helpers, o, cb) {
+      return this.createEl("div", o, cb);
+    };
+    proto.createSpan = function (this: Helpers, o, cb) {
+      return this.createEl("span", o, cb);
+    };
+    proto.empty = function (this: Node) {
+      while (this.firstChild) this.removeChild(this.firstChild);
+    };
+  }
+  el.setText = function (this: HTMLElement, t: string) {
+    this.textContent = t;
+  };
+  el.addClass = function (this: HTMLElement, ...c: string[]) {
+    this.classList.add(...c);
+  };
+}
+
+/** Messages of every Notice shown (and each setMessage), in order, as text. */
 export const notices: string[] = [];
+/** Every Notice shown, in order. */
+export const shownNotices: Notice[] = [];
 
 export class Notice {
-  constructor(message: string, _duration?: number) {
-    notices.push(message);
+  noticeEl: HTMLElement;
+  hidden = false;
+
+  constructor(message: string | DocumentFragment, _duration?: number) {
+    installDomHelpers();
+    this.noticeEl = document.createElement("div");
+    this.setMessage(message);
+    shownNotices.push(this);
   }
+
+  setMessage(message: string | DocumentFragment): this {
+    this.noticeEl.textContent = "";
+    if (typeof message === "string") this.noticeEl.textContent = message;
+    else this.noticeEl.appendChild(message);
+    notices.push(this.noticeEl.textContent ?? "");
+    return this;
+  }
+
+  hide(): void {
+    this.hidden = true;
+  }
+}
+
+/** Every Modal opened, in order. */
+export const modals: Modal[] = [];
+
+export class Modal {
+  modalEl: HTMLElement;
+  titleEl: HTMLElement;
+  contentEl: HTMLElement;
+  isOpen = false;
+
+  constructor(public app: unknown) {
+    installDomHelpers();
+    this.modalEl = document.createElement("div");
+    this.titleEl = this.modalEl.appendChild(document.createElement("div"));
+    this.contentEl = this.modalEl.appendChild(document.createElement("div"));
+  }
+
+  open(): void {
+    this.isOpen = true;
+    modals.push(this);
+    this.onOpen();
+  }
+
+  close(): void {
+    this.isOpen = false;
+    this.onClose();
+  }
+
+  onOpen(): void {}
+  onClose(): void {}
+}
+
+let testPdfJs: unknown;
+/** Set only in tests exercising the pdf.js host's lifecycle. */
+export function setPdfJsForTest(value: unknown): void {
+  testPdfJs = value;
+}
+/** Obsidian's pdf.js loader: PDF images normally come from stand-in renderers. */
+export async function loadPdfJs(): Promise<unknown> {
+  if (testPdfJs !== undefined) return testPdfJs;
+  throw new Error("pdf.js is Obsidian's: not available in tests");
+}
+
+/** Code highlighting is injected by Node export hosts; Obsidian supplies the runtime Prism. */
+export async function loadPrism(): Promise<never> {
+  throw new Error("Prism is Obsidian's: not available in tests");
 }
 
 /** The icon's name (Obsidian draws its SVG). */
