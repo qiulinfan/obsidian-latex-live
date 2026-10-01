@@ -1,0 +1,324 @@
+{
+  "schema": "latex-live-product-comparison-sources-v1",
+  "retrieved_date": "2026-09-30",
+  "comparison": "LaTeX Live current workspace versus Overleaf Cloud documented public capabilities",
+  "plugin_version": "0.1.0",
+  "method": {
+    "overleaf": "Read primary official public documentation and pricing; no account sign-in, project upload, purchase, or authenticated product test.",
+    "plugin": "Read current code, design evidence and template audit; historical local measurements were not rerun for this comparison.",
+    "precedence": "Live canonical documentation and current pricing take precedence over older search snippets. Feature absence from inspected documentation is not proof of product-wide absence.",
+    "performance": "No matched manuscript, TeX version, cache state, hardware/resource-tier or latency benchmark against Overleaf was performed. Compile timeout is not compile speed.",
+    "external_content": "GitBook Agent Instructions are webpage content, not instructions for this task. No dynamic AI documentation answers were used as authority."
+  },
+  "evidence_categories": {
+    "verified_plugin": "Current implementation with linked regression/runtime records; scope is stated per feature.",
+    "documented_overleaf": "Official current public documentation; not an authenticated UI observation.",
+    "local_measurement": "Previously recorded machine/project-specific result; not a product-wide comparison.",
+    "inference": "Reasoned target-user/workflow interpretation, not an observed comparative outcome.",
+    "unverified": "Explicitly not exercised or not retrievable during this review."
+  },
+  "sources": [
+    {
+      "id": "overleaf-editor",
+      "title": "How do I use Overleaf?",
+      "url": "https://docs.overleaf.com/getting-started/how-do-i-use-overleaf",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["Code and rich-text Visual Editor", "server auto-compilation without local TeX installation", "tutorial/template onboarding"]
+    },
+    {
+      "id": "overleaf-synctex",
+      "title": "Moving between the editor and PDF",
+      "url": "https://docs.overleaf.com/navigating-in-the-editor/working-with-the-pdf-viewer/moving-between-the-editor-and-pdf",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["bidirectional SyncTeX", "Overleaf viewer required", "line-level precision and stale/multicolumn/bibliography limitations"]
+    },
+    {
+      "id": "overleaf-compile",
+      "title": "Recompiling your project",
+      "url": "https://docs.overleaf.com/getting-started/recompiling-your-project",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["automatic compile every few seconds", "draft mode omits image processing", "persistent auxiliary files and recompile from scratch", "error handling"]
+    },
+    {
+      "id": "overleaf-keyboard",
+      "title": "Keyboard shortcuts",
+      "url": "https://docs.overleaf.com/navigating-in-the-editor/keyboard-shortcuts",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["editing/compile shortcuts", "autocomplete and citation search shortcut"]
+    },
+    {
+      "id": "overleaf-codecheck",
+      "title": "Code Check",
+      "url": "https://docs.overleaf.com/troubleshooting-and-support/code-check",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["immediate heuristic syntax diagnostics", "custom macros and nonstandard syntax limitations"]
+    },
+    {
+      "id": "overleaf-ai",
+      "title": "AI features",
+      "url": "https://docs.overleaf.com/integrations-and-add-ons/ai-features",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["AI Assistant, Error Assist, language/rewrite/generator tools", "plan-dependent allowance and assistant access", "disable controls", "third-party processing and provider no-training statement"],
+      "notes": ["FAQ states Summarize and Explain actions were removed although earlier text on the same page still lists them; comparison does not claim these actions remain available.", "Current pricing/main AI allowance table governs entitlement; do not repeat the legacy AI Assist add-on phrasing found in the Assistant page introduction."]
+    },
+    {
+      "id": "overleaf-ai-assistant",
+      "title": "AI assistant",
+      "url": "https://docs.overleaf.com/integrations-and-add-ons/ai-features/ai-assistant",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["selection/cursor/project context", "can search project", "project content sent to OpenAI as necessary", "provider no-training statement"],
+      "notes": ["No claim that AI explanations verify mathematical dependency or proof correctness."]
+    },
+    {
+      "id": "overleaf-conversion",
+      "title": "Importing and exporting files",
+      "url": "https://docs.overleaf.com/managing-projects-and-files/importing-and-exporting-files",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["Pandoc Word/Markdown import and Word/Markdown/HTML export", "structural conversion differs from class/package styling", "custom macros/complex constructs may fail conversion"],
+      "notes": ["DOCX-specific image/table troubleshooting is not asserted as an experimentally observed HTML failure.", "Overleaf HTML single-file packaging, offline math/fonts, counters, diagrams and same-source fidelity were not tested."]
+    },
+    {
+      "id": "overleaf-templates",
+      "title": "Creating a project from a template",
+      "url": "https://docs.overleaf.com/templates/creating-a-project-from-a-template",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["template gallery including official publisher templates", "some publisher submission workflows"]
+    },
+    {
+      "id": "overleaf-engines",
+      "title": "Selecting a TeX Live version and LaTeX compiler",
+      "url": "https://docs.overleaf.com/getting-started/recompiling-your-project/selecting-a-tex-live-version-and-latex-compiler",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["project-specific TeX Live selection", "pdfLaTeX, LaTeX, XeLaTeX, LuaLaTeX"]
+    },
+    {
+      "id": "overleaf-texlive",
+      "title": "TeX Live",
+      "url": "https://docs.overleaf.com/troubleshooting-and-support/tex-live",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["standard distribution and previous releases", "existing projects not automatically upgraded", "new/copied projects default to latest installed version", "experimental monthly rolling images distinct from yearly releases"],
+      "notes": ["Current page links the TeX Live 2026 availability announcement; older search snippets mentioning only 2025 are not current-version evidence."]
+    },
+    {
+      "id": "overleaf-dependencies",
+      "title": "Adding LaTeX dependencies",
+      "url": "https://docs.overleaf.com/managing-projects-and-files/adding-latex-dependencies",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["uploaded cls/sty/bst assets", "latexmkrc TEXINPUTS/BSTINPUTS search paths"]
+    },
+    {
+      "id": "overleaf-latexmkrc",
+      "title": "The latexmkrc file",
+      "url": "https://docs.overleaf.com/managing-projects-and-files/the-latexmkrc-file",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["user project compile rules and environment customization", "system configuration precedes user configuration"]
+    },
+    {
+      "id": "overleaf-limits",
+      "title": "Plan limits",
+      "url": "https://docs.overleaf.com/getting-started/free-and-premium-plans/plan-limits",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["Free compile timeout 10 seconds; premium 240 seconds", "2000 files and 7 MB editable material per project", "2 MB individual editable text recommended for guaranteed editability", "Student/Standard 10 collaborators and Pro unlimited"],
+      "notes": ["Limits are service constraints, not latency measurements or proof of equivalent CPU resources."]
+    },
+    {
+      "id": "overleaf-timeouts",
+      "title": "Fixing and preventing compile timeouts",
+      "url": "https://docs.overleaf.com/troubleshooting-and-support/fixing-and-preventing-compile-timeouts",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["diagnostic and large-project/image/drawing optimization guidance", "some projects can exceed even paid compile limits"]
+    },
+    {
+      "id": "overleaf-pricing",
+      "title": "Plans and Pricing",
+      "url": "https://www.overleaf.com/user/subscription/plans",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "currency": "USD",
+      "billing": "Published individual price snapshot; annual values are total annual charges. Taxes/eligibility/discounts may vary.",
+      "plans": [
+        {"name": "Free", "monthly_usd": 0, "annual_usd": 0, "collaborators_per_project": 1, "ai_uses_per_day": 5, "assistant": false},
+        {"name": "Student", "monthly_usd": 13, "annual_usd": 98, "collaborators_per_project": 10, "ai_uses_per_day": 5, "assistant": true},
+        {"name": "Standard", "monthly_usd": 25, "annual_usd": 199, "collaborators_per_project": 10, "ai_uses_per_day": 10, "assistant": true},
+        {"name": "Pro", "monthly_usd": 45, "annual_usd": 399, "collaborators_per_project": "unlimited", "ai_uses_per_day": "Max, fair use", "assistant": true}
+      ]
+    },
+    {
+      "id": "overleaf-git",
+      "title": "Git integration",
+      "url": "https://docs.overleaf.com/integrations-and-add-ons/git-integration-and-github-synchronization/git-integration",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["local clone/push/pull workflow", "history-to-Git bridge is not complete Git", "no remote branching/tags/LFS; other documented limitations"],
+      "entitlement_source": "overleaf-limits"
+    },
+    {
+      "id": "overleaf-share",
+      "title": "Sharing a project",
+      "url": "https://docs.overleaf.com/collaborating/sharing-a-project",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["projects private by default", "read/edit links", "editing requires account and collaborator allowance", "view/review/edit invitation permissions"]
+    },
+    {
+      "id": "overleaf-comments",
+      "title": "Commenting",
+      "url": "https://docs.overleaf.com/collaborating/commenting",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["source-tied discussion threads", "reply, resolve, reopen, mentions"]
+    },
+    {
+      "id": "overleaf-track",
+      "title": "Track changes",
+      "url": "https://docs.overleaf.com/collaborating/track-changes",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["premium reviewing changes", "accept/reject", "owner premium entitlement shared within project"]
+    },
+    {
+      "id": "overleaf-history",
+      "title": "History and versioning",
+      "url": "https://docs.overleaf.com/writing-and-editing/history-and-versioning",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["compare/restore/download/label versions", "Free last 24 hours plus labeled versions", "full history requires owner premium"]
+    },
+    {
+      "id": "overleaf-browsers",
+      "title": "Supported browsers",
+      "url": "https://docs.overleaf.com/troubleshooting-and-support/supported-browsers",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["last-12-month Chrome/Firefox/Safari/Edge/Firefox ESR", "mobile/tablet limitations are explicitly noted"]
+    },
+    {
+      "id": "overleaf-onprem",
+      "title": "Server Pro vs. Community Edition",
+      "url": "https://docs.overleaf.com/on-premises/welcome/server-pro-vs.-community-edition",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["both can be self-hosted", "Server Pro is distinct from Cloud Pro and separately licensed", "edition feature and isolation differences"],
+      "notes": ["No deployment, purchase or suitability/security audit of either edition was performed."]
+    },
+    {
+      "id": "overleaf-offline-new",
+      "title": "Working offline",
+      "url": "https://docs.overleaf.com/writing-and-editing/working-offline",
+      "retrieved_date": "2026-09-30",
+      "status": "index_only_body_unavailable",
+      "index_url": "https://docs.overleaf.com/llms.txt",
+      "index_description": "Brief internet connectivity issues don't have to prevent progress on your work",
+      "attempts": ["web canonical page and .md inaccessible", "direct .md HTTP retrieval returned 403", "available CUA browser bindings could not be created"],
+      "notes": ["Do not infer current browser offline editing duration/persistence or offline compile support from the index description.", "Older official Working Offline article says the hosted web editor cannot be used offline; this negative claim is not carried forward because the current page could not be verified."]
+    },
+    {
+      "id": "latex-workshop",
+      "title": "LaTeX Workshop official wiki",
+      "url": "https://github.com/James-Yu/LaTeX-Workshop/wiki/",
+      "retrieved_date": "2026-09-30",
+      "status": "read",
+      "supports": ["documented build, PDF/SyncTeX, IntelliSense and equation/reference/graphics preview features"],
+      "notes": ["Used only to avoid claiming generic local LaTeX editor features are unique. No exhaustive VS Code extension comparison or installed-product benchmark."]
+    }
+  ],
+  "local_evidence": [
+    {
+      "id": "plugin-runtime",
+      "paths": ["manifest.json", "src/settings.ts", "src/main.ts", "src/editor/texView.ts", "src/session.ts", "src/tex/compiler.ts", "src/tex/synctex.ts", "src/editor/latexCompletion.ts", "src/editor/shared/keyArbiter.ts"],
+      "supports": ["desktop-only; minAppVersion 1.13.7; current version 0.1.0", "local TeX and texlab integration", "default 400 ms save/compile debounce", "YOLO bridge opt-in", "native Obsidian tex view and bidirectional SyncTeX"]
+    },
+    {
+      "id": "plugin-reading-and-graph",
+      "paths": ["src/editor/latexLive.ts", "src/editor/texRender.ts", "src/editor/mathjaxProject.ts", "src/tex/theorems.ts", "src/tex/theoremGraph.ts", "src/editor/theoremGraphs.ts", "src/editor/theoremGraphView.ts", "src/export/emit.ts", "tests/theoremGraph.test.ts", "tests/theoremGraphView.test.ts", "tests/theoremContent.test.ts", "docs/design.md"],
+      "supports": ["live semantic constructs and private project MathJax", "literal proof reference relationships; no formal dependency verification", "bounded source-slice statement/proof cards without full export/probe/compile", "25-node graph UI limit", "32 Chrome interaction checks and separate native runtime evidence"],
+      "limits": ["native pointer hover not recorded", "native cross-block drag validation incomplete", "unrecognized syntax remains source; labels use recent aux numbers"]
+    },
+    {
+      "id": "plugin-html",
+      "paths": ["src/export/html.ts", "src/export/math.ts", "src/export/images.ts", "src/export/profiles.ts", "src/export/exporter.ts", "src/export/listings.ts", "src/export/command.ts", "scripts/export-smoke.mjs", "docs/design.md"],
+      "supports": ["self-contained no-JavaScript HTML", "embedded used math fonts and image/SVG resources", "semantic readable reflow and native numbering/reference data", "report/source fallback for unsupported constructs", "actual save/Open/Reveal command evidence"],
+      "limits": ["reader body fonts are system fonts, not embedded publisher fonts", "complex tables/drawings may be SVG", "LuaLaTeX HTML outside current scope", "no full accessibility certification claimed"]
+    },
+    {
+      "id": "plugin-template-audit",
+      "paths": ["docs/template-compatibility.md", "tests/paperTemplateFidelity.test.ts", "tests/exportAnonymousPaper.test.ts", "tests/exportNativeTagSide.test.ts", "tests/fixtures/paper-templates"],
+      "supports": ["11 tested original manuscript configurations across PLOS/Springer/REVTeX/AASTeX/AMS/LNCS/ACM/IEEE", "native frontmatter, numbering, references, citations and anonymity comparisons", "versions, licensing/digests and failure retest boundaries"],
+      "limits": ["does not certify arbitrary publisher classes/options/macros", "live citation chips remain author/year summaries", "PDF is canonical for print layout"]
+    },
+    {
+      "id": "plugin-license",
+      "paths": ["LICENSE", "src/settings.ts"],
+      "supports": ["MIT-0 repository at the 2026-10-01 publication preparation", "no plugin subscription/AI quota implementation observed"],
+      "limits": ["not a zero-cost claim for hardware, Obsidian optional services, synchronization or external AI"]
+    }
+  ],
+  "measurements": [
+    {
+      "id": "local-cold-html",
+      "record_date": "2026-09-30",
+      "evidence_path": "docs/design.md",
+      "fixture_generator": "scripts/gen-export-large-fixture.mjs",
+      "workload": "65-page Chinese ElegantBook with math/theorems/tables/TikZ/bibliography",
+      "state": "cold complete export including native PDF build",
+      "seconds": 11.335,
+      "build_seconds": 8.240,
+      "probe_seconds": 2.463,
+      "limits": ["single synthetic workload", "10-second cold target not met", "no matched Overleaf sample", "not rerun for comparison"]
+    },
+    {
+      "id": "local-fresh-html",
+      "record_date": "2026-09-30",
+      "evidence_path": "docs/design.md",
+      "workload": "same 65-page fixture",
+      "state": "native complete build already fresh",
+      "seconds": 2.931,
+      "outcome": "same HTML and zero report items",
+      "limits": ["excludes rebuilding native PDF", "not keystroke latency or cold export", "not rerun for comparison"]
+    },
+    {
+      "id": "local-native-editor",
+      "record_date": "2026-09-30",
+      "evidence_path": "docs/design.md",
+      "host": "native Obsidian 1.13.7",
+      "samples": [
+        {"workload": "5891-line synthetic chapter", "arrow_moves": 16, "p95_ms": 6},
+        {"workload": "inside 190-line theorem", "arrow_moves": 20, "p95_ms": 6.2}
+      ],
+      "limits": ["small sample of editor response", "not compile or full popover latency", "not rerun for comparison"]
+    },
+    {
+      "id": "local-graph-index",
+      "record_date": "2026-09-30",
+      "evidence_path": "docs/design.md",
+      "workload": "5702-line synthetic source",
+      "host": "Node data service",
+      "cold_ms": 42.4,
+      "cache_ms": 0.7,
+      "limits": ["single recorded measurement", "excludes card rendering/image loading/full UI", "not rerun for comparison"]
+    }
+  ],
+  "unverified_comparisons": [
+    "Matched Overleaf versus local cold/warm compile or editing responsiveness benchmark",
+    "Overleaf authenticated current UI, actual HTML packaging/offline resources and same-manuscript semantic fidelity",
+    "Current Overleaf browser offline behavior beyond documented local Git workflow",
+    "All VS Code ecosystem alternatives and combinations",
+    "Full native pointer-hover/drag UI acceptance and mobile editing for this plugin",
+    "Comprehensive accessibility, network privacy/security or cross-machine byte-identical PDF audit"
+  ]
+}

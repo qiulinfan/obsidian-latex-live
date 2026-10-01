@@ -36,6 +36,13 @@
     other runs (fragment compiles) take a format only through `readyPreambleFormat`.
   - Delete the job log before each run so a run that dies early never
     reports the previous log as success.
+    A full latexmk no-op may reuse the existing PDF only when this invocation exits 0,
+    has no new log, is neither stalled nor timed out, and explicitly confirms both this
+    root's "Nothing to do" and its complete up-to-date PDF target list (XeLaTeX may also
+    list XDV). Match logical/physical or root-relative paths exactly, including spaces;
+    neither recent PDF mtime nor an old log proves success. The PDF must be readable.
+    `pdfReused` distinguishes this result from a new compile; preview says "Up to date".
+    Keep the real and fake regressions in `tests/fullBuildNoop.test.ts`.
   - TeX reports physical paths (`/private/var/...` on macOS); map them back
     with `logicalMapper` before comparing with vault paths.
   - Spawn TeX with `max_print_line=10000` and `-file-line-error`; the log
@@ -656,11 +663,18 @@
   `theoremGraphHover` is LaTeX-specific: plain source refs, math refs and live chip metadata share
   the same literal key. Normal chip clicks and drag selection remain CodeMirror's. Mouse holds,
   IME, edits, selection changes, project invalidation and destruction abort pending popups/cards;
-  window release/cancel/blur listeners are removed on dispose. Keep every style scoped to
+  window release/cancel/blur listeners follow the view's actual ownerDocument after popout
+  adoption and are removed on dispose. Keep every style scoped to
   `.ll-theorem-graph`; shared modules and keys are unchanged. After UI changes run
   `node scripts/theorem-graph-smoke.mjs` (real Chrome; fails if unavailable), plus the theorem
   index/content/service/UI tests. This script also verifies source/live themes, node expansion,
   source links, cycles, narrow windows and dragging over a live reference while held.
+  `latexTooltipPortal` mounts CM's official `tooltips({ parent })` outside Obsidian's clipped,
+  transformed panes, in the view's actual `ownerDocument.body`. Keep the scoped editor CSS
+  and CM theme classes, rebind the parent after popout adoption/history restoration, and
+  remove the per-view container on destroy. The browser regression uses a narrow clipped
+  pane beside a PDF placeholder: `elementFromPoint` must hit the second-column node before
+  actual pointer press/release expands it. DOM existence or a synthetic `.click()` is insufficient.
 - The independent kgdistiller CLI bridge follows
   [docs/kgdistiller-export.md](docs/kgdistiller-export.md). Keep graph identity
   decisions in kgdistiller and reuse the existing renderer; bridge tests and
@@ -686,3 +700,21 @@
   computer-use tools; UI checks need full-screen control.
 - Design notes, measurements, and the roadmap are in
   [docs/design.md](docs/design.md); update its checkboxes when an item lands.
+- Native demo recording uses `scripts/demo-capture.swift` (ScreenCaptureKit selected window,
+  no microphone/audio), `scripts/demo-drive.mjs` (isolated demo vault), and the source-backed
+  comparison deck via `scripts/record-comparison.mjs --prepare-only` / explicit `--record`.
+  The comparison recorder owns a fresh Chrome app/profile; its receipt is marked
+  `documented_comparison_deck`, separately from native product interaction. Scene times
+  come from the capture's `startedAtUnixMs`; don't invent verified events or speed comparisons.
+  Avoid concurrent TeX/test/build/browser work while capturing. Package supplied recordings
+  with `scripts/package-demo-videos.mjs --input <receipt>` for zh/en caption rails, preserving
+  native timings and raw video. Storyboard and caption libraries live in [docs/demo](docs/demo/).
+  Keep raw videos, screenshots, compiled recorders, profiles and credentials outside Git.
+
+- Public source and authored documentation use MIT-0. Upstream libraries, external programs,
+  fonts and referenced/demo materials retain their original terms; do not relabel those.
+  README.md and README_zh-CN.md are user-facing release documentation.
+- `node scripts/check-release.mjs` verifies the public identity, exact x.y.z tag, package and
+  versions metadata; `--assets` verifies the production three-file release and no sourcemap.
+  GitHub release assets are built from the pushed tag. Never overwrite published tags or
+  release assets to correct a mistake; increment the patch version and publish a fresh release.

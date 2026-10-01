@@ -1,0 +1,152 @@
+{
+  "schema": "latex-live-comparison-video-captions-v1",
+  "languages": [
+    "zh-CN",
+    "en"
+  ],
+  "retrieved_date": "2026-09-30",
+  "audience": "Mathematics researchers and students comparing personal reading/writing with shared paper review",
+  "comparison_zh": "docs/demo/overleaf-comparison.md",
+  "comparison_en": "docs/demo/overleaf-comparison.en.md",
+  "sources_receipt": "docs/demo/overleaf-sources.json",
+  "target_duration_seconds": {
+    "min": 60,
+    "max": 100
+  },
+  "timing_status": "awaiting_recording_receipt",
+  "timing_note": "These are ordered caption segments, not measured timeline markers. Add start/end times only from the actual recording receipt.",
+  "rendering_note": "Use one language per caption track; source URLs and local evidence are provenance, not required on-screen text. Show only behavior actually captured in the recording.",
+  "segments": [
+    {
+      "id": "workflow",
+      "title_zh": "数学写作的两种重心",
+      "title_en": "Two priorities in mathematical writing",
+      "text_zh": "LaTeX Live 把 TeX 项目放进 Obsidian 笔记空间；Overleaf 让合作者在同一个浏览器项目里写作。",
+      "text_en": "LaTeX Live brings TeX projects into your Obsidian workspace. Overleaf brings coauthors into one shared browser project.",
+      "sourceURLs": [
+        "https://docs.overleaf.com/getting-started/how-do-i-use-overleaf",
+        "https://docs.overleaf.com/collaborating/sharing-a-project"
+      ],
+      "localEvidence": [
+        "src/main.ts",
+        "docs/design.md"
+      ],
+      "claim_status": "verified_plugin_and_documented_overleaf"
+    },
+    {
+      "id": "live_source",
+      "title_zh": "在源码里读公式与定理",
+      "title_en": "Read math within the source",
+      "text_zh": "公式与定理就地显示，编辑时恢复源码。Overleaf 也有 Code Editor 和 Visual Editor。",
+      "text_en": "Read formulas and theorem blocks in place; reveal source as you edit. Overleaf also offers Code and Visual editors.",
+      "sourceURLs": [
+        "https://docs.overleaf.com/getting-started/how-do-i-use-overleaf"
+      ],
+      "localEvidence": [
+        "src/editor/latexLive.ts",
+        "docs/design.md"
+      ],
+      "claim_status": "verified_plugin_and_documented_overleaf"
+    },
+    {
+      "id": "proof_refs",
+      "title_zh": "沿证明引用展开",
+      "title_en": "Follow references in proofs",
+      "text_zh": "沿证明中的字面 \\ref 查看陈述与证明。图记录源码引用关系，不验证逻辑依赖。",
+      "text_en": "Follow literal \\ref links in proofs to open statements and proofs. The graph records source references, not formally verified dependencies.",
+      "sourceURLs": [],
+      "localEvidence": [
+        "src/tex/theoremGraph.ts",
+        "src/editor/theoremGraphView.ts",
+        "tests/theoremContent.test.ts",
+        "docs/design.md"
+      ],
+      "claim_status": "verified_plugin_with_explicit_semantic_boundary"
+    },
+    {
+      "id": "pdf_toolchain",
+      "title_zh": "同样能在源码与 PDF 间定位",
+      "title_en": "Source-to-PDF navigation in both",
+      "text_zh": "两者都有双向 SyncTeX。LaTeX Live 使用本机 TeX；Overleaf 管理云端编译环境。",
+      "text_en": "Both support bidirectional SyncTeX. LaTeX Live uses your installed TeX; Overleaf manages cloud builds.",
+      "sourceURLs": [
+        "https://docs.overleaf.com/navigating-in-the-editor/working-with-the-pdf-viewer/moving-between-the-editor-and-pdf",
+        "https://docs.overleaf.com/getting-started/how-do-i-use-overleaf"
+      ],
+      "localEvidence": [
+        "src/tex/synctex.ts",
+        "src/tex/compiler.ts",
+        "manifest.json"
+      ],
+      "claim_status": "verified_plugin_and_documented_overleaf"
+    },
+    {
+      "id": "ai_choices",
+      "title_zh": "现成助手与自选工具",
+      "title_en": "Built-in assistance and chosen tools",
+      "text_zh": "Overleaf 已有项目上下文 AI 与写作工具。LaTeX Live 可选接入外部 YOLO 补全，默认关闭。",
+      "text_en": "Overleaf has project-aware AI and writing tools. LaTeX Live optionally connects to external YOLO completion, disabled by default.",
+      "sourceURLs": [
+        "https://docs.overleaf.com/integrations-and-add-ons/ai-features",
+        "https://docs.overleaf.com/integrations-and-add-ons/ai-features/ai-assistant"
+      ],
+      "localEvidence": [
+        "src/settings.ts",
+        "src/main.ts"
+      ],
+      "claim_status": "verified_plugin_and_documented_overleaf"
+    },
+    {
+      "id": "reading_html",
+      "title_zh": "分享自包含阅读版",
+      "title_en": "Share a self-contained reading edition",
+      "text_zh": "本插件导出单个可重排 HTML，内嵌数学字体与图片。Overleaf 也支持 Pandoc HTML 导出。",
+      "text_en": "Export one reflowing HTML file with embedded math fonts and images. Overleaf also exports HTML through Pandoc.",
+      "sourceURLs": [
+        "https://docs.overleaf.com/managing-projects-and-files/importing-and-exporting-files"
+      ],
+      "localEvidence": [
+        "src/export/html.ts",
+        "src/export/math.ts",
+        "src/export/images.ts",
+        "docs/template-compatibility.md",
+        "docs/design.md"
+      ],
+      "claim_status": "verified_plugin_and_documented_overleaf",
+      "boundary": "No same-manuscript test of Overleaf HTML packaging or fidelity. Plugin body fonts use system stacks; complex drawings may be SVG; HTML excludes LuaLaTeX."
+    },
+    {
+      "id": "review_collaboration",
+      "title_zh": "合著与审阅的优势",
+      "title_en": "Integrated coauthoring and review",
+      "text_zh": "Overleaf 整合评论、修订与历史，部分功能取决于方案。LaTeX Live 的同步与协作需另选工具。",
+      "text_en": "Overleaf integrates comments, tracked changes and history, with plan-dependent features. LaTeX Live leaves synchronization and collaboration to your chosen tools.",
+      "sourceURLs": [
+        "https://docs.overleaf.com/collaborating/commenting",
+        "https://docs.overleaf.com/collaborating/track-changes",
+        "https://docs.overleaf.com/writing-and-editing/history-and-versioning"
+      ],
+      "localEvidence": [
+        "docs/demo/overleaf-comparison.md",
+        "src/main.ts"
+      ],
+      "claim_status": "plugin_boundary_and_documented_overleaf"
+    },
+    {
+      "id": "audience_fit",
+      "title_zh": "按工作方式选择",
+      "title_en": "Choose for your workflow",
+      "text_zh": "本地数学阅读与证明导航：LaTeX Live。团队论文审阅：Overleaf。尚无同稿速度对照。",
+      "text_en": "For local mathematical reading and proof navigation: LaTeX Live. For shared paper review: Overleaf. No matched speed benchmark was performed.",
+      "sourceURLs": [
+        "https://docs.overleaf.com/collaborating/sharing-a-project",
+        "https://docs.overleaf.com/collaborating/track-changes"
+      ],
+      "localEvidence": [
+        "docs/demo/overleaf-comparison.md",
+        "docs/demo/overleaf-sources.json"
+      ],
+      "claim_status": "workflow_fit_inference_with_unverified_performance_comparison"
+    }
+  ]
+}

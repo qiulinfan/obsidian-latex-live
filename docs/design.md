@@ -1673,10 +1673,40 @@ HTML 仍是可重排阅读版；原生 PDF 保留投稿版式。实时 citation 
 私有 MathJax 均有针对性回归；原有三个 HTML 基准项目的显示回归 81/81 通过。
 最终完整测试 725/725、零跳过，生产构建通过。
 
-courses 已重载开发构建。真实 Obsidian 的合成 elegantbook 项目编译零错误、零警告，运行时索引 2 个节点、
+此前 courses 已重载开发构建。真实 Obsidian 的合成 elegantbook 项目编译零错误、零警告，运行时索引 2 个节点、
 1 条来自 `proof-body.tex` 的引用边；展开陈述/证明得到 4 个公式、正确编号和可导航引用。原生鼠标悬停尚未记录，
-坐标接口返回 `noWindowsAvailable`；Chrome 交互结果与 Obsidian 运行时数据验证分别记录。
+当时坐标接口返回 `noWindowsAvailable`；Chrome 交互结果与 Obsidian 运行时数据验证分别记录。
 5,702 行合成源码的索引测量：冷读取 42.4 ms、缓存读取 0.7 ms；这是单次 Node 数据服务测量，不是完整小窗耗时。
+
+#### 窗格裁切修复（2026-10-01）
+
+DesktopDemo 准备录制时，原生 Obsidian 中已复现：小窗 DOM 有两列，但编辑器祖先的裁切和 transform
+使第二列不可见，真实鼠标点击落到旁边 PDF。仅检查节点存在或调用 DOM 的 `click()` 不能发现这个问题。
+
+LaTeX 编辑器现在通过 CodeMirror 官方 `tooltips({ parent })` 将提示窗挂到当前窗口的 `body`，每个编辑器
+拥有独立零尺寸容器。外层保留现有编辑器样式作用域，CM 自身复制活动主题类；容器使用 Obsidian 的
+`--layer-popover` 层级。恢复历史或编辑器移到弹出窗口时按实际 `ownerDocument` 重建，关闭编辑器时清理。
+此设置也用于该 LaTeX 编辑器的补全、诊断和公式提示；共享编辑器模块和按键仲裁保持原样。
+
+`scripts/theorem-graph-smoke.mjs` 已加入 400 px、`overflow: hidden`、带 transform 的编辑窗格和旁边的
+合成 PDF 占位层。源码/实时模式与明暗主题都检查第二列实际超出窗格、`elementFromPoint` 命中正确节点，
+再用真实 pointer press/release 验证内容展开和源码按钮，并保留拖选、IME、窄屏和循环展开检查。
+同一场景的独立 Chrome 检查 44/44 通过；新增门户容器、主题、历史恢复、弹出窗口和清理回归后，
+小窗单元测试 12/12 通过。修复后的原生 Obsidian 点击与录制验收另行记录，不以浏览器合成场景代替。
 
 静态 `.llx`/SVG 再生成：`node scripts/regen-export-fixtures.mjs`。GUI 源和 PNG/PDF：
 `node scripts/prepare-editor-fixture.mjs <scratch-folder>`。PDF、截图和运行日志留在临时目录，不进入 Git。
+
+#### 原生录制与最终回归（2026-10-01）
+
+ScreenCaptureKit 独立窗口录像已覆盖源码/实时模式、输入补全、错误恢复、公式提示、TikZ 裁剪、
+证明引用图与陈述/证明展开、八个论文模板家族的十个配置，以及 HTML 保存、报告、浏览器阅读与引用跳转。
+实际 PDF 双击将首行光标移动到同文件第 18 行，符合相同 PDF 点的 SyncTeX 反查结果；正向定位也可见。
+YOLO 实际模型请求、附件内容校验、原生 Tab 接受/Undo、Enter 仅换行/Undo、审阅实际答复后的原生粘贴与
+完整 PDF 构建均有录像和独立收据。首次请求中断和录制驱动的失败尝试保留，发布片只截取已验证的原速区间。
+没有用这些录像替代尚未完成的操作系统跨块拖选验收，也没有做 Overleaf 同稿速度实验。
+
+小窗的鼠标释放监听随实际 `ownerDocument.defaultView` 迁移；新窗口的 mouseup/pointercancel 可解除
+按住状态，旧窗口事件不干扰当前编辑器。新增回归使用 CodeMirror 官方 `EditorView.setRoot`。
+最终完整测试 **740/740、零跳过**，生产构建通过，永久证明小窗 Chrome 回归 **44/44**；共享模块、测试和
+样式与 Tinymist 保持逐字节一致。实际日志与录制收据保留在本机 `LaTeX-Live-Demo-2026-09-30/evidence/`。

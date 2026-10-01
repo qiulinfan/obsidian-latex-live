@@ -7,6 +7,8 @@ const production = process.argv[2] === "production";
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
+  banner: { js: "/*! LaTeX Live. SPDX-License-Identifier: MIT-0. Copyright 2026 Qiulin Fan. Third-party resources retain their upstream terms. */" },
+  legalComments: "eof",
   external: [
     "obsidian",
     "electron",
