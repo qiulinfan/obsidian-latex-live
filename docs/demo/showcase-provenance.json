@@ -761,6 +761,174 @@
       "feature": "Biology and physics template examples",
       "provenance": "LaTeX Live 0.1.1; actual complete latexmk builds, zero errors, full PDF text and resolved bibliography verified for PLOS-style and REVTeX fixtures.",
       "language": "zh"
+    },
+    {
+      "id": "editing-mode-switch",
+      "path": "../assets/showcase/editing-mode-switch.gif",
+      "sha256": "e3933b7b0601e28522e3096ab00d46acde30d96cabd9fc8d85c1de27c76498c1",
+      "width": 1280,
+      "height": 652,
+      "duration_s": 13.5,
+      "nativeRangeSum_s": 13.5,
+      "bytes": 635745,
+      "montage": false,
+      "sources": [
+        {
+          "source": "elegantbook-interactive.mp4",
+          "sourceSha256": "5f174a847fb40c1b6a27e69e30752cc0e5093bfb5a868fef0eaa37ec37c038cd",
+          "start_s": 20,
+          "end_s": 33.5,
+          "requested_s": 13.5,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "Actual editor-header live/source/live mode switches",
+      "provenance": "Continuous native ElegantBook take, live at t20, source during t23–28, live again at t29–33; original synthetic source and native clicks.",
+      "language": "en"
+    },
+    {
+      "id": "yolo-assisted-writing",
+      "path": "../assets/showcase/yolo-assisted-writing.gif",
+      "sha256": "1300efa73606b6d54eeae86060fe7739fe7d2fd3ac2d9fc4d50e9cc64b2aa619",
+      "width": 1280,
+      "height": 1118,
+      "duration_s": 16.75,
+      "nativeRangeSum_s": 16.700000000000003,
+      "bytes": 2957049,
+      "montage": true,
+      "sources": [
+        {
+          "source": "06f-yolo-ghost-native.mp4",
+          "sourceSha256": "898b18c198e06c3ba752fcc2415842b59b7419381860486ccb1180c659b35033",
+          "start_s": 110.9,
+          "end_s": 116.2,
+          "requested_s": 5.299999999999997,
+          "crop": {
+            "x": 0,
+            "y": 300,
+            "width": 1120,
+            "height": 850
+          }
+        },
+        {
+          "source": "06f-yolo-ghost-native.mp4",
+          "sourceSha256": "898b18c198e06c3ba752fcc2415842b59b7419381860486ccb1180c659b35033",
+          "start_s": 131.6,
+          "end_s": 139,
+          "requested_s": 7.400000000000006,
+          "crop": {
+            "x": 0,
+            "y": 300,
+            "width": 1120,
+            "height": 850
+          }
+        },
+        {
+          "source": "06f-yolo-ghost-native.mp4",
+          "sourceSha256": "898b18c198e06c3ba752fcc2415842b59b7419381860486ccb1180c659b35033",
+          "start_s": 151.5,
+          "end_s": 155.5,
+          "requested_s": 4,
+          "crop": {
+            "x": 0,
+            "y": 300,
+            "width": 1120,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "Real external YOLO generation, writing completion and source restoration",
+      "provenance": "Generation 2 request at 110.951 s, suggestion at 113.253 s, native Tab at 134.131 s and Undo at 153.158 s; verified observer/source receipt. Montage removes review gaps, not model waiting.",
+      "language": "en"
+    },
+    {
+      "id": "editing-mode-switch-zh",
+      "path": "../assets/showcase/editing-mode-switch-zh.gif",
+      "sha256": "79784e87038c288a232363e4e262deebe3c96fd9e5f2e65091ee997092e3f2d6",
+      "width": 1280,
+      "height": 652,
+      "duration_s": 13.5,
+      "nativeRangeSum_s": 13.5,
+      "bytes": 626004,
+      "montage": false,
+      "sources": [
+        {
+          "source": "elegantbook-interactive.mp4",
+          "sourceSha256": "5f174a847fb40c1b6a27e69e30752cc0e5093bfb5a868fef0eaa37ec37c038cd",
+          "start_s": 20,
+          "end_s": 33.5,
+          "requested_s": 13.5,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "Actual editor-header live/source/live mode switches",
+      "provenance": "Continuous native ElegantBook take, live at t20, source during t23–28, live again at t29–33; original synthetic source and native clicks.",
+      "language": "zh"
+    },
+    {
+      "id": "yolo-assisted-writing-zh",
+      "path": "../assets/showcase/yolo-assisted-writing-zh.gif",
+      "sha256": "11e60f2dedd6e4470238a5498b6a47305b30191501cc5ea7999019eea2c0b287",
+      "width": 1280,
+      "height": 1118,
+      "duration_s": 16.75,
+      "nativeRangeSum_s": 16.700000000000003,
+      "bytes": 2981407,
+      "montage": true,
+      "sources": [
+        {
+          "source": "06f-yolo-ghost-native.mp4",
+          "sourceSha256": "898b18c198e06c3ba752fcc2415842b59b7419381860486ccb1180c659b35033",
+          "start_s": 110.9,
+          "end_s": 116.2,
+          "requested_s": 5.299999999999997,
+          "crop": {
+            "x": 0,
+            "y": 300,
+            "width": 1120,
+            "height": 850
+          }
+        },
+        {
+          "source": "06f-yolo-ghost-native.mp4",
+          "sourceSha256": "898b18c198e06c3ba752fcc2415842b59b7419381860486ccb1180c659b35033",
+          "start_s": 131.6,
+          "end_s": 139,
+          "requested_s": 7.400000000000006,
+          "crop": {
+            "x": 0,
+            "y": 300,
+            "width": 1120,
+            "height": 850
+          }
+        },
+        {
+          "source": "06f-yolo-ghost-native.mp4",
+          "sourceSha256": "898b18c198e06c3ba752fcc2415842b59b7419381860486ccb1180c659b35033",
+          "start_s": 151.5,
+          "end_s": 155.5,
+          "requested_s": 4,
+          "crop": {
+            "x": 0,
+            "y": 300,
+            "width": 1120,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "Real external YOLO generation, writing completion and source restoration",
+      "provenance": "Generation 2 request at 110.951 s, suggestion at 113.253 s, native Tab at 134.131 s and Undo at 153.158 s; verified observer/source receipt. Montage removes review gaps, not model waiting.",
+      "language": "zh"
     }
   ],
   "processing": "Verified temporal excerpts, optional fixed crops, caption rail and proportional resize. GIF frame sampling and palette conversion; no accelerated playback or reconstructed UI.",
@@ -876,5 +1044,9 @@
         "event": "proof reference navigation"
       }
     ]
+  },
+  "presentation_update": {
+    "opening": "Continuous live/source/live switch, followed by actual YOLO-assisted writing and proof-reference navigation",
+    "yolo_excerpt_editing": "Actual model waiting preserved; review gaps between request/acceptance/undo omitted by explicit temporal cuts; normal playback speed throughout."
   }
 }

@@ -1,5 +1,5 @@
 <h1 align="center">LaTeX Live</h1>
-<p align="center">Read and write LaTeX projects in Obsidian, with live math, proof references and native PDF preview.</p>
+<p align="center">Write with rendered mathematics in Obsidian, switch to source when needed, and keep the native PDF in view.</p>
 
 <p align="center">
   <a href="https://github.com/qiulinfan/obsidian-latex-live/commits/main"><img src="https://img.shields.io/github/last-commit/qiulinfan/obsidian-latex-live/main?style=flat-square&color=6c5ce7" alt="Last commit"></a>
@@ -11,6 +11,30 @@
 
 <p align="center"><b>English</b> | <a href="./README_zh-CN.md">简体中文</a></p>
 
+## Live editing ⇄ source mode
+
+Start with formulas, numbered theorem blocks and references rendered in the editor. Switch to source from the header when you want to work directly with TeX, then return to live editing in the same `.tex` file.
+
+![Actual live editing to source and back in ElegantBook](./docs/assets/showcase/editing-mode-switch.gif)
+
+Touching an individual formula also reveals its source while you stay in live editing. The full ElegantBook example below shows changing the exponent, restoring its rendering and updating the native PDF.
+
+## Continue writing with YOLO
+
+With the separately installed [YOLO](https://github.com/Lapis0x0/obsidian-yolo) plugin, a real model suggestion appears as ghost text in your LaTeX editor. Tab inserts the selected proof passage; Undo restores the original source. Enter remains a writing key.
+
+![Real YOLO request, suggestion, Tab acceptance and undo](./docs/assets/showcase/yolo-assisted-writing.gif)
+
+These normal-speed excerpts show the actual request and its wait, acceptance and undo. The cuts remove pauses between reviewing and accepting the suggestion; this is a writing demonstration, not a model-speed benchmark.
+
+## Hover a reference, follow a proof
+
+Hover a theorem reference to open its proof-reference graph in a small window. Click a node to expand its statement and proof, follow another reference, or open the exact source location.
+
+![Hover a reference, expand a theorem and proof, then open source](./docs/assets/showcase/ref-proof-graph.gif)
+
+The graph comes from literal `\ref` calls in proofs within the current LaTeX project. It describes explicit proof references; it does not certify logical dependencies.
+
 ## Edit, see the PDF, jump back
 
 Change a formula and watch the native PDF update. Then move from your cursor to the PDF, or double-click the PDF to return to the source—even across chapter files.
@@ -21,7 +45,7 @@ Three warm edits of the same one-page document: **LaTeX Live 0.1.1 ≈ 0.87 s** 
 
 ![Actual source-to-PDF and PDF-to-source navigation](./docs/assets/showcase/bidirectional-synctex.gif)
 
-## Read and edit your template
+## More templates, the same editing flow
 
 Keep the original `.tex` project and its class. Read formulas, numbered theorem blocks and references in place; touch a formula to edit its source, then continue reading. The PDF keeps the template's native layout.
 
@@ -40,18 +64,16 @@ The AMS / IEEE clips contain actual edits. PLOS / REVTeX show prepared complete 
 
 </details>
 
-## Hover a reference, follow a proof
+## Share a portable reading edition
 
-Hover a theorem reference to open its proof-reference graph in a small window. Click a node to expand its statement and proof, follow another reference, or open the exact source location.
+Export a self-contained HTML page with math, theorem blocks, references, bibliography, images and supported SVG graphics. Follow its references and table of contents without Obsidian; inspect the export report for unsupported content.
 
-![Hover a reference, expand a theorem and proof, then open source](./docs/assets/showcase/ref-proof-graph.gif)
-
-The graph comes from literal `\ref` calls in proofs within the current LaTeX project. It describes explicit proof references; it does not certify logical dependencies.
+![Actual exported HTML with SVG, code, reference links and navigation](./docs/assets/showcase/html-reading-edition.gif)
 
 ## More of the writing workflow
 
 <details>
-<summary>Formula previews, snippets, YOLO, TeX figures, diagnostics and HTML export</summary>
+<summary>Formula previews, snippets, TeX figures, diagnostics and another compilation take</summary>
 
 ### Preview the formula you are typing
 
@@ -65,12 +87,6 @@ texlab supplies completion and snippets. Tab moves through fields; Enter continu
 
 ![Command completion, snippet fields and environment continuation](./docs/assets/showcase/smart-writing.gif)
 
-### Add your preferred AI completion
-
-With the separately installed [YOLO](https://github.com/Lapis0x0/obsidian-yolo) plugin, use real ghost-text suggestions in the LaTeX editor. Tab accepts a suggestion; Enter remains a writing key. Undo restores the source. This clip starts after generation and makes no model-speed claim.
-
-![A real YOLO suggestion accepted with Tab and undone](./docs/assets/showcase/yolo-writing.gif)
-
 ### Read TeX graphics in the editor
 
 Supported TikZ and table blocks can display a crop of the actual compiled PDF. Keep the real TeX drawing beside the surrounding mathematics.
@@ -82,12 +98,6 @@ Supported TikZ and table blocks can display a crop of the actual compiled PDF. K
 Real TeX diagnostics reach the source editor. The PDF remains available while you fix the source; the build dock keeps controls and diagnostics above its scrolling viewport.
 
 ![Real undefined-command diagnostic and recovery](./docs/assets/showcase/diagnostics-recovery.gif)
-
-### Share a portable reading edition
-
-Export a self-contained HTML page with math, theorem blocks, references, bibliography, images and supported SVG graphics. Follow its references and table of contents without Obsidian; inspect the export report for unsupported content.
-
-![Actual exported HTML with SVG, code, reference links and navigation](./docs/assets/showcase/html-reading-edition.gif)
 
 ### Watch the compilation itself
 
@@ -107,9 +117,9 @@ Overleaf also offers [automatic compilation](https://docs.overleaf.com/getting-s
 
 1. Install **Obsidian 1.13.7 or later on desktop** and a local TeX distribution such as [TeX Live](https://www.tug.org/texlive/) or [MacTeX](https://www.tug.org/mactex/).
 2. Install and enable LaTeX Live using the release instructions below.
-3. Put a `.tex` project inside your vault and open it. Use the eye action in the editor header to open the PDF preview.
-4. Edit and save. The default typing delay is 400 ms before saving and requesting a compile; it is not the time required to generate a PDF.
-5. Switch the editor mode from its header or run **LaTeX Live: Toggle live preview**. Use **LaTeX Live: Full build with latexmk (BibTeX/Biber, all passes)** when a complete build is needed.
+3. Put a `.tex` project inside your vault and open it. Choose **Switch to live preview** in the editor header to start reading and editing rendered mathematics.
+4. Open the PDF with the eye action, then edit and save. The default typing delay is 400 ms before saving and requesting a compile; it is not the time required to generate a PDF.
+5. Switch back to source whenever you need it, using the header or **LaTeX Live: Toggle live preview**. For bibliography and complete builds, run **LaTeX Live: Full build with latexmk (BibTeX/Biber, all passes)**.
 
 For enhanced editing, install [texlab](https://github.com/latex-lsp/texlab) separately. Configure **TeX binary directory** and **texlab binary** in plugin settings if automatic detection does not find them.
 

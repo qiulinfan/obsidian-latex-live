@@ -1,5 +1,5 @@
 <h1 align="center">LaTeX Live</h1>
-<p align="center">在 Obsidian 中读写原生 LaTeX 项目，就地查看公式、证明引用和真实 PDF。</p>
+<p align="center">在 Obsidian 中就地读写数学，按需切入源码，配合 AI 补全并查看原生 PDF。</p>
 
 <p align="center">
   <a href="https://github.com/qiulinfan/obsidian-latex-live/commits/main"><img src="https://img.shields.io/github/last-commit/qiulinfan/obsidian-latex-live/main?style=flat-square&color=6c5ce7" alt="最近提交"></a>
@@ -11,6 +11,30 @@
 
 <p align="center"><a href="./README.md">English</a> | <b>简体中文</b></p>
 
+## 实时编辑模式 ⇄ 源码模式
+
+先在编辑器中阅读就地显示的公式、带编号的定理框和引用。需要直接操作 TeX 时，点击标题栏切到源码；再切回实时编辑模式，继续读写同一份 `.tex` 文件。
+
+![ElegantBook 中实际切换：实时编辑、源码、实时编辑](./docs/assets/showcase/editing-mode-switch-zh.gif)
+
+实时编辑模式也支持局部进入源码：光标触及公式时显示它的 TeX，离开后恢复渲染。下面的完整 ElegantBook 演示还展示了修改指数、恢复公式显示和更新 PDF。
+
+## 配合 YOLO，继续写证明
+
+单独安装 [YOLO](https://github.com/Lapis0x0/obsidian-yolo)，即可在 LaTeX 编辑器中获得实际模型生成的 ghost text 建议。Tab 将选中的证明片段补入正文，撤销还原原稿；Enter 继续正常写作。
+
+![实际 YOLO 请求、建议出现、Tab 接受与撤销](./docs/assets/showcase/yolo-assisted-writing-zh.gif)
+
+各片段保留正常播放速度，包含这次模型请求的实际等待、接受和撤销。剪辑省略了审阅建议与按键操作之间的停顿；它展示辅助写作流程，不用于比较模型速度。
+
+## 悬浮引用，沿证明继续阅读
+
+悬浮定理引用，在小窗查看证明引用图。点击节点，展开该定理的陈述和证明；可以继续沿引用浏览，也可以直接打开对应源文件位置。
+
+![引用悬浮、展开定理与证明，再打开源码](./docs/assets/showcase/ref-proof-graph-zh.gif)
+
+图中的关系来自当前 LaTeX 项目证明里的字面 `\ref`，表示明确写出的证明引用关系，不是经过逻辑验证的定理依赖。
+
 ## 边改边编译，源码与 PDF 双向跳转
 
 修改公式，查看原生 PDF 更新。再从光标定位到 PDF，或双击 PDF 回到对应源码行；多文件项目也能沿章节跳转。
@@ -21,7 +45,7 @@
 
 ![源码到 PDF，再从 PDF 回到源码](./docs/assets/showcase/bidirectional-synctex-zh.gif)
 
-## 在自己的模板里阅读，也能直接编辑
+## 不同模板，同一条编辑流程
 
 保留原来的 `.tex` 工程和文档类。公式、带编号的定理框和引用就地显示；光标进入公式时恢复源码，改完继续阅读。PDF 仍由原模板排版。
 
@@ -40,18 +64,16 @@ AMS / IEEE 片段包含实际修改；PLOS / REVTeX 展示完成全文构建后�
 
 </details>
 
-## 悬浮引用，沿证明继续阅读
+## 分享可独立阅读的 HTML
 
-悬浮定理引用，在小窗查看证明引用图。点击节点，展开该定理的陈述和证明；可以继续沿引用浏览，也可以直接打开对应源文件位置。
+导出自包含 HTML，保留数学、定理框、引用、文献、图片与支持范围内的 SVG 图形。读者无需 Obsidian 就能沿引用和目录跳转；导出报告列出未支持的内容。
 
-![引用悬浮、展开定理与证明，再打开源码](./docs/assets/showcase/ref-proof-graph-zh.gif)
-
-图中的关系来自当前 LaTeX 项目证明里的字面 `\ref`，表示明确写出的证明引用关系，不是经过逻辑验证的定理依赖。
+![实际导出的 HTML：SVG、代码、引用与目录跳转](./docs/assets/showcase/html-reading-edition-zh.gif)
 
 ## 更多写作细节
 
 <details>
-<summary>公式预览、补全与占位符、YOLO、TeX 图形、诊断和 HTML 导出</summary>
+<summary>公式预览、补全与占位符、TeX 图形、诊断和实时编译</summary>
 
 ### 写公式时，就能看到公式
 
@@ -65,12 +87,6 @@ texlab 提供命令补全与 snippet。Tab 在占位符间移动，Enter 续写�
 
 ![命令补全、占位符与环境续写](./docs/assets/showcase/smart-writing-zh.gif)
 
-### 接入自己选择的 AI 补全
-
-单独安装 [YOLO](https://github.com/Lapis0x0/obsidian-yolo)，即可在 LaTeX 编辑器中使用真实的 ghost text 建议。Tab 接受，Enter 继续写作，撤销还原源码。此片段从生成完成后开始，不用于比较模型速度。
-
-![Tab 接受实际 YOLO 建议，再撤销](./docs/assets/showcase/yolo-writing-zh.gif)
-
 ### 在编辑器里读 TeX 图形
 
 支持范围内的 TikZ 和表格可显示实际编译 PDF 的裁剪，让图形与周围的数学内容一起阅读。
@@ -82,12 +98,6 @@ texlab 提供命令补全与 snippet。Tab 在占位符间移动，Enter 续写�
 真实 TeX 诊断回到源码编辑器；修复期间保留已有 PDF。构建控件和诊断放在滚动 PDF 上方的独立区域。
 
 ![实际未定义命令错误及恢复编译](./docs/assets/showcase/diagnostics-recovery-zh.gif)
-
-### 分享可独立阅读的 HTML
-
-导出自包含 HTML，保留数学、定理框、引用、文献、图片与支持范围内的 SVG 图形。读者无需 Obsidian 就能沿引用和目录跳转；导出报告列出未支持的内容。
-
-![实际导出的 HTML：SVG、代码、引用与目录跳转](./docs/assets/showcase/html-reading-edition-zh.gif)
 
 ### 直接看一次实时编译
 
@@ -107,9 +117,9 @@ Overleaf 也提供[自动编译](https://docs.overleaf.com/getting-started/recom
 
 1. 安装桌面版 **Obsidian 1.13.7 或更新版本**，以及 [TeX Live](https://www.tug.org/texlive/)、[MacTeX](https://www.tug.org/mactex/) 等本机 TeX 发行版。
 2. 按下面的安装说明启用 LaTeX Live。
-3. 将 `.tex` 项目放进 vault，打开文件，点击编辑器标题栏的预览图标。
-4. 编辑并保存。默认停键 400 ms 后保存并请求编译；这不是 PDF 的生成耗时。
-5. 使用标题栏按钮或 **LaTeX Live: Toggle live preview** 切换编辑模式。需要完整构建时，执行 **LaTeX Live: Full build with latexmk (BibTeX/Biber, all passes)**。
+3. 将 `.tex` 项目放进 vault，打开文件，点击标题栏的 **Switch to live preview**，进入实时编辑模式，开始阅读和修改就地显示的数学内容。
+4. 点击预览图标打开 PDF，再编辑并保存。默认停键 400 ms 后保存并请求编译；这不是 PDF 的生成耗时。
+5. 需要时，通过标题栏或 **LaTeX Live: Toggle live preview** 切回源码。处理文献或完整构建时，执行 **LaTeX Live: Full build with latexmk (BibTeX/Biber, all passes)**。
 
 需要增强编辑功能时，另行安装 [texlab](https://github.com/latex-lsp/texlab)。如果自动检测找不到程序，在设置里填写 **TeX binary directory** 和 **texlab binary**。
 
