@@ -1,6 +1,6 @@
 {
   "name": "obsidian-latex-live",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Live LaTeX compilation and PDF preview for .tex files in Obsidian, driven by the TeX installation already on the machine",
   "main": "main.js",
   "private": true,
@@ -39,5 +39,8 @@
     "mathjax": "3.2.2",
     "obsidian": "latest",
     "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "dompurify": "3.4.16"
   }
 }

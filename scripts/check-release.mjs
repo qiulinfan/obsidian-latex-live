@@ -19,5 +19,6 @@ if (process.argv.includes("--assets")) {
   for (const file of ["main.js", "manifest.json", "styles.css"]) if (!existsSync(file) || !readFileSync(file).length) fail(`Missing or empty release asset: ${file}.`);
   const main = readFileSync("main.js", "utf8");
   if (!main.includes("SPDX-License-Identifier: MIT-0") || main.includes("sourceMappingURL=")) fail("Production bundle license or sourcemap boundary is incorrect.");
+  if (!main.includes("DOMPurify") || !main.includes("TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION")) fail("Bundled DOMPurify license is missing.");
 }
 console.log(`LaTeX Live ${manifest.version}: release metadata${process.argv.includes("--assets") ? " and assets" : ""} verified.`);

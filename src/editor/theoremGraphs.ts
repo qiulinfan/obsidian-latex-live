@@ -14,6 +14,7 @@ import { abortError } from "../tex/run";
 import { buildTheoremGraph, type TheoremGraph, type TheoremNode, type TheoremSource } from "../tex/theoremGraph";
 import { theoremMap } from "../tex/theorems";
 import { refNames, type LatexRefs } from "./latexRefs";
+import { safeHtmlFragment } from "./htmlFragment";
 
 interface Snapshot {
   root: string;
@@ -130,7 +131,7 @@ export class TheoremGraphs {
       const rendered = await emitSourceSlice(input, { key: source.key, visit: source.visit, nodes: source.nodes, excluded: source.excluded });
       this.check(signal, snapshot);
       const body = doc.createElement("div");
-      body.innerHTML = rendered.body;
+      body.appendChild(safeHtmlFragment(doc, rendered.body));
       section.appendChild(body);
       for (const [name, color] of rendered.colors) card.style.setProperty(`--llx-c-${colorId(name)}`, cssRgb(doc.body.classList.contains("theme-dark") ? darkText(color) : color));
       for (const footnote of rendered.footnotes) {
@@ -138,7 +139,7 @@ export class TheoremGraphs {
         note.className = "ll-theorem-footnote";
         note.appendChild(doc.createTextNode(`${footnote.mark} `));
         const text = doc.createElement("span");
-        text.innerHTML = footnote.html;
+        text.appendChild(safeHtmlFragment(doc, footnote.html));
         note.appendChild(text);
         section.appendChild(note);
       }

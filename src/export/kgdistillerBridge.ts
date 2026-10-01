@@ -107,10 +107,13 @@ function labelMath(env: NodeMathEnv, source?: string): ProjectMath {
   const output = new internals.output.chtml_ts.CHTML({ adaptiveCSS: true });
   const visitor = new internals.core.MmlTree.SerializedMmlVisitor.SerializedMmlVisitor();
   output.typeset = (item) => {
-    const template = env.document.createElement("template");
-    template.innerHTML = visitor.visitTree(item.root);
-    if (!template.content.firstElementChild) throw new Error("MathJax produced no MathML.");
-    return template.content.firstElementChild;
+    const Parser = env.document.defaultView!.DOMParser;
+    const parsed = new Parser().parseFromString(visitor.visitTree(item.root), "application/xml");
+    const math = parsed.documentElement;
+    if (parsed.querySelector("parsererror") || math.localName !== "math" || math.namespaceURI !== "http://www.w3.org/1998/Math/MathML") {
+      throw new Error("MathJax produced invalid MathML.");
+    }
+    return env.document.importNode(math, true);
   };
   const math = ProjectMath.create(env.mj, env.document, {
     statements: defs.statements, physics: defs.packages.has("physics"), unsupported: defs.unsupported,

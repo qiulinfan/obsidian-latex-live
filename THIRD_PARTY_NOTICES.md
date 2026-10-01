@@ -4,6 +4,7 @@ LaTeX Live's own software and authored documentation are MIT-0. Third-party code
 
 The production Obsidian bundle uses this repository's source and does not bundle a TeX engine, texlab, MathJax, pdf.js, CodeMirror or Lezer. Obsidian supplies its runtime APIs, CodeMirror/Lezer, MathJax and pdf.js. The user's separately installed TeX distribution and texlab are separate programs.
 
+- [DOMPurify](https://github.com/cure53/DOMPurify): Copyright Cure53 and other contributors. Bundled to sanitize theorem-card HTML, under its Apache-2.0 license option. The full license is in [licenses/DOMPurify-Apache-2.0.txt](licenses/DOMPurify-Apache-2.0.txt) and the production bundle.
 - [CodeMirror and Lezer](https://codemirror.net/): MIT upstream libraries, supplied by Obsidian at runtime.
 - [MathJax](https://github.com/mathjax/MathJax): Apache-2.0. The test dependency matches the runtime supplied by Obsidian. MathJax/font resources used in exported documents retain their upstream terms.
 - [pdf.js](https://github.com/mozilla/pdf.js): Apache-2.0, supplied by Obsidian at runtime.

@@ -658,7 +658,12 @@
   `src/editor/theoremGraphs.ts` owns bounded project snapshots and lazy source cards; its
   bibliography and aux data belong to that same committed snapshot. `emitSourceSlice` validates
   original node identity, visit and size before any image IO, follows original input targets,
-  and excludes contained proofs from statement content. Cards reuse the project's private
+  and excludes contained proofs from statement content. Card HTML enters the editor only
+  through `safeHtmlFragment` (DOMPurify per actual window): preserve generated MathJax CHTML
+  layout attributes, but never executable HTML, event handlers or external SVG glyph reuse.
+  Keep its upstream Apache-2.0 license in the source and production bundle. The Node bridge
+  parses generated MathML as XML, then applies its strict MathML allowlist.
+  Cards reuse the project's private
   MathJax and never run a build, probe or fragment compile. Unavailable drawings stay source.
   `theoremGraphHover` is LaTeX-specific: plain source refs, math refs and live chip metadata share
   the same literal key. Normal chip clicks and drag selection remain CodeMirror's. Mouse holds,
