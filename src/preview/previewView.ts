@@ -53,7 +53,8 @@ export class LatexPreviewView extends ItemView {
     root.empty();
     root.addClass("ll-preview");
 
-    const bar = root.createDiv({ cls: "ll-toolbar" });
+    const dock = root.createDiv({ cls: "ll-preview-dock" });
+    const bar = dock.createDiv({ cls: "ll-toolbar" });
     this.statusEl = bar.createDiv({ cls: "ll-status" });
     const actions = bar.createDiv({ cls: "ll-actions" });
     const button = (icon: string, label: string, run: () => void) => {
@@ -73,7 +74,7 @@ export class LatexPreviewView extends ItemView {
     button("move-horizontal", "Fit width", () => this.renderer?.fitWidth());
     button("scroll-text", "Show log", () => this.showLog());
 
-    this.problemsEl = root.createEl("details", { cls: "ll-problems" });
+    this.problemsEl = dock.createEl("details", { cls: "ll-problems" });
     this.renderer = new PdfRenderer(root);
     this.renderer.scrollEl.addEventListener("dblclick", (ev) => {
       void this.inverseSearch(ev);
@@ -106,6 +107,7 @@ export class LatexPreviewView extends ItemView {
   setRoot(root: string | null): void {
     if (root === this.root) return;
     this.root = root;
+    if (this.problemsEl) this.problemsEl.open = false;
     this.attach(root ? this.plugin.acquireSession(root) : null);
     (this.leaf as unknown as { updateHeader?: () => void }).updateHeader?.();
     this.render();
@@ -217,8 +219,8 @@ export class LatexPreviewView extends ItemView {
         });
       }
     }
-    // Open automatically when errors appear, keep the user's choice otherwise.
-    el.open = errors > 0 || (wasOpen && shown.length > 0);
+    // Diagnostics never open the dock; an explicit choice lasts until cleared or switched.
+    el.open = wasOpen && shown.length > 0;
   }
 
   private async inverseSearch(ev: MouseEvent): Promise<void> {

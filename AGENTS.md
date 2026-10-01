@@ -1,5 +1,13 @@
 # obsidian-latex-live agent guidance
 
+- Editor and gutter surfaces are transparent so vault/theme background-image snippets can
+  paint behind them; keep text, selection, tooltip and control opacity independent. Background
+  artwork and personal appearance settings belong to the vault's configuration, not this plugin.
+  The preview's build controls and diagnostics live in `.ll-preview-dock`, in normal layout
+  flow above the independently scrolling PDF viewport. Diagnostics start collapsed, never
+  auto-open on errors, retain an explicit choice across builds, and reset on root changes or
+  cleared diagnostics. Long lists scroll within the dock without covering the PDF.
+
 - This plugin is a thin Obsidian frontend over the TeX distribution already
   installed on the machine (pdfLaTeX, XeLaTeX, LuaLaTeX, latexmk, SyncTeX).
   It owns the editor view, the compile queue, log parsing, the PDF preview,
