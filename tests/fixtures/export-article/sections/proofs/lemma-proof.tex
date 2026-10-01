@@ -1,0 +1,9 @@
+% !TEX root = ../../main.tex
+% Nested: main.tex -> sections/method.tex -> this file. The magic comment is the
+% only way the root is found from here.
+\begin{proof}[Proof of \cref{lem:bias-variance}]
+  Expand the square in \cref{def:linear} and take expectations term by term, which gives
+  \eqref{eq:bv-expand}. The quadratic in $W$ is minimised by \eqref{eq:wstar}; substituting
+  it and using $(\vis\Sigma\vis)^{+}\vis\Sigma\vis(\vis\Sigma\vis)^{+} = (\vis\Sigma\vis)^{+}$
+  yields \eqref{eq:bv-bound}.
+\end{proof}

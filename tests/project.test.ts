@@ -9,6 +9,8 @@ import {
   preambleFiles,
   preambleOf,
   referencedFiles,
+  contextualFileReferences,
+  subfileSource,
 } from "../src/tex/project";
 
 function tree(files: Record<string, string>): string {
@@ -84,6 +86,36 @@ test("orphans compile on their own", () => {
 test("\\import resolves directory and file", () => {
   const refs = referencedFiles("\\subimport{parts/}{intro}\n", "/r");
   assert.deepEqual(refs, ["/r/parts/intro.tex"]);
+});
+
+test("import contexts carry nested and parent fallback paths through root discovery and preamble inputs", () => {
+  const dir = tree({
+    "main.tex": "\\documentclass{article}\n\\import{parts one/}{setup}\n\\begin{document}\n\\import{parts one/}{chapter}\n\\end{document}",
+    "parts one/setup.tex": "\\subimport{nested/}{definitions}",
+    "parts one/nested/definitions.tex": "\\newcommand{\\x}{x}",
+    "parts one/chapter.tex": "\\subimport{nested/}{child}",
+    "parts one/nested/child.tex": "\\input{parent notes}",
+    "parts one/parent notes.tex": "Parent fallback.",
+  });
+  const main = join(dir, "main.tex");
+  assert.equal(findRoot(join(dir, "parts one", "parent notes.tex"), dir), main);
+  assert.deepEqual([...preambleFiles(main)].sort(), [join(dir, "parts one", "setup.tex"), join(dir, "parts one", "nested", "definitions.tex")].sort());
+  const imported = contextualFileReferences('\\import{parts one/}{"chapter"}', dir)[0];
+  assert.equal(imported.path, join(dir, "parts one", "chapter.tex"));
+  const nested = contextualFileReferences("\\subinputfrom{nested/}{child}", dir, imported.inputDirs)[0];
+  assert.equal(nested.path, join(dir, "parts one", "nested", "child.tex"));
+  const fallback = contextualFileReferences("\\input{parent notes}", dir, nested.inputDirs)[0];
+  assert.equal(fallback.path, join(dir, "parts one", "parent notes.tex"));
+});
+
+test("subfile effective source retains offsets and omits commented markers, preamble, and tail", () => {
+  const src = "% \\begin{document}\n\\documentclass[main]{subfiles}\n\\newcommand{\\ignored}{X}\n\\begin{document}\nBody. % \\end{document}\n\\input{notes}\n\\end{document}\nTail.";
+  const body = subfileSource(src);
+  assert.equal(body.length, src.length);
+  assert.equal(body.split("\n").length, src.split("\n").length);
+  assert.equal(body.indexOf("Body."), src.indexOf("Body."));
+  assert.doesNotMatch(body, /ignored|Tail|documentclass/);
+  assert.match(body, /\\input\{notes\}/);
 });
 
 test("engine detection order", () => {

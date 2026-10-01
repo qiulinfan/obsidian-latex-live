@@ -1,0 +1,117 @@
+\chapter{线性代数工具}\label{chap:linalg}
+
+\section{内积与范数}\label{sec:inner}
+
+\begin{definition}{内积 Inner product}{inner}
+  实向量空间 $V$ 上的\term{内积}是满足对称、双线性、正定的映射
+  $\inner{\cdot}{\cdot}\colon V \times V \to \R$。它诱导范数 $\norm{x} = \sqrt{\inner{x}{x}}$。
+\end{definition}
+
+Cauchy--Schwarz 不等式 $\abs{\inner{x}{y}} \le \norm{x}\,\norm{y}$ 的证明只用到
+$\norm{x - t y}^2 \ge 0$ 对所有 $t \in \R$ 成立。
+
+\section{矩阵}\label{sec:matrices}
+
+几种常见的矩阵写法：
+\begin{equation}\label{eq:matrices}
+  A = \begin{pmatrix} 2 & -1 \\ -1 & 2 \end{pmatrix}, \quad
+  B = \begin{bmatrix} 1 & 0 & 0 \\ 0 & \cos\theta & -\sin\theta \\ 0 & \sin\theta & \cos\theta \end{bmatrix}, \quad
+  \det A = \begin{vmatrix} 2 & -1 \\ -1 & 2 \end{vmatrix} = 3.
+\end{equation}
+行内的小矩阵 $\left(\begin{smallmatrix} a & b \\ c & d \end{smallmatrix}\right)$ 不应撑开行距。
+一般的 $n \times n$ 矩阵：
+\[
+  M = \begin{pmatrix}
+    m_{11} & m_{12} & \cdots & m_{1n} \\
+    m_{21} & m_{22} & \cdots & m_{2n} \\
+    \vdots & \vdots & \ddots & \vdots \\
+    m_{n1} & m_{n2} & \cdots & m_{nn}
+  \end{pmatrix}, \qquad
+  \left[\begin{array}{c|c}
+    I_k & 0 \\ \hline
+    0 & \Lambda
+  \end{array}\right].
+\]
+
+\begin{theorem}{谱定理 Spectral theorem}{spectral}
+  实对称矩阵 $A \in \R^{n\times n}$ 可以正交对角化：存在正交矩阵 $Q$ 和对角阵
+  $\Lambda = \operatorname{diag}(\lambda_1, \dots, \lambda_n)$ 使
+  \begin{equation}\label{eq:spectral}
+    A = Q \Lambda Q\T = \sum_{i=1}^{n} \lambda_i\, q_i q_i\T.
+  \end{equation}
+\end{theorem}
+
+\begin{proposition}{半正定 Positive semidefinite}{psd}
+  若 \eqref{eq:spectral} 中所有 $\lambda_i \ge 0$，则对任意 $x$
+  \begin{equation}\label{eq:quad-form}
+    x\T A x = \sum_{i=1}^{n} \lambda_i \inner{q_i}{x}^2 \ge 0.
+  \end{equation}
+\end{proposition}
+
+\begin{proof}
+  把 \eqref{eq:spectral} 代入并利用 $Q$ 的正交性。协方差矩阵
+  $\Sigma = \E{(X - \mu)(X - \mu)\T}$ 满足 $v\T \Sigma v = \Var(v\T X) \ge 0$，
+  这正是定义~\ref{def:prob-space} 下方差非负的推论。
+\end{proof}
+
+几个恒等式，用 \texttt{gather}、\texttt{multline} 和 \texttt{split}：
+\begin{gather}
+  \tr(AB) = \tr(BA), \qquad \rank(A) + \dim\ker A = n, \label{eq:trace} \\
+  \ceil{x} - \floor{x} \in \set{0, 1}.
+\end{gather}
+\begin{multline}\label{eq:long}
+  \norm{x + y}^2 + \norm{x - y}^2 \\
+  = \inner{x}{x} + 2\inner{x}{y} + \inner{y}{y}
+  + \inner{x}{x} - 2\inner{x}{y} + \inner{y}{y}
+  = 2\norm{x}^2 + 2\norm{y}^2.
+\end{multline}
+\begin{equation}\label{eq:split}
+  \begin{split}
+    \pdv{}{x}\, \bigl(x\T A x\bigr) &= (A + A\T)\, x \\
+                                    &= 2 A x \quad (A = A\T).
+  \end{split}
+\end{equation}
+
+\section{图示}\label{sec:figures}
+
+图~\ref{fig:projection} 用 TikZ 画出正交投影，它的源码在一个单独的文件里，
+由本章 \verb|\input| 进来（路径相对于 main.tex）。
+
+\begin{figure}[htbp]
+  \centering
+  \input{figures/tikz-projection}
+  \caption{向量 $y$ 在子空间 $\operatorname{span}\{x\}$ 上的正交投影 $\hat y$。}
+  \label{fig:projection}
+\end{figure}
+
+交换图（tikz-cd，MathJax 无法渲染）：
+\begin{equation*}
+  \begin{tikzcd}
+    V \arrow[r, "A"] \arrow[d, "P"'] & W \arrow[d, "P'"] \\
+    V' \arrow[r, "A'"'] & W'
+  \end{tikzcd}
+\end{equation*}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.55\linewidth]{figures/heatmap.png}
+  \caption{一张合成的热力图（由 ImageMagick 生成）。}
+  \label{fig:heatmap}
+\end{figure}
+
+\begin{table}[htbp]
+  \centering
+  \caption{矩阵分解一览}\label{tab:decomp}
+  \begin{tabular}{lll}
+    \toprule
+    分解 & 形式 & 条件 \\
+    \midrule
+    谱分解 & $A = Q\Lambda Q\T$ & $A = A\T$ \\
+    SVD & $A = U \Sigma V\T$ & 任意 $A$ \\
+    Cholesky & $A = L L\T$ & $A \succ 0$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+回顾第~\ref{chap:prob} 章：式~\eqref{eq:total-exp} 与 \eqref{eq:var-def} 在投影观点下都是
+Pythagoras 定理，见~\cite{wang2022linalg}。

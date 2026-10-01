@@ -1,0 +1,33 @@
+% Synthetic pdfLaTeX article for LaTeX Live: local .sty package + \input'ed sections.
+% All content is invented for testing.
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{localnotes}
+
+\title{A Toy Analysis of Masked Reconstruction\thanks{Synthetic document for editor tests.}}
+\author{Test Author}
+\date{September 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+  We study a toy objective $\loss = \Exp_{\mask}\norm{\vx - f_{\vtheta}(\mask \odot \vx)}^2$
+  and show two elementary bounds. Everything here is made up for testing.
+\end{abstract}
+
+\input{sections/intro}
+\input{sections/method}
+\input{sections/results}
+
+\appendix
+\input{sections/appendix}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

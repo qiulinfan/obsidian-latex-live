@@ -1,0 +1,7 @@
+% The source of the fragment pages here: the probe pass on pdfLaTeX and XeLaTeX, dvisvgm 3.6.
+\documentclass{article}
+\usepackage{amsmath,tikz}
+\NewDocumentCommand{\pair}{m o}{\langle #1 \IfValueT{#2}{\mid #2}\rangle}
+\begin{document}
+Inline $\pair{x_1}[y]$ text, \tikz[baseline=-0.5ex]\draw[red] (0,0) circle (0.8ex); and \tikz\draw[->] (0,0) -- (1em,1ex); then $\pair{z}$.
+\end{document}

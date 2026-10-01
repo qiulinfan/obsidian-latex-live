@@ -1,0 +1,226 @@
+llxinfo{equation-tag-side}{right}
+llxinfo{today}{September 30, 2026}
+llxname{contents}{目录}
+llxname{listfigure}{插图目录}
+llxname{listtable}{表格目录}
+llxname{figure}{图}
+llxname{table}{表}
+llxname{bib}{Bibliography}
+llxname{ref}{References}
+llxname{index}{索\protect \hspace  {2em}引}
+llxname{part}{}
+llxname{chapter}{Chapter}
+llxname{appendix}{附录}
+llxname{abstract}{}
+llxname{proof}{证明}
+llxname{lstlisting}{Listing}
+llxname{author}{\kaishu 作者：}
+llxname{institute}{\kaishu 组织：}
+llxname{date}{\kaishu 时间：}
+llxname{version}{\kaishu 版本：}
+llxname{theorem}{定理}
+llxname{definition}{定义}
+llxname{postulate}{公设}
+llxname{axiom}{公理}
+llxname{corollary}{推论}
+llxname{lemma}{引理}
+llxname{proposition}{命题}
+llxname{example}{例题}
+llxname{exercise}{练习}
+llxname{problem}{问题}
+llxname{solution}{解}
+llxname{note}{笔记}
+llxname{remark}{注}
+llxname{assumption}{假设}
+llxname{conclusion}{结论}
+llxname{property}{性质}
+llxcolor{structurecolor}{rgb}{0.23529,0.44315,0.71765}
+llxcolor{main}{rgb}{0,0.65099,0.32158}
+llxcolor{second}{rgb}{1,0.5255,0.09413}
+llxcolor{third}{rgb}{0,0.68234,0.96863}
+llxcolor{winered}{rgb}{0.5,0,0}
+llxcolor{coverlinecolor}{rgb}{1,0.5255,0.09413}
+llxenv{definition}{\protected macro:->\__cmd_start_env:nnnnn { g o t\label g }{definition}{\__cmd_grab_G:w \__cmd_grab_D:w []\__cmd_grab_t:w \label \__cmd_grab_G:w }{}{}}
+llxenv{note}{macro:-> \par \noindent \makebox [-3pt][r]{ \scriptsize \color {red!90}\textdbend \quad } \textbf {\color {second}\notename } \citshape }
+llxenv{theorem}{\protected macro:->\__cmd_start_env:nnnnn { g o t\label g }{theorem}{\__cmd_grab_G:w \__cmd_grab_D:w []\__cmd_grab_t:w \label \__cmd_grab_G:w }{}{}}
+llxenv{proof}{macro:-> \par \noindent \textbf {\color {second}\proofname \;} \color {black!90}\cfs }
+llxenv{example}{macro:->\@protected@testopt \example \\example {}}
+llxenv{remark}{macro:->\noindent \textbf {\color {second}\remarkname }}
+llxenv{proposition}{\protected macro:->\__cmd_start_env:nnnnn { g o t\label g }{proposition}{\__cmd_grab_G:w \__cmd_grab_D:w []\__cmd_grab_t:w \label \__cmd_grab_G:w }{}{}}
+llxenv{lemma}{\protected macro:->\__cmd_start_env:nnnnn { g o t\label g }{lemma}{\__cmd_grab_G:w \__cmd_grab_D:w []\__cmd_grab_t:w \label \__cmd_grab_G:w }{}{}}
+llxenv{corollary}{\protected macro:->\__cmd_start_env:nnnnn { g o t\label g }{corollary}{\__cmd_grab_G:w \__cmd_grab_D:w []\__cmd_grab_t:w \label \__cmd_grab_G:w }{}{}}
+llxenv{exercise}{macro:->\@protected@testopt \exercise \\exercise {}}
+llxenv{solution}{macro:->\par \noindent \textbf {\color {main}\solutionname } \citshape }
+llxinfo{fontsize}{10.95}
+llxinfo{tocdepth}{1}
+llxinfo{secnumdepth}{5}
+llxinfo{citestyle}{numeric-comp}
+llxinfo{sortcites}{1}
+llxinfo{today}{September 30, 2026}
+llxinfo{title-date}{2026 年 9 月}
+llxin{}{ursfs.fd}{31}
+llxout{}{ursfs.fd}
+llxin{}{umsa.fd}{31}
+llxout{}{umsa.fd}
+llxin{}{umsb.fd}{31}
+llxout{}{umsb.fd}
+llxstep{page}{B}{}{main.tex}{31}
+llxinfo{tocdepth}{1}
+llxstep{page}{ii}{}{main.tex}{35}
+llxin{chapters}{ch1.tex}{36}
+llxstep{chapter}{1}{chapters}{ch1.tex}{1}
+llxstep{bookmark@seq@number}{1}{chapters}{ch1.tex}{1}
+llxtoc{chapter}{\protect \numberline {第一章}概率空间与期望}{chapters}{ch1.tex}{1}
+llxstep{section}{1.1}{chapters}{ch1.tex}{6}
+llxstep{bookmark@seq@number}{2}{chapters}{ch1.tex}{6}
+llxtoc{section}{\protect \numberline {1.1}基本定义}{chapters}{ch1.tex}{6}
+llxstep{tcb@cnt@definition}{1.1}{chapters}{ch1.tex}{8}
+llxstep{tcb@cnt@definition}{1.1}{chapters}{ch1.tex}{8}
+llxstep{equation}{1.1}{chapters}{ch1.tex}{22}
+llxstep{section}{1.2}{chapters}{ch1.tex}{37}
+llxstep{bookmark@seq@number}{3}{chapters}{ch1.tex}{37}
+llxtoc{section}{\protect \numberline {1.2}方差与条件期望}{chapters}{ch1.tex}{37}
+llxstep{equation}{1.2}{chapters}{ch1.tex}{43}
+llxstep{equation}{1.3}{chapters}{ch1.tex}{43}
+llxstep{tcb@cnt@theorem}{1.1}{chapters}{ch1.tex}{46}
+llxstep{tcb@cnt@theorem}{1.1}{chapters}{ch1.tex}{46}
+llxstep{equation}{1.4}{chapters}{ch1.tex}{48}
+llxcite{zhang2020notes}{5}{}
+llxstep{cbx@tempcntb}{-1}{chapters}{ch1.tex}{61}
+llxstep{exam}{1.1}{chapters}{ch1.tex}{64}
+llxstep{page}{2}{chapters}{ch1.tex}{67}
+llxstep{section}{1.3}{chapters}{ch1.tex}{74}
+llxstep{bookmark@seq@number}{4}{chapters}{ch1.tex}{74}
+llxtoc{section}{\protect \numberline {1.3}集中不等式}{chapters}{ch1.tex}{74}
+llxstep{enumi}{{(a)}}{chapters}{ch1.tex}{78}
+llxstep{Item}{1}{chapters}{ch1.tex}{78}
+llxstep{enumi}{{(b)}}{chapters}{ch1.tex}{79}
+llxstep{Item}{2}{chapters}{ch1.tex}{79}
+llxstep{enumi}{{(c)}}{chapters}{ch1.tex}{80}
+llxstep{Item}{3}{chapters}{ch1.tex}{80}
+llxcite{li2019lln}{2}{}
+llxstep{cbx@tempcntb}{-1}{chapters}{ch1.tex}{89}
+llxcite{smith2021concentration}{3}{}
+llxstep{cbx@tempcntb}{3}{chapters}{ch1.tex}{89}
+llxstep{cbx@tempcnta}{1}{chapters}{ch1.tex}{89}
+llxstep{footnote}{1}{chapters}{ch1.tex}{97}
+llxstep{Hfootnote}{1.1}{chapters}{ch1.tex}{97}
+llxout{chapters}{ch1.tex}
+llxstep{page}{3}{chapters}{ch1.tex}{36}
+llxin{chapters}{ch2.tex}{37}
+llxstep{chapter}{2}{chapters}{ch2.tex}{1}
+llxstep{bookmark@seq@number}{5}{chapters}{ch2.tex}{1}
+llxtoc{chapter}{\protect \numberline {第二章}线性代数工具}{chapters}{ch2.tex}{1}
+llxstep{section}{2.1}{chapters}{ch2.tex}{3}
+llxstep{bookmark@seq@number}{6}{chapters}{ch2.tex}{3}
+llxtoc{section}{\protect \numberline {2.1}内积与范数}{chapters}{ch2.tex}{3}
+llxstep{tcb@cnt@definition}{2.1}{chapters}{ch2.tex}{5}
+llxstep{tcb@cnt@definition}{2.1}{chapters}{ch2.tex}{5}
+llxstep{section}{2.2}{chapters}{ch2.tex}{13}
+llxstep{bookmark@seq@number}{7}{chapters}{ch2.tex}{13}
+llxtoc{section}{\protect \numberline {2.2}矩阵}{chapters}{ch2.tex}{13}
+llxstep{equation}{2.1}{chapters}{ch2.tex}{16}
+llxstep{tcb@cnt@theorem}{2.1}{chapters}{ch2.tex}{36}
+llxstep{tcb@cnt@theorem}{2.1}{chapters}{ch2.tex}{36}
+llxstep{equation}{2.2}{chapters}{ch2.tex}{39}
+llxstep{tcb@cnt@proposition}{2.1}{chapters}{ch2.tex}{44}
+llxstep{tcb@cnt@proposition}{2.1}{chapters}{ch2.tex}{44}
+llxstep{equation}{2.3}{chapters}{ch2.tex}{46}
+llxstep{equation}{2.4}{chapters}{ch2.tex}{61}
+llxstep{equation}{2.5}{chapters}{ch2.tex}{61}
+llxstep{equation}{2.6}{chapters}{ch2.tex}{67}
+llxstep{page}{4}{chapters}{ch2.tex}{67}
+llxstep{equation}{2.7}{chapters}{ch2.tex}{68}
+llxstep{section}{2.3}{chapters}{ch2.tex}{75}
+llxstep{bookmark@seq@number}{8}{chapters}{ch2.tex}{75}
+llxtoc{section}{\protect \numberline {2.3}图示}{chapters}{ch2.tex}{75}
+llxin{figures}{tikz-projection.tex}{82}
+llxopen{1}
+llxclose{1}
+llxfrag{1}{104.79109pt}{0.0pt}{206.20293pt}{6}
+llxout{figures}{tikz-projection.tex}
+llxstep{figure}{2.1}{chapters}{ch2.tex}{83}
+llxopen{0}
+llxblock{0}{5}
+llxclose{0}
+llxstep{figure}{2.2}{chapters}{ch2.tex}{98}
+llxstep{table}{2.1}{chapters}{ch2.tex}{104}
+llxcite{wang2022linalg}{6}{}
+llxstep{cbx@tempcntb}{-1}{chapters}{ch2.tex}{117}
+llxout{chapters}{ch2.tex}
+llxstep{page}{5}{chapters}{ch2.tex}{37}
+llxin{chapters}{ch3.tex}{38}
+llxstep{chapter}{3}{chapters}{ch3.tex}{1}
+llxstep{bookmark@seq@number}{9}{chapters}{ch3.tex}{1}
+llxtoc{chapter}{\protect \numberline {第三章}优化与收敛}{chapters}{ch3.tex}{1}
+llxstep{section}{3.1}{chapters}{ch3.tex}{7}
+llxstep{bookmark@seq@number}{10}{chapters}{ch3.tex}{7}
+llxtoc{section}{\protect \numberline {3.1}凸函数}{chapters}{ch3.tex}{7}
+llxstep{tcb@cnt@definition}{3.1}{chapters}{ch3.tex}{9}
+llxstep{tcb@cnt@definition}{3.1}{chapters}{ch3.tex}{9}
+llxstep{tcb@cnt@lemma}{3.1}{chapters}{ch3.tex}{18}
+llxstep{tcb@cnt@lemma}{3.1}{chapters}{ch3.tex}{18}
+llxstep{equation}{3.1}{chapters}{ch3.tex}{20}
+llxstep{section}{3.2}{chapters}{ch3.tex}{25}
+llxstep{bookmark@seq@number}{11}{chapters}{ch3.tex}{25}
+llxtoc{section}{\protect \numberline {3.2}梯度下降}{chapters}{ch3.tex}{25}
+llxstep{tcb@cnt@theorem}{3.1}{chapters}{ch3.tex}{34}
+llxstep{tcb@cnt@theorem}{3.1}{chapters}{ch3.tex}{34}
+llxstep{equation}{3.2}{chapters}{ch3.tex}{36}
+llxstep{equation}{3.3}{chapters}{ch3.tex}{49}
+llxstep{tcb@cnt@corollary}{3.1}{chapters}{ch3.tex}{53}
+llxstep{tcb@cnt@corollary}{3.1}{chapters}{ch3.tex}{53}
+llxstep{section}{3.3}{chapters}{ch3.tex}{57}
+llxstep{bookmark@seq@number}{12}{chapters}{ch3.tex}{57}
+llxtoc{section}{\protect \numberline {3.3}随机梯度}{chapters}{ch3.tex}{57}
+llxstep{equation}{3.4}{chapters}{ch3.tex}{61}
+llxstep{page}{6}{chapters}{ch3.tex}{63}
+llxcite{chen2018sgd}{1}{}
+llxstep{cbx@tempcntb}{-1}{chapters}{ch3.tex}{65}
+llxcite{zhang2020notes}{5}{}
+llxstep{cbx@tempcntb}{2}{chapters}{ch3.tex}{65}
+llxstep{equation}{3.5}{chapters}{ch3.tex}{68}
+llxstep{exer}{3.1}{chapters}{ch3.tex}{77}
+llxin{}{Uding.fd}{77}
+llxout{}{Uding.fd}
+llxstep{bookmark@seq@number}{13}{chapters}{ch3.tex}{86}
+llxtoc{section}{第三章~练习}{chapters}{ch3.tex}{86}
+llxin{}{uornementsadf.fd}{86}
+llxout{}{uornementsadf.fd}
+llxstep{enumi}{{\protect \color  {structurecolor}1.}}{chapters}{ch3.tex}{86}
+llxstep{Item}{4}{chapters}{ch3.tex}{86}
+llxstep{enumi}{{\protect \color  {structurecolor}2.}}{chapters}{ch3.tex}{87}
+llxstep{Item}{5}{chapters}{ch3.tex}{87}
+llxstep{enumi}{{\protect \color  {structurecolor}3.}}{chapters}{ch3.tex}{88}
+llxstep{Item}{6}{chapters}{ch3.tex}{88}
+llxout{chapters}{ch3.tex}
+llxstep{page}{7}{chapters}{ch3.tex}{38}
+llxin{chapters}{appendix.tex}{41}
+llxstep{chapter}{A}{chapters}{appendix.tex}{1}
+llxstep{bookmark@seq@number}{14}{chapters}{appendix.tex}{1}
+llxtoc{chapter}{\protect \numberline {A}记号表}{chapters}{appendix.tex}{1}
+llxin{chapters}{notation.tex}{5}
+llxstep{table}{A.1}{chapters}{notation.tex}{5}
+llxout{chapters}{notation.tex}
+llxstep{section}{A.1}{chapters}{appendix.tex}{7}
+llxstep{bookmark@seq@number}{15}{chapters}{appendix.tex}{7}
+llxtoc{section}{\protect \numberline {A.1}交叉引用汇总}{chapters}{appendix.tex}{7}
+llxcite{demo2024web}{4}{}
+llxstep{cbx@tempcntb}{-1}{chapters}{appendix.tex}{19}
+llxout{chapters}{appendix.tex}
+llxstep{page}{8}{chapters}{appendix.tex}{41}
+llxstep{bookmark@seq@number}{16}{chapters}{appendix.tex}{43}
+llxtoc{chapter}{参考文献}{chapters}{appendix.tex}{43}
+llxcite{chen2018sgd}{1}{}
+llxstep{llx@bib}{chen2018sgd}{chapters}{appendix.tex}{43}
+llxcite{li2019lln}{2}{}
+llxstep{llx@bib}{li2019lln}{chapters}{appendix.tex}{43}
+llxcite{smith2021concentration}{3}{}
+llxstep{llx@bib}{smith2021concentration}{chapters}{appendix.tex}{43}
+llxcite{demo2024web}{4}{}
+llxstep{llx@bib}{demo2024web}{chapters}{appendix.tex}{43}
+llxcite{zhang2020notes}{5}{}
+llxstep{llx@bib}{zhang2020notes}{chapters}{appendix.tex}{43}
+llxcite{wang2022linalg}{6}{}
+llxstep{llx@bib}{wang2022linalg}{chapters}{appendix.tex}{43}
+llxstep{page}{9}{chapters}{appendix.tex}{45}

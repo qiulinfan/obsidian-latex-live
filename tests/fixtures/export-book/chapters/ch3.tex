@@ -1,0 +1,89 @@
+\chapter{优化与收敛}\label{chap:opt}
+
+% A macro defined inside a chapter, not in macros.tex: renderers must scan this file too.
+\newcommand{\Lip}{L}
+\newcommand{\grad}{\nabla}
+
+\section{凸函数}\label{sec:convex}
+
+\begin{definition}{凸函数 Convex function}{convex}
+  函数 $f\colon \R^d \to \R$ 称为凸的，若对任意 $x, y$ 和 $t \in [0,1]$，
+  \[
+    f\bigl(t x + (1-t) y\bigr) \le t f(x) + (1-t) f(y).
+  \]
+  若 $\grad f$ 是 $\Lip$-Lipschitz 的，即 $\norm{\grad f(x) - \grad f(y)} \le \Lip \norm{x - y}$，
+  则称 $f$ 是 $\Lip$-光滑的。
+\end{definition}
+
+\begin{lemma}[下降引理 Descent lemma]\label{lem:descent}
+  若 $f$ 是 $\Lip$-光滑的，则
+  \begin{equation}\label{eq:descent}
+    f(y) \le f(x) + \inner{\grad f(x)}{y - x} + \frac{\Lip}{2}\norm{y - x}^2 .
+  \end{equation}
+\end{lemma}
+
+\section{梯度下降}\label{sec:gd}
+
+梯度下降的迭代为 $x_{k+1} = x_k - \eta \grad f(x_k)$，目标是
+$x^\star \in \argmin_{x \in \R^d} f(x)$；写成展示公式时下标放在正下方：
+\[
+  x^\star = \argmin_{x \in \R^d} \; \loss[x] + \frac{\lambda}{2}\norm{x}^2 .
+\]
+默认参数下 $\loss = \loss[\theta]$。
+
+\begin{theorem}[梯度下降的收敛率]\label{thm:gd-rate}
+  设 $f$ 凸且 $\Lip$-光滑，步长 $\eta = 1/\Lip$，则
+  \begin{equation}
+    f(x_k) - f(x^\star) \le \frac{\Lip \norm{x_0 - x^\star}^2}{2k}.
+    \label{eq:gd-rate}
+  \end{equation}
+\end{theorem}
+
+\begin{proof}
+  由引理~\ref{lem:descent} 与 $\eta = 1/\Lip$，
+  \begin{align}
+    f(x_{k+1}) &\le f(x_k) - \frac{1}{2\Lip}\norm{\grad f(x_k)}^2 \label{eq:gd-step} \\
+    \intertext{再由凸性 $f(x_k) - f(x^\star) \le \inner{\grad f(x_k)}{x_k - x^\star}$，配方得}
+    f(x_{k+1}) - f(x^\star)
+      &\le \frac{\Lip}{2}\Bigl( \norm{x_k - x^\star}^2 - \norm{x_{k+1} - x^\star}^2 \Bigr). \notag
+  \end{align}
+  对 $k$ 求和并利用 \eqref{eq:gd-step} 的单调性即得。
+\end{proof}
+
+\begin{corollary}{迭代复杂度}{gd-complexity}
+  要达到 $f(x_k) - f(x^\star) \le \eps$，只需 $k \ge \ceil*{\frac{\Lip \norm{x_0 - x^\star}^2}{2\eps}}$ 步。
+\end{corollary}
+
+\section{随机梯度}\label{sec:sgd}
+
+用无偏估计 $g_k$ 替代梯度，$\E{g_k \given x_k} = \grad f(x_k)$。由第~\ref{chap:prob} 章的
+全期望公式~\eqref{eq:total-exp}，
+\begin{equation}\label{eq:sgd-var}
+  \E{\norm{g_k}^2} = \norm{\grad f(x_k)}^2 + \E{\Var(g_k \given x_k)},
+\end{equation}
+其中向量方差按 \eqref{eq:var-def} 逐坐标定义，再用定理~\ref{thm:spectral} 的谱分解与
+\eqref{eq:quad-form} 控制二次型。这些结果见~\cite{chen2018sgd,zhang2020notes}。
+
+分段步长：
+\begin{equation}\label{eq:schedule}
+  \eta_k =
+  \begin{cases}
+    \eta_0, & k < K_0, \\[2pt]
+    \dfrac{\eta_0}{\sqrt{k - K_0 + 1}}, & k \ge K_0.
+  \end{cases}
+\end{equation}
+
+\begin{exercise}
+  证明对 $\mu$-强凸且 $\Lip$-光滑的 $f$，梯度下降线性收敛：
+  $\norm{x_k - x^\star}^2 \le \left(1 - \frac{\mu}{\Lip}\right)^k \norm{x_0 - x^\star}^2$。
+\end{exercise}
+
+\begin{solution}
+  在 \eqref{eq:descent} 中取 $y = x^\star$ 并用强凸性下界。
+\end{solution}
+
+\begin{problemset}
+  \item 证明 \eqref{eq:quad-form} 蕴含 $\lambda_{\min}(A) \norm{x}^2 \le x\T A x$。
+  \item 对 $f(x) = \frac12 x\T A x - b\T x$，写出 $\Lip$ 与 $\mu$，并与表~\ref{tab:decomp} 对照。
+  \item 计算 $\KL{\mathcal{N}(\mu_1, \sigma^2)}{\mathcal{N}(\mu_2, \sigma^2)}$。
+\end{problemset}

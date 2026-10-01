@@ -1127,3 +1127,462 @@ P4–P6 的审查里落在共享部分（`src/editor/shared/`，规范副本在 
 P5 的旧裁剪现在按相同文本的出现次数区分，首次编译的悬停等待按主文件释放，卸载结束全部等待。
 真实运行时的三个框头、PNG、中文 PDF 第一页、四个裁剪与深色反色正常；关闭预览后的运行时 API 返回真实 TeX 片段，
 关闭 fallback 时显示 MathJax 错误。Typst 纸面/数学渲染和实际光标 SVG 预览正常，共享修复已部署到三个既有 vault。
+
+## HTML 导出（2026-09-29 起）
+
+目标：命令 “Export to HTML” 把一个 LaTeX 项目导出成一个自包含、不含 JavaScript 的 HTML 文件，重点是 elegantbook 这类模板
+（`lang=cn` 的 ctex/XeLaTeX、带类名和编号的彩色定理框、按章编号的公式、`\ref`/`\eqref`/`\autoref`/`\cref` 的文字、biblatex
+引用、`\include` 的多文件章节、图、TikZ/tikz-cd）。做法是自己的转换器：结构来自插件自己的解析树，编号、名字和颜色来自 TeX
+本身（多跑一遍“探针”，`llxprobe.sty` 把每次计数器步进、目录项、类名和颜色按文档顺序写进 `<job>.llx`），TeX 以外画不了的
+构造（TikZ、未知环境、MathJax 拒绝的公式）以后由同一遍的 DVI 经 dvisvgm 变成 SVG 片段。研究和设计在 scratchpad 的
+`html-export/`（report.md、design.md，选型的证据：make4ht、pandoc、lwarp、unified-latex-to-hast 都丢中文或编号）。
+
+默认选择（用户可以改）：参考文献是可重排的 HTML 列表；标题是紧凑的页头而不是封面；正文用读者系统字体加中文衬线字体栈
+（Songti SC、Noto Serif CJK SC、Source Han Serif SC），不嵌入正文字体；PDF 模式的探针（LuaLaTeX）留到后续，不在首版，但 `\includepdf`
+的页面在 S6 以图片导出。用户真实的 elegantbook 笔记还用 `\usepackage[utf8]{inputenc}`（和 ctex 一起）、pdfpages、listings、
+algorithm + algpseudocode、`\setcounter{tocdepth}{2}`、`chinesefont=nofont`，第一版都要处理。
+
+- [x] S1 流水线骨架（2026-09-29，见下）：`runTex`、解析器、签名表、计划、探针、`.llx` 读取和重同步、报告、页面组装、
+      只有文字的输出、命令（保存对话框、带取消的进度 Notice、陈旧时完整构建、写文件）。
+- [x] S2 数学和编号（2026-09-29，见下）：`ExportMath`（私有 CHTML 输出，只带用到的字形和字体，数据 URI），每行
+      `\tag{TeX 的编号}`，`\intertext` 拆分，计划里的 `mathOk`，失败时 `<pre>`。
+- [x] S3 引用、文献、脚注（2026-09-29，见下）：biblatex 的 `.bbl`（中文作者）、numeric-comp、natbib 的 `\bibitem`，`\citet`，
+      脚注标记。
+- [x] S4 外观（2026-09-30，见下）：`profiles.ts`（elegantbook 和标准类的配置、ctex 名字、普查分类、tcolorbox 框和 elegant 的
+      head、amsthm 的风格、紧凑页头、按 `tocdepth` 的目录、明暗两套 CSS 和暗色的对比度、中文衬线字体栈）、导出器分成
+      `prepareExport`/`emitExport`、`scripts/export-smoke.mjs`、忠实性断言 3、4。
+- [x] S5 TeX 片段（2026-09-30，见下）：dvisvgm（`--exact-bbox --currentcolor --font-format=woff2`），每页的标记（片段号、基线），
+      按片段加前缀，清理，暗色主题的颜色，片段里的步进按片段号丢掉并记为显示过的编号，失败时显示源码。
+- [x] S6 浮动体、图片、表格（2026-09-30，见下）：图注（`\caption*`、subcaption 的 `(a)`、`\captionof`）、PNG/JPG/GIF/SVG 图片、
+      PDF 图片和 `\includepdf` 的页面（宿主的 `pdfImages`：Obsidian 的 pdf.js）、tabular（l/c/r/p/m/b、竖线、`\hline`、booktabs、
+      `\cline`/`\cmidrule`、`\multicolumn`；multirow、colortbl 交给 TeX）、`\lstinputlisting`、algorithm 浮动体。
+- [ ] S7a 界面（2026-09-30，见下）：报告弹窗（按严重程度分组，位置可点）、Open/Reveal（Electron 的 shell）、`exportFolder`
+      设置、会话内记住每个主文件的目标、`.tex` 文件的右键菜单。S7b（以后）：文件夹打包。
+- [x] S8 首版加固：elegantnote/elegantpaper/ctex 配置、`\newenvironment` 展开、`\import`/`\subfile`、带空格和 Unicode 的路径。
+      用户以当前验证为基线进入功能研发；65 页冷导出 11.335 s、构建新鲜时 2.931 s，10 s 保留为后续优化目标。
+      LuaLaTeX 的 PDF 模式探针、S7b 文件夹打包、S9 印刷 SVG 分页模式留到后续。
+
+### S1：流水线骨架（2026-09-29）
+
+模块（`src/export/`，除了 `command.ts` 都不依赖 obsidian 模块，整条流水线在 Node 测试里对真实 TeX 跑）：
+
+- **`src/tex/run.ts` 的 `runTex`**：从 `Compiler.exec` 抽出来（自己的进程组、无进展看门狗、5 分钟超时、`AbortSignal` 中止时杀整组并
+  reject `AbortError`，进程关闭之后才 settle）。`Compiler` 用它（dispose 时 abort 自己的 `AbortController`），探针也用它；
+  `fragment.ts` 暂时还是自己 spawn（规则相同），`killTree` 搬到 `run.ts`。
+- **解析器 `texTree.ts`**：容错、按偏移精确，顶层节点正好覆盖整个文件。节点：text、space、par、comment、group、macro、env、
+  math、verb。和编辑器的词法规则一致（latexHighlight 的 `MATH_ENVS`、`VERBATIM_ENVS`、第一个出现在行首的 `\iffalse`；行内公式
+  跳过文字参数，`$f = \text{当 $x$ 时} 1$` 是一个公式，段落结束行内公式）。TeX 自己的规则：`%` 吃掉行尾换行和下一行的缩进（所以
+  跨行的 `a-%↵-b` 是一个连字符连接，注释后面的空行仍然分段）；`\verb`、`\lstinline`、`\mintinline`、verbatim 类环境是原样文字，
+  listings/minted 的选项先读成参数；`\url` 和 `\href` 的地址是原样参数（里面的 `%`、`#`、`_` 是字符）；定义（`\newcommand`、`\def`、
+  `\let`、`\newenvironment`、`\NewDocumentCommand`……以及文档改名的定义命令 `\nc`）是代码，一个节点；`\end` 关掉同名最近的
+  环境，里面没关的环境到它为止，谁也没开的 `\end` 是一个 `end` 宏。参数按签名读（`s`、`t\label`、`o`/`O{}`、`m`、`g`、原样的 `v`），
+  所以 elegantbook 的 `g o t\label g`（`{标题}{标签}` 和 `[标题]\label{k}` 两种写法）、用户宏、`\\[2pt]` 都和 TeX 读得一样；参数之间
+  最多隔一个换行，空行结束查找。
+- **签名表 `signatures.ts`**：内置的命令和环境（LaTeX、graphicx、hyperref、cleveref、natbib/biblatex、listings、pdfpages、algpseudocode、
+  tabular 等），然后是项目的：`Definitions.macros`（`[n][默认]`）、源码里 `\NewDocumentCommand`/`\newenvironment`/`\NewDocumentEnvironment`
+  的参数说明、定理表的环境；探针之后再加上普查（census）里 TeX 自己定义的环境（`\meaning` 里 xparse 的参数说明、`\@protected@testopt`
+  是一个可选参数、`#1#2` 的个数），只补项目不知道的环境，然后用新签名重新解析（`reparse`）。
+- **计划 `plan.ts`**：文件按“从主文件目录出发的路径、正斜杠、带扩展名”作键（`chapters/ch1.tex`，和 `\input` 写的、和探针记的
+  `\CurrentFilePathUsed` 一样）。访问顺序：主文件是 0 号，正文里每个 `\input`/`\include`/`\subfile` 按文档顺序递归开下一个访问
+  （同一个文件读两次就是两次访问），遵守 `\includeonly`；导言区读的文件（`macros.tex`）要解析但不算访问（探针在
+  `\begin{document}` 之后才记录）。片段：TikZ 家族的图和 `\tikz` 是行内片段（`llxfrag`，lrbox），带 tikz-cd 的显示公式和输出器
+  不认识的环境是块（`llxblock`，不装盒子，不改变编号）。插入都在行内：`\begin{llxfrag}{7}` 紧贴在构造前面，`\end{llxfrag}` 紧贴在后面，
+  副本和原文件行数一样、插入之外逐字节相同。探针配置：要报告的名字（固定的一组加定理表的每个环境）、颜色（elegant 类的四个加
+  `\definecolor` 和正文里 `\textcolor`/`\color` 用到的）、要普查的环境（正文里用到的非标准环境）。
+- **探针 `probe.ts`**：`llxprobe.sty` 是 `probe.ts` 里的字符串，每次导出写到工作目录。工作目录是 `<构建目录>-export`（构建目录的兄弟：
+  `readAuxLabels` 往构建目录里扫三层，放进去会把导出的 .aux 当成实时预览的标签）。准备：写 sty 和插桩副本（`src/<键>`），建
+  `\include` 要写 .aux 的子目录，从构建目录复制 .aux（包括 `chapters/*.aux`）、.bbl、.toc；再用 `runTex` 跑
+  `<引擎> <DVI 选项> -interaction=nonstopmode -file-line-error -jobname=<job> "\RequirePackage{llxprobe}\input{<主文件名>}"`，
+  cwd 是工作目录，`TEXINPUTS=.:<工作目录>/src:<主文件目录>:`（加用户自己的）。和设计稿不同的一点：主文件用文件名 `\input`
+  （由 `TEXINPUTS` 在 `src/` 里找到），所以它的记录是 `{}{main.tex}`，和其他文件的键一样，不用把 `src` 映射回去。DVI 选项：
+  pdfLaTeX `-output-format=dvi`、XeLaTeX `-no-pdf`、LuaLaTeX 暂时也是 DVI（S8 换成 PDF 模式）。探针写的枚举记录是项目的标签
+  （`\labelenumi`：enumerate 包的 `(a)`、enumitem 的 `(i)`、elegantbook 的 `{\color{structurecolor}1.}`），不是 `\theenumi`；展开值时
+  `\color` 和字号命令（`\@setfontsize`）不起作用，`\protected@edef` 保护健壮命令。
+- **`.llx` 读取 `probeLog.ts`**：记录按访问定位，不按它自己写的文件名：访问刚结束时 TeX 还报子文件的名字，行号却是父文件的（书的
+  `\printbibliography` 的目录项写成 `appendix.tex` 第 43 行，其实是 main.tex 第 43 行）。计划的访问按（文件键，第几次）对上探针的访问；
+  位置按访问链比较（`[根里的行, 第几个子访问, 子文件里的行, …]`，只比到范围的深度：一个构造的行读进来的文件里的记录算在构造里面）。
+  `StepQueue.take(计数器, 范围)`：同一计数器、同一位置、同一值的记录合并（tcolorbox 每个框步进两次，subequations 的父编号两次）；
+  范围之前的记录丢掉并记为孤儿（报告的 numbering 项）；队首在范围里就取走；否则给 null（输出器退到 .aux 的编号或 `?`）。`\tag` 的
+  equation 步进又复原，下一个公式在别的文件里步进到同一个值：两条记录位置不同，各自被自己的构造取走（S2 的输出器把 `\tag` 那条
+  取走不用）。`drop(范围)` 丢掉一个片段里的所有步进（编号在它的图里）。
+- **输出 `emit.ts`（S1 只有文字）**：按计划的访问顺序走主文件的正文和它读的每个文件，每个构造的行就是 StepQueue 的范围。标题：
+  级别和类印出来的编号（`第一章`、`1.1`、`A`）来自目录记录，标题文字来自源码，紧跟的 `\label` 作锚点；段落：空行和 `\par` 分段，
+  中文字符之间的换行空格去掉（xeCJK 的做法，跨过行内标签也算），TeX 的连字（`--`、`---`、引号）在注释连起来的文字上做，`~` 是不断行
+  空格；`\textbf` 这类样式和 `\bfseries` 这类字体开关（作用到组结束，跨段落，块用 div 包起来），`\textcolor`/`\color` 用探针的颜色和
+  xcolor 的基本颜色；列表的标签是 TeX 印的（enumerate 来自探针，嵌套层数对应 enumi–enumiv），description 的词条；定理类环境：名字
+  （探针的 `\<env>name`，否则定理表）、编号（计数器来自普查的 `\@thm`、定理表的 `counter`、elegantbook 的 `tcb@cnt@<env>`）、标题的
+  位置（括号里、紧跟、替换名字）、amsthm 的句点和证明的 □；浮动体的图注用探针的名字和编号；verbatim 和 listings 是 `<pre>`（带
+  `caption=` 的 listing 有 `Listing 1.1` 标题）；`\href`/`\url` 是链接（只允许 http(s)、mailto、ftp、片段和相对地址）；引用的文字和
+  实时预览的芯片一样（latexRefs 的 `refText`，.aux 来自构建目录），链接到标签的锚点；引用先用 biblatex 的编号（探针的 `llxcite`）；
+  脚注的标记来自探针；用户的文字宏（`\term`、`\zhen`）按定义展开。现在的占位：数学是转义过的源码 `<code>`（S2），片段是源码（S5），
+  图片和 `\includepdf` 是方括号里的路径（S6），参考文献只有标题（S3）；每种占位在报告里记一条 info。不认识的宏保留参数的文字，
+  按名字汇总成 warning。
+- **页面 `html.ts`、报告 `report.ts`、编排 `exporter.ts`**：`renderPage` 组装 head、样式（探针颜色的 CSS 变量、明暗两套、中文衬线字体栈）、
+  页头（`\maketitle` 时的 `\title`/`\subtitle`/`\author`/`\institute`/`\date`，`\thanks` 成脚注）、`\tableofcontents` 位置的目录（`tocdepth`
+  以内的有目录项的标题）、正文、脚注；`<html lang>` 在 ctex 和中文 elegant 类时是 `zh-CN`。`buildFreshness`：没有 .aux 或 .log、主文件
+  或 `.fls` 里的输入（构建目录以外）或 .bib 比 log 新、引用了却没有 .bbl 或 .bbl 比 .bib 旧、log 要求再跑一遍/Biber/BibTeX 或有未定义
+  的引用时是陈旧的；最后一条只看不是 latexmk 写的 log（`.fdb_latexmk` 至少一样新时，完整构建已经跑满所有遍，剩下的未定义是文档
+  自己的，否则每次导出都要完整构建）。陈旧时 `host.build`；构建有错也照样导出（报告的 build 项），没有 .aux 就中止并给出 log 的第一个
+  错误。探针没有写出记录（`.llx` 里连名字都没有）时进入只靠 .aux 的模式，报告里一条 error；探针卡住或超时也是 error；探针 log 里的
+  错误按原文件和行（`src/` 映射回项目）报 warning。`exportHtml(root, host, onProgress, signal)` 在各阶段之间检查 `signal`，输出器每
+  30 ms 让一次 UI（`host.idle()`）。
+- **命令 `command.ts`**：“Export to HTML”（`export-html`），活动视图是 `.tex` 的 LaTeX 编辑器时可用。先保存项目里打开的编辑器，
+  检查 TeX；保存对话框用 Obsidian 暴露的 `require("electron").remote.dialog.showSaveDialog`（默认 `<主文件目录>/<名字>.html`，
+  `createDirectory`、`showOverwriteConfirmation`），包在 `ExportIo` 里（测试可以换掉对话框和写入）；没有 `remote` 时写到默认路径并
+  提示。进度是持续显示的 Notice（`setMessage` 更新，带 Cancel 按钮，中止 `AbortController`：`runTex` 杀进程组，构建阶段放开会话，
+  只有导出持有的会话被释放时连同进程一起 dispose）。陈旧时的完整构建走主文件的会话（`acquireSession` → `request("full")` → 等
+  `mode === "full"` 的 result，或 failure → `releaseSession`），`session.ts` 不用改。写入：vault 里的路径走 `vault.adapter.write`，
+  外面的走 `fs`；`report.json` 留在工作目录；完成时 Notice “Exported main.html (28 KB, 1.9 s): 2 TeX fragments, 0 warnings”。
+  每个主文件同时只有一个导出（第二次请求提示 already exporting），插件卸载时全部取消。
+
+夹具（都是合成的，小）：`tests/fixtures/export-book`、`export-article` 是 scratchpad `rp/projects` 两个合成项目的拷贝，
+`figures/heatmap.png` 换成 ImageMagick 生成的 400×240 渐变（2.5 KB，原来 400 KB）；`export-homework` 是新写的作业式笔记
+（elegantbook `lang=cn,chinesefont=nofont` 加手动设的 Fandol 字体、`\usepackage[utf8]{inputenc}`、`\setcounter{tocdepth}{2}`、
+`\include` 的一章：`lstlisting`（带 caption）和 `\lstinline`、`algorithm` + `algpseudocode`、`\includepdf` 一页 pdfLaTeX 画的
+矢量 PDF，1.5 KB；S6 时重新生成过：原来的图超出 A5 页面，PDF 有两页、第一页是空的）；`export-static/` 是探针对前两个项目写的 `.llx`（重新生成：对新拷贝跑一次探针）和一个手写的 `twice.llx`
+（同一文件读两次）。
+
+验证（2026-09-29，TeX Live 2026，不入库的脚本在 scratchpad 的 `impl-export/`）：
+
+- 测试：新增 5 个测试文件 42 个测试（另有 `tests/support/exportHost.ts`：用插件的 `Compiler` 做完整构建的 Node 宿主）。`tests/exportTree.test.ts` 20 个（行和注释规则、`\verb` 各种形式、verbatim 和 listings 的选项、
+  嵌套 `\iffalse`、定义是代码（13 种定义和改名的 `\nc`）、公式的分隔符和偏移、`%` 在公式里、段落结束行内公式、文字参数里的公式、
+  嵌套的数学环境、`\\[2pt]` 和 `\\*`、多余的 `\end` 和没关的 `\begin`、elegantbook 两种框的写法、跨一个换行的参数、跨段落的
+  `\footnote`、`\caption` 里的公式、字体开关的组、`\item`、用户宏签名、`\url`/`\href` 原样、重音和 tabular；每个夹具文件的覆盖；和
+  unified-latex 的差分；5700 行章节的时间；`main.js` 不打包 unified-latex）、`tests/exportPlan.test.ts` 6 个（文件图含嵌套的
+  notation.tex、访问顺序和父行、`\includeonly`、读两次、插桩副本的行数和插入以外的字节、片段、`\tikz` 和片段里的 `\input` 仍是访问、
+  探针配置）、`tests/exportProbeLog.test.ts` 8 个（静态 `.llx`：记录、目录项、颜色模型、tcolorbox 的两次步进、按访问定位的
+  文献目录项、`\tag` 复原和 subequations、孤儿和缺失的步进、读两次的文件）、`tests/exportProbe.test.ts` 5 个（真实 XeLaTeX/pdfLaTeX，
+  没有 TeX 时跳过：名字 定义/定理/命题/图/表/目录/证明、颜色等于 `ELEGANT_SCHEMES.blue`、`第一章`/`1.1`、`chapters/ch1.tex` 的归属；
+  验收见下）、`tests/run.test.ts` 3 个（假的 TeX 脚本：中止杀掉整个进程组、已中止的信号不启动、超时）。全部 464 个测试通过，
+  `npm run check`、`npm run build` 通过。
+- 解析：和 unified-latex 1.8.4（devDependency，只给差分测试用）在 5 个夹具项目的 24 个 .tex/.sty 文件上比较环境、公式、verbatim
+  和参数个数，650 个事件里 613 个相同，其余 37 个都是有意的（定义体里的宏在这里是代码、elegantbook 的 `g`/`t\label` 参数
+  unified-latex 读不了、`\lstinline` 它当成普通命令）。`scripts/gen-perf-fixture.mjs` 的 5700 行章节（243,394 字符）解析中位数
+  3.4 ms（最少 2.4 ms；设计稿的 spike 4.9 ms，unified-latex 365–466 ms）。计划 4–10 ms。
+- 包大小：`main.js`（生产构建，不压缩）515,042 B，其中 `src/export/` 99,413 B（压缩后 62,456 B），`run.ts` 2,510 B；esbuild 的
+  metafile 里没有 unified-latex 或 pegjs 的输入（测试检查）。
+- 探针（合成项目的新拷贝，插件的 `Compiler` 完整构建之后）：书（XeLaTeX）1.9–2.3 s、作业 1.4–1.5 s、文章（pdfLaTeX）0.61–0.65 s，
+  三个都没有 TeX 错误；书的 196 条记录里 16 条目录项、11 个编号框的步进（合并 tcolorbox 的重复之后）、2 个片段页。输出 3–8 ms，HTML 28 KB / 7 KB / 13 KB。构建新鲜时
+  整个导出：书 1.9–2.3 s、作业 1.5 s、文章 0.62 s；陈旧时先完整构建（书 8.9–11.7 s、作业 5.8 s、文章 3.2 s），第二次导出不再构建。
+- 验收（`tests/exportProbe.test.ts`）：书的 HTML 目录逐项等于构建目录 `.toc` 里 `tocdepth` 以内的条目（`第一章 概率空间与期望` …
+  `第三章 练习`、`A 记号表`、`参考文献`），正文标题的编号按顺序相同；作业（`tocdepth` 2，`第 1 章`、`1.1.1 代码`）同样；文章没有目录，
+  4 个节标题的编号和标题等于 .aux 的。忠实性断言 7：书、作业的正文里每一段汉字（文字节点、公式里 `\text` 的参数、verbatim）都在页面
+  文字里（中文之间的空格规范化后），书有 150 段以上。取消：探针的 XeLaTeX 在跑时（`pgrep -f llxprobe` 找到）中止，导出约 0.1 s 后以
+  `AbortError` 结束，之后没有探针进程。另外检查了 `定理 1.1 (全期望公式 Law of total expectation)`、`(a)` 标签、
+  `Cauchy–Schwarz 不等式`、换行两边的中文连起来（`重新出现：条件期望`）、`\term` 展开成 `<b><em>概率空间</em></b>`、`\verb` 原样、
+  没有 `<script>`；书的报告里除了 info 没有别的，文章有 `\cref` 等 19 处引用、`Lemma 2.2.`、`(ii)`。
+- 画面（无头 Chrome 截图，1000 px，浅色）：书、作业、文章的页头、目录、标题、定理头、列表、listings 和算法的标题都在；公式和片段
+  暂时是源码。
+- 跑完后没有 xelatex、pdflatex 进程；所有编译都在 `$TMPDIR` 的拷贝和构建目录里，测试结束时删掉它们。
+- 还没做：在 Obsidian 里点一次命令（保存对话框、进度 Notice 的 Cancel、写进 vault）；这次不碰任何 vault，留给 S7a 的 GUI 检查。
+
+### S2：数学和编号（2026-09-29）
+
+- **`src/export/math.ts` 的 `ExportMath`**：和实时预览一样经过 `ProjectMath`（项目的定义、垫片宏，失败抛 `MathError`），但
+  用导出自己的 CHTML 输出（`new MathJax._.output.chtml_ts.CHTML({fontURL, adaptiveCSS: true})`，经 `ProjectMath.create` 新加的
+  可选第四个参数 `{ output, tagSide }` 传进去；不传时和以前一样用 Obsidian 共享的输出，已有测试不变），所以它的样式表只有这次
+  导出画过的字形。`stylesheet(html)` 从输出的 `styleSheet(它最后一次渲染的 MathDocument)` 里只留页面用到的：字形规则
+  （`mjx-c.mjx-c1D465.TEX-I::before`）按页面里 `mjx-c` 元素的类组合留，字体类（`.TEX-I`、`.MJX-TEX`）按页面用到的类留，有
+  可伸缩定界符时留它们的字体栈，再加这些字体（和内联样式里的 `MJXZERO`）的 `@font-face`，woff 内联成
+  `data:font/woff;base64`；MathJax 的布局规则全留。字体在 Obsidian 里用 `fetch(MathJax 的 fontURL/文件名)` 取，测试里读
+  `node_modules/mathjax` 的同名文件（和 Obsidian 的逐字节相同）。解析样式表要认字符串：`{` 这个字形的规则是
+  `content: "{"`，按花括号切会把后面的 `@font-face` 全弄坏（书里的 `\set{0, 1}` 就这样，第一次截图公式全是系统字体）。
+- **行和编号（`displayLayout`、`displayTex`）**：显示公式按外层环境自己的 `\\` 分行（`split`、`aligned`、`cases` 里面的不算，
+  amsmath 和 MathJax 都不给它们编号），每行记下自己的 `\tag`/`\tag*`（及其文字）、`\notag`/`\nonumber` 和 `\label`；`equation`、
+  `multline` 是一行；`alignat{2}` 的列数每一部分都带上。`\intertext`/`\shortintertext`（MathJax 没有）把对齐拆成几部分，中间的
+  文字是一个段落（`llx-intertext`，用输出器渲染，里面的行内公式、引用照常）。输出器按探针的步进给每个要编号的行一个号，写成
+  行尾的 `\tag{号}`（MathJax 的自动编号是关的）。探针实测的 amsmath 规则（TeX Live 2026）：`equation` 在 `\begin` 处步进一次，
+  有自己的 `\tag`、`\notag`、`\nonumber` 时又退回去（这一步取走不显示）；`multline` 和 `align`/`gather`/`flalign`/`alignat` 的行只
+  在要编号时步进；`eqnarray` 开头步进一次、每个编号行之后再步进一次、结束时退回最后一次（`eqnarray*` 步进一次又退回）；
+  `\\` 结尾会多出一个空行，TeX 给它编号（MathJax 会丢掉只有 `\tag` 的空行，所以空行写成 `{}\tag{号}`）；`subequations` 自己的
+  父编号（`2`）由它自己取走不显示，里面的行显示 `2a`、`2b`。没有步进时用该行 `\label` 的 .aux 编号，再没有就是 `?`（报告里一条
+  numbering）。`leqno`（文档类选项，或 amsmath/mathtools 的包选项，从源码判断）让 MathJax 的 `tagSide` 为 left。`\label` 在公式
+  前面成锚点（行内公式和片段里的 `\label` 也是）；公式里的 `\eqref` 等经 `prepareMath` 的 `formulaRefs` 变成和芯片一样的文字。
+- **计划里的 `mathOk`**：计划先跑一遍只收集要问的公式，导出器再逐个检查（渲染，每 30 ms 让一次 UI、检查取消，进度
+  “checking the formulas 60/130”），然后正式计划时只查缓存；显示公式按上面的部分逐一检查（不带编号）。MathJax 拒绝的成为片段
+  （S5 之前显示源码）。渲染按“显示与否 + 源码”缓存，行内公式在计划里渲染一次、输出时直接用；输出时仍然失败的公式是 `<pre>`
+  （行内是 `<code>`）的源码，报告里一条 math warning。MathJax 读不了的项目定义（文章的 `\NewDocumentCommand{\set}{m o}`）是 info。
+- **页面**：`renderPage` 多了 `mathCss`；导出器用正文、页头和脚注的 HTML 算样式表。中文和公式之间的空格保留（公式的 `mjx-` 标签
+  里没有文字，以前的 `joinCjk` 会把“写作 $X$”的空格当成两个汉字之间的删掉）；全角标点旁边的空格去掉（xeCJK 的做法，书的 PDF 里
+  `、 (3.5)` 印成 `、(3.5)`）。报告多了 `numbers`：输出器从 TeX 取的每个号（计数器、显示的值、是否显示、给它命名的标签），
+  忠实性测试拿它和探针、.aux 对比。
+
+### S3：引用、文献、脚注（2026-09-29）
+
+- **引用**：`\ref` 这一族的文字就是 latexRefs 的 `refText`（构建目录的 .aux），链接到标签的锚点；不在 .aux 的是不带链接的
+  `is-missing`。输出结束时，指向页面上没有的 id 的链接（标签在页面不显示的构造里、引用了页面没列出的文献）变成普通文字，
+  报告里一条 ref/cite warning。
+- **探针新增的记录**（`probe.ts`）：biblatex 的 `\AtEveryBibitem` 为每个印出的条目写 `llxcite`（没被引用过的条目也有编号）和
+  一条 `llxstep{llx@bib}{key}`（按位置归到 `\printbibliography` 的行）；`llxinfo{citestyle}`（`\blx@cbxfile`）和
+  `llxinfo{sortcites}`；natbib 在 `enddocument` 时写 `llxinfo{natbib}{numbers,sort,compress}` 和 `natbib-open/close/sep/aysep/cmt`
+  （natbib 读 .bbl 时才可能改成数字模式，所以在文末写）。展开值时 `\TextOrMath` 取文字那一支，`\thanks` 的 `\@fnsymbol` 记成
+  `\textasteriskcentered`（以前是 `∗*`）。`export-static/*.llx` 重新生成过。
+- **`src/export/bibliography.ts`**：`readBbl` 读 biblatex .bbl 第一个数据表里的条目（顺序就是编号的排序），名字分 given/family
+  （中文作者只有 family），列表（publisher、location、language）、字段、`\verb` 字段（url、doi），biblatex 的分隔宏换成文字
+  （`\bibrangedash` 是 –）。`formatEntry` 按 biblatex 标准样式（standard.bbx，英文字符串）排：作者（`A and B`、`A, B, and C`，
+  超过 3 个或 `and others` 是 `A et al.`）、标题（article/inproceedings 等加引号，其余斜体）、语言（`chinese` 照印，`langgerman`
+  印 German，英文省略）、`In: 期刊 12.3 (2019), pp. 101–118`、`2nd ed.`、`地点: 出版社, 年`、`DOI:`、`URL: … (visited on 09/01/2026)`，
+  和书的 PDF 逐条一致（测试里有 6 条）。`numericLabels`：numeric 按引用顺序、`, ` 连接；numeric-comp（和 natbib 的
+  sort/compress）排序，连续三个以上成区间（`[1–3, 6]`），两个照写（`[2, 3]`）；同一个键只出现一次。`postnoteText`：页码或
+  区间的后注加 `p.`/`pp.`（`[5, pp. 12–15]`），其他照印（`[5, 第 2 章]`）。`readBibcites` 读 .aux 的 `\bibcite`。
+- **输出器的引用**：biblatex 的 numeric/numeric-comp：编号来自 `llxcite`，`[前注 编号, 后注]`，`\textcite` 是 `Li and Doe [2]`，
+  `\citeauthor`/`\citeyear`/`\citetitle`、`\supercite`、`\footcite`（一个脚注）；其他 biblatex 样式退回实时预览的作者年份标签
+  （报告 info）。natbib 和 LaTeX 的标签来自 .aux 的 `\bibcite`（natbib 用 `\advance` 数自己的计数器，探针看不到步进，所以不是设计稿
+  说的 enumiv）：数字模式 `[1, Sec. 3]`、`\Citet` 的 `Roe and Placeholder [3]`、`\citet*` 用全名、`\citealp`、`\citenum`；作者年份模式
+  `(Doe and Example, 2023; Lee, 2024)`、`Roe and Placeholder (2022)`；标点用探针记下的 natbib 设定。没有 natbib 的 `\cite` 用
+  `\bibcite` 的标签原样（`[Knu84, 1, p. 5]`）。引用命令都有星号参数（签名 `s o o m`），编号链接到文献条目 `#llx-bib-<键>`。
+- **文献**：`\printbibliography` 列出探针看到它印出的条目（它那几行里的 `llx@bib` 步进，按印出的顺序），标签是 `[编号]`，标题
+  来自目录记录（`heading=bibintoc`）、`title=` 选项，否则有 `\chapter` 的类用 `\bibname`、其余用 `\refname`；`heading=none` 没有标题；
+  没有探针记录时列出 .bbl 的全部条目。BibTeX 的 `\bibliography` 在它的位置读构建目录的 .bbl，里面的 `thebibliography` 和文档里
+  直接写的一样处理：每个 `\bibitem` 的标签来自 `\bibcite`（natbib 数字模式 `[1]`，作者年份模式没有标签、悬挂缩进；LaTeX 的
+  `[1]` 或 `[Knu84]`），`\newblock`、`\natexlab`、`\penalty0`、`\doi` 按 BibTeX 的样式处理。
+- **脚注**：`\footnote[7]{..}` 用给定的记号、不取步进；`\footnotemark` 取步进，`\footnotetext` 的文字跟最早一个等着的记号走（给了
+  `[记号]` 就找那个）；没有正文记号的脚注不带返回链接。`\maketitle` 里 `\thanks` 的步进 TeX 记在下一行（`\maketitle` 读到下一行
+  才执行），所以它的范围延伸到后面的第一个构造；记号跟在标题后面，页面的 `<title>` 不再带上 `\thanks` 的文字。
+- **其他**：重音命令（`\"u`）按 texText 的规则变成字符（S1 里当成未知命令）。
+
+验证（2026-09-29，TeX Live 2026，Ghostscript 10，合成项目的新拷贝，不入库的脚本在 scratchpad 的 `impl-export/s2/`）：
+
+- 测试：新增 3 个测试文件 17 个测试，全部 481 个测试通过，`npm run check`、`npm run build` 通过。`tests/exportMath.test.ts` 5 个
+  （align 的行、自己的 `\tag{$\star$}`、`\notag`/`\nonumber`、`\\[2pt]`、结尾 `\\` 的空行，`equation` 里的 `split`、`multline`、
+  `gather`、带星号的环境、`\[..\]`；`\intertext` 拆分和 `alignat{2}`；项目宏 `\E`、`\KL`、`\loss`、`\iid`；编号行渲染成
+  `mjx-mlabeledtr`，`leqno` 在左；失败和计划的检查；样式表只有页面用到的字形规则（先用 Obsidian 共享的输出画 `\mathfrak`、
+  `\oint`、`\mathscr`，再用导出的输出画一个页面不显示的公式，两者都不进样式表），只有用到的字体族，数据 URI 解码后和
+  `node_modules/mathjax` 的 woff 逐字节相同，`content: "{"` 不破坏样式表）、`tests/exportBib.test.ts` 7 个（.bbl 摘录、中文作者、
+  `formatEntry` 和书的 PDF 一致、区间和后注、`\bibcite`，以及输出器在合成项目加手写探针记录上：biblatex numeric-comp、natbib 数字和
+  作者年份、LaTeX、退回实时预览标签、脚注记号）、`tests/exportFidelity.test.ts` 5 个（真实 TeX，没有时跳过；没有 gs 时跳过和 PDF
+  文字的比较）。
+- 验收：书的公式编号序列 `1.1 … 1.4, 2.1 … 2.7, 3.1 … 3.5` 等于 `gs -sDEVICE=txtwrite` 从 PDF 取出的（行尾的括号编号）；文章显示
+  `1, 2a, 2b, ⋆, 3, 4, 5`（PDF 的 ASCII 编号相同，外加图里的 `bound (2b)`）；另一个生成的 amsmath 文档（pdfLaTeX：`\tag`、`\notag`、
+  `\nonumber`、gather、两种 multline、subequations、split、`\intertext`、flalign、`alignat`、`eqnarray` 和 `eqnarray*`、结尾 `\\`、
+  `equation*` 的 `\tag`）21 个编号和 PDF 的逐个相同。忠实性断言 1（书 28 个、文章 13 个、数学文档 14 个带标签的号等于 .aux）、
+  2（每个计数器取走的号等于探针合并后的步进，报告没有 numbering 项）、5（每个引用的文字等于 `refText`，书 44 处、文章 19 处，
+  每个页内链接都有目标）、6（书的引用编号等于 `llxcite`，文献条目等于 .bbl 的 6 条且编号相同；文章的等于 `\bibcite`，3 条）。
+  书显示 `[5, 第 2 章]`、`[2, 3]`、`[1, 5]`、`[6]`、`[4]`，PDF 里是 `[2,3]`、`[1,5]`（gs 丢了空格）；文章的
+  `recover them [1].`、`Roe and Placeholder [3] give…`、`see also [1, Sec. 3].`、`Section 2 derives`、`Figures 1 and 2 show the
+  trend`、`(Equation (⋆))`、`Proof of Theorem 2.2.`、`see [2, 3].`、`Compare with Theorem 3.1 and Section 1.` 在页面和 PDF 里都有；
+  `\thanks` 的记号是 `∗`。书、文章的报告除了 info 没有别的。
+- 时间（构建新鲜时的第二次导出，Node + jsdom）：书 1.6 s（计划 107–113 ms，含 130 个公式的检查；探针 1.4 s；输出 60 ms），
+  文章 0.5–0.6 s，作业 1.2–1.3 s；陈旧时先完整构建：书 8.2–8.7 s、文章 3.1–3.5 s、作业 5.8–6.1 s。
+- 大小：书 446 KB（其中 MathJax 字体 172 KB，11 个字体族，base64 后约 229 KB），文章 285 KB（字体 149 KB），作业 89 KB（55 KB）。
+  `main.js`（生产构建，不压缩）557,961 B，其中 `src/export/` 141,990 B（压缩后 87,045 B）。
+- 画面（无头 Chrome，1000 px）：公式用 MathJax 的 TeX 字体（`document.fonts` 里 11 个族都是 loaded），cases 的大括号、矩阵的定界符、
+  `\sum` 的上下标正确，编号在右边和 PDF 一样；中文和公式之间有空格。
+- 跑完后没有 xelatex、pdflatex、latexmk、Chrome 进程；测试的临时目录在测试结束时删掉。
+- 还没做：在 Obsidian 里的导出（`fetch` 字体、Obsidian 的 MathJax 做私有输出）只做了类型检查，没有点命令；按设计留给 S7a 的
+  GUI 检查。
+
+### S4：外观（2026-09-30）
+
+- **配置 `profiles.ts`**：两套，`profileOf(主文件, 源码)` 按 `\documentclass` 选：elegantbook（任何 `lang`/`mode`/`color`）和 standard
+  （article、report、book、AMS 类、ctex 的类）；`lang` 是 `zh-CN`（ctex 的类或宏包、中文 elegant 类）或 `en`。外观都照安装的类印出来的
+  样子（elegantbook.cls v4.6、LaTeX 和 amsthm 的默认），编号、名字、颜色仍全部来自 TeX：
+  - elegantbook：标题、目录标题、图注标签、列表标签用 structurecolor；章标题居中（`第一章`，`\appendix` 之后 `附录 A`，英文
+    `Chapter 1`；目录保留 .toc 的号，和 PDF 的目录一样是 `A 记号表`）；链接 winered，目录里的链接是黑的。fancy 模式的 tcolorbox 定理
+    是框：角色色（defstyle main、thmstyle second、prostyle third）的 0.5pt 边框、`角色!5` 的底色、白色粗体标题贴在左上角并跨在边框上、
+    右下角 ♣/♡/♠、正文 `\citshape`（lang=cn 是 ctex 的楷体，否则斜体）；类自己的 head（例题、练习、问题、解、笔记、证明、注……）是段首的
+    角色色粗体，笔记、练习的左边距有 ☡、✍ 图标，`\citshape` 的 head 正文楷体，证明的正文仿宋（`\cfs`）；simple 模式的 amsthm 定理是角色色
+    粗体 head 加楷体正文。封面变成紧凑页头：顶上一条 coverlinecolor 色带、标题、副标题、`作者：/组织：/时间：/版本：` 行（探针的
+    `\authorname` 等）、`\extrainfo`。listings 是 structurecolor 细框（它的 `\lstset` 是 `frame=single`），不上关键字颜色；enumerate
+    的标签按 enumitem 的颜色，itemize 是 structurecolor 的 ●。
+  - standard：标题是正文色的粗体，书的章 `Chapter 1`（附录 `Appendix A`）单独一行在标题上面；定理按 amsthm 的风格（来自普查：plain
+    粗体 head、斜体正文；definition 正文直立；remark head 斜体），note `(标题)` 是正常粗细、句点粗体；LaTeX 自己的 `\newtheorem`：head 和
+    note 都粗体、正文斜体、没有句点；证明是斜体 `Proof.`（`[标题]` 代替名字），□ 在最后一行右端；居中的标题块，作者按 `\and` 用逗号连。
+  - 共同：图注 `图 2.1:`（冒号是 CSS 的 `::after`，页面文字和 `numbers` 不变），子图 `(a)` 和 algorithm 的 ruled 标题没有冒号；`\paragraph`、
+    `\subparagraph` 接在段首（输出器把它当下一段的开头）；description 的词条和正文同一行；目录最高一级（书的章、文章的节）粗体；
+    脚注的返回链接在最后一段里；含公式的段落 `overflow-x: auto`（比 375 px 宽的行内公式在段落里横向滚动，不撑宽页面；段落是块，
+    公式的基线不变）。字体：拉丁衬线在前（elegantbook：TeX Gyre Termes、Times New Roman；standard：Latin Modern Roman、CMU Serif、
+    Times New Roman），然后中文衬线栈（Songti SC、Noto Serif CJK SC、Source Han Serif SC）；`font-synthesis-style: none`，中文不会被
+    斜体压斜（xeCJK 也不压），中文文档里 `\emph` 和斜体的汉字用楷体（ctex 的斜体就是楷体）。
+- **名字**：探针的 `\<name>name` 优先；没有探针（只靠 .aux 的模式）时是 elegantbook 的语言表、ctex 的中文名（目录、图、表、参考文献、
+  摘要、附录、证明）或 LaTeX 的英文名（`fallbackName`），输出器里零散的英文兜底（`Contents`、`Figure`、`Abstract` 等）都换成它。
+- **颜色**：浅色就是 TeX 的值，和 PDF 一样（所以浅色里 elegantbook 的 second、third 色的字对白底或框的底色只有 2.3–2.5:1，白字在
+  它们的标题底上也是）。
+  暗色：画文字的颜色和白色按 2 % 一步混合，直到对暗色里最亮的表面（框的底色，按 `#303034` 算）对比度 ≥ 4.5；白字下面的填充（框的
+  标题）和黑色混合，直到白字 ≥ 4.5；框的底色是 12 % 的角色色叠在暗背景上。都在 TS 里算好写成 `rgb()`（不用 `color-mix`，浏览器
+  算出的值可以直接检查）。页面只用颜色变量：`--llx-c-<名字>`（文字、边框），elegantbook 角色另有 `--llx-f-`（填充）和 `--llx-t-`
+  （底色），浅色一套、`prefers-color-scheme: dark` 一套；`\textcolor`/`\color`/`\colorbox` 和列表标签写成 `var(--llx-c-..)`。xcolor 的表达式
+  （`blue!70!black`、`red!30`、`-red`、`a!p!b!q!c` 链）用探针报告的基本色按 xcolor 的规则混合（计划把表达式里的颜色名交给探针），
+  读不了的是 info，文字用正文色；`\colorbox` 里的文字固定是深色（PDF 里是黑字）。
+- **普查分类**：计划把定理表不认识、HTML 画不了的环境做成 TeX 片段；探针之后，普查的 `\meaning` 是 amsthm 或 LaTeX 的 `\@thm`（类或
+  宏包里的 `\newtheorem`，项目源码里看不到）时，这个环境按定理输出（`censusTheorems`：标题是 meaning 的标题或探针的 `\<env>name`，
+  计数器和是否编号来自 meaning，amsthm 有句点），片段的 SVG 不用，步进照常取；里面有 TikZ 图的仍画成片段；报告一条 info。签名表给
+  `\@thm` 的环境一个可选参数（note）。amsthm 的风格（`\th@plain`/`definition`/`remark`、自定义的按 plain）也读普查。
+- **探针新增**：`llxname` 多了 author、institute、date、version；颜色多了 winered、coverlinecolor；`\tableofcontents` 时（`cmd/tableofcontents/before`）
+  再写一次 `llxinfo{tocdepth}`，正文里的 `\setcounter{tocdepth}` 也算。enumitem 的标签在记录里本来就留着 `\protect \color {structurecolor}`
+  （健壮命令，`\llx@expand` 挡不住），输出器现在把它变成标签的颜色。`export-static/book.llx` 重新生成过（只多了上面几行）。
+- **导出器分成两段**：`prepareExport`（构建、计划、探针、片段、图片：文件和进程）和 `emitExport`（输出器、MathJax 的样式表、页面：只用
+  DOM），`exportHtml` 依次调用；`exportMath(env, prepared)` 在任何窗口里建数学渲染器。`ExportImages` 在 `load` 时记下每个名字找到的文件，
+  输出时不再碰文件系统（以前每次输出都再找一遍）。
+- **`scripts/export-smoke.mjs`**（无头 Chrome，CDP，和 browser-smoke 一样的进程组和清理，没有 Chrome 或 TeX 时跳过）：三个夹具的新拷贝
+  在 Node 里 `prepareExport`（`tests/support/exportHost.ts` 的宿主，PDF 页用 Ghostscript 144 dpi 代替 pdf.js），结果（Map/Set 带标记的 JSON）
+  交给页面；页面里用 MathJax 3.2.2（`tex-chtml-full.js` + `ui/safe.js`，app.js 的配置）`emitExport`，字体从 MathJax 的字体目录 `fetch`，和
+  Obsidian 里一样由真浏览器测量。页面用的 Node 模块在打包时换成桩（`path` 是一个小的 POSIX 实现，`Buffer` 只给 base64），输出器本来就
+  不在输出时读文件。导出的页面单独打开，1000 px 和 375 px、浅色和深色各查一遍：E1 MathJax 和片段的字体都加载（`document.fonts.check('16px
+  MJXTEX-I')`）、E2 每个 `mjx-c` 有宽度（不可见运算符 U+2061–2064 除外）、E3 框的边框等于探针的颜色（浅色）、对页面 ≥ 3:1（深色）、
+  E4 按设备宽度没有横向溢出（移动视口会把自己撑宽，所以不看 `innerWidth`），滚动的段落不在竖直方向裁掉公式、E5 行内片段在基线上
+  （±1 px）、E6 深色里所有文字 ≥ 4.5（浅色只报最小值）、E7 没有控制台错误。截图和导出的页面留在 `$TMPDIR/latex-live-export-smoke/`。
+
+验证（2026-09-30，TeX Live 2026，Ghostscript 10.07，Chrome，合成夹具的新拷贝，不入库的脚本和截图在 scratchpad 的 `impl-export/s4/`、
+`impl-export/shots/`）：
+
+- 测试：新增 `tests/exportProfiles.test.ts` 6 个（判断；没有探针时的名字和章标签；颜色：xcolor 表达式、elegantbook 五套配色和 winered、
+  xcolor 基本色的暗色变体对 `#303034` 和暗背景都 ≥ 4.5、填充上的白字 ≥ 4.5、已经够的颜色不变、页面变量；普查：amsthm 和 LaTeX 的
+  `\newtheorem`、`\lemmaname` 这样的标题经探针名字、各风格的外观；elegantbook 的框、笔记、证明、例题的完整输出、`附录 A`、段首的
+  `\paragraph`、彩色的列表标签和 ●、`\textcolor{blue!70!black}`；amsthm 三种风格、LaTeX 的定理（普查把片段换成定理）、两种标题块、
+  目录和脚注），`tests/exportFidelity.test.ts` 新增 2 个（断言 3、4）；`tests/exportBib.test.ts`、`exportFloats.test.ts`、`exportProbe.test.ts`
+  按新的标记（标题的 `class`、子图注的 `is-sub`、listing 的 `llx-lst`、彩色的枚举标签）改了三处正则。全部 512 个测试通过，
+  `npm run check`、`npm run build` 通过，`node scripts/browser-smoke.mjs` 31/31（改了 styles.css）。
+- 忠实性断言 3：书的框标题的名字集合等于探针的 定义/定理/命题/引理/推论，`定义 定理 命题 图 表 目录 证明` 等于探针的名字，图注标签
+  只有 图、表，目录标题是 目录，段首 head 的名字是探针的 笔记、证明、例题、注、练习、解，文献标题等于 .toc 的 `参考文献`；文章的
+  `Definition 2.1 (Linear reconstructor).`、`Lemma 2.2.`、`Theorem 3.1.`、`Remark.`、`Proof of Theorem 2.2.`、`Abstract`、`References`、
+  `Table 1`、`Figure 1`、`Figure 2` 在页面和 PDF 的文字（gs）里都有，定义直立、引理斜体、注的 head 斜体。断言 4：页面的颜色变量等于探针的
+  值（structurecolor、main、second、third、winered、coverlinecolor），main/second/third 等于 `ELEGANT_SCHEMES.blue`，winered 是
+  `rgb(128, 0, 0)`，深色的每个变量对 `#303034` ≥ 4.5，框用自己角色的变量（定义 `is-main`、命题 `is-third`）。
+- `node scripts/export-smoke.mjs`：81/81。在页面里输出：书 108–118 ms、文章 33–38 ms、作业 8 ms（新建 `ExportMath`、重新渲染所有公式、
+  取字体、样式表）；字体书 11/11 + 片段 7/7、文章 9/9 + 19/19、作业 3/3 + 6/6 都加载；书 1,566 个、文章 522 个、作业 30 个 `mjx-c` 都有宽度；
+  书 9 个框的边框等于探针的 main/second/third；行内片段的基线差 0 px（书 1 个、文章 2 个）；375 px 没有横向溢出（S2 记下的 15 px：书里
+  两个行内公式比 375 px 的行宽，一个在两层的列表里，现在在各自的段落里滚动，没有段落在竖直方向裁掉东西）；深色文字的最小对比度书 4.56、文章 8.08、作业 6.04，
+  浅色的最小值书 2.32（elegantbook 的 second/third 色，和 PDF 一样）、文章 7.28、作业 4.96。
+- 时间（Node + jsdom，构建新鲜时的第二到四次导出）：书 1.67–1.91 s（计划 93–109 ms，探针 1.35–1.57 s，片段 152–185 ms，输出 41–56 ms），
+  文章 0.74–0.82 s，作业 1.32–1.39 s（负载下一次 2.27 s）；陈旧时先完整构建：书 8.3 s、文章 4.0 s、作业 5.6 s。
+- 大小：书 476 KB（在 Chrome 里输出 479 KB：真浏览器量出的 CHTML 尺寸不同）、文章 331 KB、作业 124 KB。`main.js`（生产构建，不压缩）
+  620,017 B，其中 `src/export/` 202,187 B（压缩后 125,604 B），`profiles.ts` 21,427 B，`command.ts` 12,934 B。
+- 和 PDF 并排比较（`impl-export/shots/*.png`：左边 gs 110 dpi 的 PDF 页，右边 1000 px 的页面，浅色和深色各一张；书 10 组、文章 3 组、作业
+  3 组）。一致的：页头的标题行、目录的条目和粗体的章、章节编号和颜色、定理框（颜色、标题、编号、标题的位置、角上的花色、楷体正文）、
+  head（例题的绿色、笔记和注的橙色、证明的仿宋）、公式编号、引用的 winered、图注 `图 2.1:`、表的 booktabs 线、`附录 A 记号表`、
+  description 同行、problemset 的蓝色编号、算法（TeX 片段）、文章的 amsthm 头、证明的 □、摘要、文献。不同的（页面上可见）：
+  - 字体：书的 PDF 是 Fandol 宋体 + Termes，页面是系统的 Songti SC + Times New Roman；文章的 PDF 是 Computer Modern，这台机器没有
+    Latin Modern/CMU，页面退到 Times New Roman。PDF 10.95 pt、行距 1.3，页面 17 px、行高 1.75，行更疏。
+  - 笔记的图标：PDF 是 manfnt 的危险弯道路牌，页面是 ☡ 字符（系统字体里画得像一个 Z）；练习的 ✍ 近似 bbding 的铅笔手。
+  - itemize：PDF 是带阴影的蓝色小球，页面是 structurecolor 的 ●。problemset 标题两边 adforn 的花饰页面没有。`\TeX` 标志是纯文字 `TeX`。
+  - `\norm{x}`（`\left\lVert x\right\rVert`）：MathJax 3.2.2 用 Size1 的扩展字形（高 0.602 em），双竖线比 PDF 短；`\norm{y}` 有下伸部分，
+    用正常的字形。实时预览里也是这样，属于 MathJax。
+  - 表格的行比 PDF 疏（单元格上下内边距）；目录没有引导点和页码；页眉、页码没有；脚注都在页面最后。
+  - 作业的 listing：PDF 的关键字（`def`、`for`、`in`、`range`、`len`、`while`、`and`）是 winered、注释是灰的，页面只有框，没有语法颜色；
+    PDF 有封面图和单独的目录页，页面是紧凑页头。
+  - 文章：PDF 里引用是黑字（hyperref 没有 colorlinks），页面是蓝色链接。
+- 跑完后没有 xelatex、pdflatex、latexmk、dvisvgm、Chrome 进程，没有留下 `latex-live-export-*` 临时目录（`latex-live-export-smoke` 是
+  故意留下的截图目录）。
+- 还没做：listings 的语法颜色；elegantbook 的封面图（设计的默认是紧凑页头）；elegantnote、elegantpaper、ctex 的专门配置（S8）。
+
+### S5：TeX 片段（2026-09-30）
+
+- **探针**（`probe.ts`）：每个片段都是 preview 的一页。`llxfrag`（lrbox）在 `\usebox` 前写
+  `\special{dvisvgm:raw <g class="llx-ref" data-id="7" data-y="{?y}"/>}`，`llxblock` 开头写只有 `data-id` 的标记；两个环境都在
+  `.llx` 里用 `llxopen{id}`/`llxclose{id}` 把自己括起来，读取时每条步进记下它所在的片段（`ProbeStep.frag`）。探针之后
+  `runDvisvgm`（`runTex`：自己的进程组、看门狗、2 分钟超时、可中止）把 DVI/XDV 的每一页转成 `<工作目录>/frag/f<页>.svg`：
+  `dvisvgm --page=1- --exact-bbox --currentcolor --font-format=woff2`。页和片段按标记里的片段号对应，不按页序：哪个宏包自己
+  `\shipout` 一页也错不了位。没有 dvisvgm（TeX 装得不全）时报告一条 error，所有片段显示源码；dvisvgm 没转完的页报告一条 warning。
+- **后处理 `fragments.ts`**（字符串变换，`prepareFragment(svg, id, fontPt, embed)`）：去掉 XML 声明、注释、CDATA 和标记；id、
+  `href="#.."`、`url(#..)`、dvisvgm 的字体类（`text.f2`）和 `@font-face` 的字体族都加前缀 `llx<id>-`（书的两个片段各自嵌了一份
+  `cmmi10` 的子集，字形不同，不加前缀后一个会盖掉前一个；内联 SVG 的 `<style>` 对整页生效）；黑色变成 `currentColor`
+  （`--currentcolor` 只管字形，pgf 自己写 `fill='#000'`）；暗色主题下，和暗背景（`#1b1b1d`）对比度不到 3:1 的颜色（WCAG 对图形的
+  要求，`blue!70!black` 是 1.4:1）用 `color-mix(in oklab, c 45%, white)` 提亮，红色、青色、橙色不动；大小按文档字号
+  （`llxinfo{fontsize}`，SVG 的单位是 bp）换成 em，所以片段跟着周围文字缩放；行内片段用 `vertical-align:-深度em` 放在基线上
+  （深度 = 墨迹底边 − 标记的 y）。实测基线：pdfLaTeX 标记 y=0，XeLaTeX 同一个盒子 y=−64.028（dvisvgm 保留 1in 偏移），两个引擎
+  算出的深度都是 2.4907 bp = 2.500 pt，等于 TeX 的 `\dp`（`llxfrag{0}{7.5pt}{2.5pt}`）；红圈 1.4916/1.4930 pt 对 1.49167/1.493 pt。
+- **清理**：raw special 能写任何东西，所以只留 dvisvgm 会写的 SVG 元素（`<script>`、`<foreignObject>` 连内容去掉，`<a>` 变成
+  `<g>`，其他标签去掉）；属性里的 `on*`、`javascript:`（也认字符引用 `&#106;`）、指向页面外的 `href` 去掉，只留 `#..` 和
+  PNG/JPEG/GIF 的数据 URI；样式里的 `@import`、外部 `url()` 去掉；标签按带引号的属性值读（值里可以有 `>`），读不成标签的 `<`
+  转义成 `&lt;`，HTML 解析器不会看到过滤器没看到的标签。
+- **两个实测出来的问题**：dvisvgm 按字体的 cmap 给字形起码位，Fandol 里“非”和康熙部首“⾮”（U+2FAE）是同一个字形，作业的
+  算法里 `非空` 出来是 `⾮空`（看着一样，搜索、复制都错）。现在文本里康熙部首区和部首补充区（U+2E80–U+2FDF）的字符按 NFKC
+  换成统一汉字（全角标点不动），这些字改用读者的中文字体画，和页面正文一样。pdfLaTeX 里 TikZ 节点中的 `\includegraphics`，
+  dvisvgm（就算加 `--embed-bitmaps`）也只写相对项目目录的文件名，现在由导出器从主文件目录读成数据 URI；XeTeX 的图片 special
+  dvisvgm 读不了，XeLaTeX 片段里有图片时报告一条 warning。
+- **输出**：行内片段（TikZ 图、`\tikz`、HTML 画不了的表格、MathJax 拒绝的行内公式）是段落里的 SVG；块（显示公式、不认识的环境、
+  `algorithmic`）是 `<div class="llx-frag-block">`，显示公式居中（`is-display`），其他左对齐；片段里的 `\label` 在前面做锚点。
+  `\tikz ... ;` 的片段在计划里跨好几个兄弟节点，输出器以前只跳过了第一个，后面的路径（`[red] (0,0) circle (0.8ex);`）又当文字
+  输出一遍，现在片段范围里的兄弟节点都跳过。没有 SVG 的片段显示源码（`<pre>`/`<code>`），报告一条 fragment warning。
+- **片段里的编号**：S1 按行丢步进，和行内片段同一行的构造（同一行的 `\caption`、紧跟在行内公式后面的 `\footnote`）的步进也被丢掉；
+  现在按 `llxopen`/`llxclose` 记下的片段号丢（`StepQueue.drop(id)`），丢掉的步进里页面会显示的计数器（equation、figure、table、
+  footnote、lstlisting、algorithm、子图、定理类）记进 `report.numbers`（shown，片段里只有一个标签和一个步进时带上标签），忠实性
+  断言 2 照样成立，断言 1 核对片段里画出的编号等于 .aux 的。
+
+### S6：浮动体、图片、表格（2026-09-30）
+
+- **图注**：浮动体（figure、table、algorithm，`figure*`/`table*`、wrapfigure、`sidewaysfigure`/`sidewaystable`）里的 `\caption` 用
+  探针的名字（`图`、`表`）和步进；步进从浮动体开头找起，因为 subcaption 在第一个子图处就给 figure 步进了（在 `\caption` 之前）。
+  `\caption*` 没有标签和编号；subfigure/subtable 的图注是 `(a)`（它的 `\label` 在 `\ref` 里是 `2a`，所以子图注不带标签记进
+  `numbers`）；`\captionof{figure}{..}` 在哪里都行，浮动体外面是一个居中的段落（`figcaption` 只能在 `figure` 里）。subfigure 和
+  minipage 按 TeX 给的宽度（`0.45\textwidth` 是 45 %，`3cm` 按字号换成 em）并排，`[t]`/`[b]` 是顶端/底端对齐。algorithm 浮动体是
+  上下两条粗线、标题下一条细线的“ruled”样式，`algorithmic` 是 TeX 片段。
+- **图片 `images.ts`**：输出前（输出器是同步的）读完计划访问的文件里每个 `\includegraphics` 和 `\includepdf`，按 graphicx 的规则找
+  文件（`graphics.ts`）。PNG、JPEG、GIF、SVG 原样做成数据 URI；graphicx 的 `width`/`height`（行宽的分数是百分比，长度按字号换成 em）、
+  `scale`、`keepaspectratio`、`angle`；没给大小时按 TeX 的自然大小：像素按文件记录的分辨率（PNG 的 pHYs、JPEG 的 JFIF 密度），
+  没有就是 72 dpi；页面上都不超过正文宽度。PDF（`\includegraphics[page=n]`、pdfpages 的 `\includepdf[pages=..]`：`1,3-5`、`-`、`3-`、
+  `-2`、`last`、倒序、`{}` 是空页不输出，默认只有第一页）经宿主的 `pdfImages(文件, want)` 画成 2 倍的 PNG：Obsidian 里是
+  `pdfRenderer.ts` 新加的 `pdfPagePngs`（pdf.js 带 `PDFJS_ASSETS`，每个文件打开一次，`want(页数)` 选页），测试用替身；没有宿主的
+  渲染器时页面写 `[文件]`，报告一条 image warning。EPS 不导出（warning，建议换成 PDF/PNG）；找不到的文件、名字里有宏的也是 warning。
+  pdfpages 的 `addtotoc` 目录项做成锚点和目录条目。
+- **表格 `tables.ts`**：列说明 `l c r`、`p/m/b{宽}`（顶端/居中/底端对齐的段落列，宽度进 `<colgroup>`）、`|` 和 `||`、`@{}`（去掉那边的
+  内边距）、`*{n}{..}`、`>{..}`/`<{..}`/`!{..}`（忽略）、siunitx 的 `S`（居中）、`X`；行按 tabular 自己的 `\\` 分，单元格按它自己的 `&`
+  分（组和公式里的不算）；行之间的线：`\hline`（两条是双线）、`\cline{a-b}`、booktabs 的 `\toprule`/`\bottomrule`（粗）、
+  `\midrule`/`\cmidrule(lr){a-b}`（细）、`\specialrule`，画在下一行单元格的上边（最后一条在最后一行的下边）；`\multicolumn{n}{spec}{..}`
+  跨列，用它自己的列说明（包括竖线，也把 `@{}` 的内边距还回来，和 TeX 一样）。有 `\multirow`、`\rowcolor`/`\cellcolor`/`\columncolor`、
+  `\rowcolors`、`\hhline`、`\diagbox` 的 tabular 由计划交给 TeX（行内片段）；tabularx、longtable 本来就是不认识的环境（块片段）。
+  `\resizebox`/`\scalebox`/`\rotatebox`/`\adjustbox` 里有环境时输出里面的内容（表格按正文宽度）。
+- **listings**：`\lstinputlisting[caption=..,label=..,firstline=..,lastline=..]{文件}`（从主文件目录读）和 `lstlisting` 一样有标签、
+  标题和探针的编号；读不到的文件是 build warning。
+
+验证（2026-09-30，TeX Live 2026，dvisvgm 3.6，Ghostscript 10.07，合成项目的新拷贝，不入库的脚本在 scratchpad 的 `impl-export/s56/`）：
+
+- 测试：新增 `tests/exportFragments.test.ts` 8 个（静态页：标记给出片段号和基线，pdfLaTeX 和 XeLaTeX 的深度都等于 TeX 的 `\dp`、
+  宽高换成 em；两个 `cmmi10` 子集加前缀后分开，每个用到的类都在自己的样式表里；黑色是 `currentColor`、红色不变、`#0000b3` 有暗色
+  规则；康熙部首；图里的图片嵌入；清理（script、各种 `on*`、`javascript:`、`&#106;avascript:`、foreignObject、iframe、`<set>`、
+  `<animate>`、`@import`、外部 url、带 `>` 的属性值、断开的标签）；没画出来的片段显示源码并报告，片段同一行的图注保住自己的
+  编号；真实 TeX 两个引擎：4 个片段都是 SVG，行内深度和探针记录的 `\dp` 差不到 0.1 pt，字体族互不重复）、`tests/exportFloats.test.ts`
+  9 个（列说明、长度、`key=value`、pdfpages 的页列表、PNG/JPEG/GIF 的大小和分辨率、booktabs 和竖线表格的每个单元格的类、交给 TeX
+  的表格、图片的各种大小和 EPS/缺文件的报告、PDF 图片和 `\includepdf` 经替身渲染（每个文件一次调用，页 1、2、3）、没有渲染器时
+  的报告、各种图注和 minipage、`\lstinputlisting` 和 algorithm）、`tests/exportFidelity.test.ts` 新增 3 个、`tests/exportProbeLog.test.ts`
+  新增 1 个（片段括起来的步进）。测试工具：`emitDoc`（手写探针记录跑输出器）从 `exportBib.test.ts` 挪进 `tests/support/exportHost.ts`，
+  加了项目文件、片段和 `pdfImages`；`testPng` 生成带 pHYs 的 PNG。全部 502 个测试通过，`npm run check`、`npm run build` 通过。
+  `export-static/book.llx`、`article.llx` 按新探针重新生成（只多了 `llxopen`/`llxclose`）；`export-static/fragments/` 是
+  `fragments/main.tex` 在两个引擎上的 dvisvgm 页（6 个 SVG，共 12 KB）。
+- 验收（`tests/exportFidelity.test.ts`）：书的投影图和 tikz-cd 是 SVG（计划 2 个、页面 2 个、没有源码），投影图的标签是 SVG 文字；
+  热力图是文件原样的数据 URI，`width:55%`；表 2.1 第一行上边粗线、第二行上边细线、最后一行下边粗线；`fig:projection`、
+  `fig:heatmap`、`tab:decomp`、`tab:notation` 的编号等于 .aux。文章的 4 个片段（`$m_i \in \set{0, 1}$` 在行内，`vertical-align:-0.25em`；
+  `\[ \set{..}[..] \]`、`keypoint` 框、结果图）都是 SVG，没有源码。作业的 `\includepdf` 页经替身成为图片，算法是 SVG，里面有
+  `标记`、`非空`、`未标记`，报告除 info 外为空。生成的浮动体文档（pdfLaTeX：MathJax 拒绝的编号公式、同一行带脚注的行内片段、TikZ 图、
+  子图、竖线和双线表格、multirow 表格、`\caption*`、`\captionof`、两种 listings）：编号 1–4 等于 PDF 的（`gs`），11 个带标签的编号
+  等于 .aux，每个计数器取走的号等于探针的步进，引用文字等于 `refText`，报告除 info 外为空。
+- 画面（无头 Chrome）：书的投影图、tikz-cd、热力图、表格在 1000 px 的浅色和深色下都清楚（深色下 `blue!70!black` 的 x 提亮了）；
+  作业的算法（中文）和扫描页；文章的 `$m_i \in \set{0,1}$` 在行内、`\[\set{..}[..]\]`、`keypoint` 块、结果图和表 1。行内片段的基线：
+  每个 `vertical-align` 放下后 SVG 的基线和紧跟的零高度 inline-block 的底边差 0 px（书 1 个、文章 2 个）；片段的 32 个字体族在
+  `document.fonts` 里都是 loaded。375 px 深色：文章、作业没有横向溢出，书仍是 S2 记下的那个 15 px 宽的行内公式（S4）。
+- 时间（构建新鲜时的第二次导出，Node + jsdom）：片段和图片阶段书 174–186 ms（2 个片段），文章 206–234 ms（4 个），作业 247–295 ms
+  （1 个片段，加上 Ghostscript 替身画 PDF 页）；整个导出书 1.8–1.9 s、文章 0.78–0.82 s、作业 1.5 s。
+- 大小：书 469 KB（S3 446 KB）、文章 328 KB（285 KB）、作业 119 KB（89 KB，其中扫描页的 PNG）。`main.js`（生产构建，不压缩）
+  593,986 B，其中 `src/export/` 176,769 B（压缩后 108,446 B），`fragments.ts`、`images.ts`、`tables.ts` 共 21,400 B。
+- 跑完后没有 xelatex、pdflatex、latexmk、dvisvgm、Chrome 进程，也没有留下 `latex-live-export-*` 临时目录。
+- 还没做：在 Obsidian 里点一次导出（`pdfPagePngs` 用 pdf.js 画 PDF 页只做了类型检查和构建），按设计留给 S7a 的 GUI 检查；
+  没有 dvisvgm 时的降级只看过代码路径，没有测试（要一个有引擎却没有 dvisvgm 的 TeX 目录）；XeLaTeX 片段里的图片；带编号的
+  显示公式片段按墨迹框居中，编号不在正文右边（TeX 的行宽和左边距没有传给 SVG）。
+
+
+## 2026-09-30：首版收尾与后续开发
+
+### HTML 完成的实现
+
+- 原生环境展开、import/subfile 上下文、定义及图片/PDF/listing 预加载；空格、Unicode、项目内绝对路径和 `./`/`../`
+  经真实 XeLaTeX 验证。精确输入别名读取插桩副本，原始字节和访问顺序不变。
+- 重复文件的 SVG 由片段号与访问号识别，字体和元素 id 独立，删除计数器记录限于本次访问；真实图和公式分别显示 1/2、
+  (1)/(2)。缺图时报告不再声称编号已显示。
+- elegantnote/elegantpaper 中英文、ctex/`scheme=plain` 配置、页头字段间隔、摘要字体和真实 TeX 日期。
+- 缓存导言区依赖的新鲜度、缺失输入重建、临时输出清理与字体取消。LuaLaTeX 按原首版计划明确拒绝，其旧 DVI 流程会
+  静默丢失 luamplib 图形，不能报告为成功导出。
+
+真实命令从章节找到主文件，原生保存出 249 KB 自包含 HTML，零警告。报告、Open 在 Chrome 打开本地文件、Reveal 在
+Finder 选中文件均已验证；中文、两张图片、引用和 (1.1)–(1.5) 编号正确。六个新类的明暗/桌面/窄屏检查 162/162。
+
+### 性能后续目标
+
+`scripts/gen-export-large-fixture.mjs` 生成实际 65 页中文 elegantbook，含定理、数学、表格、TikZ 和文献。
+完整构建新鲜时导出 3.76/3.94 s，HTML 相同、零报告项；准确冷态约 22 s，其中完整构建约 17 s。
+XeLaTeX 四遍占主要时间，Biber 约 0.43 s。现在通过 latexmk 公开的 `after_xlatex_analysis` hook，
+仅移除本次物理构建目录/job 的 `.run.xml` 生成账本依赖：recorder 确认 OUTPUT、logreq 头、请求全部属于 biblatex。
+现有用户 hook 保留；其他 XML 和其他 logreq package 保留。实际 XML 修改仍重建，文献修改仍运行 Biber 并收敛。
+真实 65 页生产样本三遍 XeLaTeX，冷导出 11.335 s（构建 8.240 s、探针 2.463 s）；新鲜构建 2.931 s，
+HTML 完全相同、零报告项。65 页冷态 10 s 目标仍未达到，不能以 warm-only 数据替代。
+用户明确决定将 10 s 作为后续优化目标，先进入功能研发。

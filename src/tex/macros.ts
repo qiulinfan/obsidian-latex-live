@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "fs";
 import { dirname, join } from "path";
-import { fileReferences, stripComments } from "./project";
+import { contextualFileReferences, stripComments, subfileSource } from "./project";
 
 /**
  * What a project defines: macro arities, colors and environments for completion, and the
@@ -20,6 +20,8 @@ export interface Definitions {
    * loaded. Filled by projectDefinitions only.
    */
   statements: string[];
+  /** Last effective full normalized declaration per macro, in execution order, for source parsers. */
+  declarations?: ReadonlyMap<string, string>;
   /**
    * Macros whose last definition (document order) MathJax cannot read, -> that definition: an
    * xparse spec other than `m`s after one `o`, a body using `@` internals. Filled by
@@ -37,6 +39,7 @@ export const emptyDefinitions = (): Definitions => ({
   colors: new Set(),
   environments: new Set(),
   statements: [],
+  declarations: new Map(),
   unsupported: new Map(),
   packages: new Set(),
   files: [],
@@ -112,6 +115,8 @@ interface Statement {
   at: number;
   /** Normalized source; for an unsupported definition, its source as written (shortened). */
   text: string;
+  /** Complete declaration for parsers; `text` may be shortened for an unsupported MathJax definition. */
+  declaration: string;
   /** The macro it defines (no backslash), or null (environments, colors). */
   name: string | null;
   /** From \providecommand: kept only while `name` is still undefined. */
@@ -349,9 +354,11 @@ const MAX_SHOWN = 80;
  * The definition statements of comment-free source, in order (before the provide rule), with
  * the definer aliases `inherited` from earlier files and the source's own.
  */
-function rawStatements(src: string, inherited: Aliases = NO_ALIASES): Statement[] {
+function rawStatements(src: string, inherited: Aliases = NO_ALIASES, parser = false): Statement[] {
   // \makeatletter blocks define internals; blank them, keeping offsets.
-  src = src.replace(/\\makeatletter[\s\S]*?(?:\\makeatother|$)/g, (m) => " ".repeat(m.length));
+  // Source parsers need the public consumer declarations inside them, while MathJax keeps
+  // its existing filter. A makeatletter token inside a macro body must not hide later readers.
+  if (!parser) src = src.replace(/\\makeatletter[\s\S]*?(?:\\makeatother|$)/g, (m) => " ".repeat(m.length));
   const aliases = new Map([...inherited, ...definerAliases(src)]);
   const re = new RegExp(`\\\\(${[...Object.keys(STATEMENT_KINDS), ...aliases.keys()].join("|")})(?![A-Za-z])`, "g");
   const out: Statement[] = [];
@@ -363,14 +370,15 @@ function rawStatements(src: string, inherited: Aliases = NO_ALIASES): Statement[
     re.lastIndex = st.end;
     // An alias's own definition names a definer, not a macro.
     if (st.name && aliases.has(st.name)) continue;
+    if (parser && (!st.name || !/^[A-Za-z]+$/.test(st.name) || /^\\def\\[A-Za-z]+@/.test(st.text))) continue;
     let unsupported = st.unsupported ?? false;
     if (INTERNAL.test(st.text)) {
       // An internal name itself (`\def\x@y`) is no user macro; a body with internals is unsupported.
-      if (!st.name || st.text.includes(`\\${st.name}@`)) continue;
+      if (!parser && (!st.name || st.text.includes(`\\${st.name}@`))) continue;
       unsupported = true;
     }
     const text = unsupported && st.text.length > MAX_SHOWN ? `${st.text.slice(0, MAX_SHOWN)}…` : st.text;
-    out.push({ at: m.index, text, name: st.name, provide: st.provide, unsupported });
+    out.push({ at: m.index, text, declaration: st.text, name: st.name, provide: st.provide, unsupported });
   }
   return out;
 }
@@ -419,7 +427,7 @@ interface FileScan {
   /** The definer aliases the file itself defines. */
   aliases: Map<string, string>;
   /** Its definitions and statements for the aliases it was last read with. */
-  read: { key: string; defs: Definitions; statements: Statement[] } | null;
+  read: { key: string; defs: Definitions; statements: Statement[]; parserDeclarations: Statement[] } | null;
 }
 
 function scanFile(text: string): FileScan {
@@ -428,10 +436,10 @@ function scanFile(text: string): FileScan {
 }
 
 /** A file's definitions and statements, given the definer aliases of the files read before it. */
-function readWith(scan: FileScan, aliases: Aliases): { defs: Definitions; statements: Statement[] } {
+function readWith(scan: FileScan, aliases: Aliases): { defs: Definitions; statements: Statement[]; parserDeclarations: Statement[] } {
   const key = JSON.stringify([...aliases]);
   if (scan.read?.key !== key) {
-    scan.read = { key, defs: scanDefinitions(scan.text, emptyDefinitions(), aliases), statements: rawStatements(scan.src, aliases) };
+    scan.read = { key, defs: scanDefinitions(scan.text, emptyDefinitions(), aliases), statements: rawStatements(scan.src, aliases), parserDeclarations: rawStatements(scan.src, aliases, true) };
   }
   return scan.read;
 }
@@ -477,39 +485,60 @@ const MAX_FILES = 80;
  */
 export function projectDefinitions(root: string, buffers?: ReadonlyMap<string, string>): Definitions {
   const out = emptyDefinitions();
+  const declarations = new Map<string, string>();
+  out.declarations = declarations;
   const rootDir = dirname(root);
   const seen = new Set<string>();
+  const files = new Set<string>();
   const defined = new Set<string>();
+  const parserDefined = new Set<string>();
   const aliases = new Map<string, string>();
-  const visit = (file: string) => {
-    if (seen.has(file) || seen.size >= MAX_FILES) return;
-    seen.add(file);
-    const hit = scanned(file, buffers?.get(file));
-    if (!hit) return;
-    out.files.push(file);
+  const visit = (file: string, inputDirs: readonly string[], bodyOnly = false) => {
+    const context = `${file}|${inputDirs.join("|")}|${bodyOnly}`;
+    if (seen.has(context) || seen.size >= MAX_FILES) return;
+    seen.add(context);
+    const raw = scanned(file, buffers?.get(file));
+    if (!raw) return;
+    const hit = bodyOnly ? scanFile(subfileSource(raw.text)) : raw;
+    if (!files.has(file)) { files.add(file); out.files.push(file); }
     for (const [k, v] of hit.aliases) aliases.set(k, v);
-    const { defs, statements } = readWith(hit, aliases);
+    const { defs, statements, parserDeclarations } = readWith(hit, aliases);
     for (const [k, v] of defs.macros) out.macros.set(k, v);
     for (const c of defs.colors) out.colors.add(c);
     for (const e of defs.environments) out.environments.add(e);
     for (const p of defs.packages) out.packages.add(p);
-    const refs = fileReferences(hit.src, rootDir);
+    const exists = (path: string) => buffers?.has(path) || existsSync(path);
+    const refs = contextualFileReferences(hit.src, rootDir, inputDirs, exists);
     for (const m of hit.src.matchAll(PACKAGE_RE)) {
       const ext = m[1] === "documentclass" || m[1] === "LoadClass" ? ".cls" : ".sty";
       for (const name of m[2].split(",")) {
-        const local = join(rootDir, name.trim() + ext);
-        if (name.trim() && existsSync(local)) refs.push({ at: m.index ?? 0, path: local });
+        const local = inputDirs.map((dir) => join(dir, name.trim() + ext)).find(exists);
+        if (name.trim() && local) refs.push({ at: m.index ?? 0, path: local, inputDirs: [...inputDirs], bodyOnly: false });
       }
     }
     refs.sort((a, b) => a.at - b.at);
     let r = 0;
-    for (const st of statements) {
-      while (r < refs.length && refs[r].at < st.at) visit(refs[r++].path);
-      admit(st, defined, out.statements, out.unsupported);
+    const events = [
+      ...statements.map(st => ({ st, parser: false })),
+      ...parserDeclarations.map(st => ({ st, parser: true })),
+    ].sort((a, b) => a.st.at - b.st.at || Number(a.parser) - Number(b.parser));
+    for (const { st, parser } of events) {
+      while (r < refs.length && refs[r].at < st.at) {
+        const ref = refs[r++];
+        visit(ref.path, ref.inputDirs, ref.bodyOnly);
+      }
+      if (!parser) admit(st, defined, out.statements, out.unsupported);
+      else if (st.name && !(st.provide && parserDefined.has(st.name))) {
+        parserDefined.add(st.name);
+        declarations.set(st.name, st.declaration);
+      }
     }
-    while (r < refs.length) visit(refs[r++].path);
+    while (r < refs.length) {
+      const ref = refs[r++];
+      visit(ref.path, ref.inputDirs, ref.bodyOnly);
+    }
   };
-  visit(root);
+  visit(root, [rootDir]);
   return out;
 }
 
@@ -520,6 +549,7 @@ export function mergeDefinitions(base: Definitions, extra: Definitions): Definit
     colors: new Set([...base.colors, ...extra.colors]),
     environments: new Set([...base.environments, ...extra.environments]),
     statements: [...base.statements, ...extra.statements],
+    declarations: new Map([...(base.declarations ?? []), ...(extra.declarations ?? [])]),
     unsupported: new Map([...base.unsupported, ...extra.unsupported]),
     packages: new Set([...base.packages, ...extra.packages]),
     files: [...base.files, ...extra.files],

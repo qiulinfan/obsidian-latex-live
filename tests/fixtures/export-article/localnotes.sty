@@ -1,0 +1,70 @@
+% localnotes.sty -- a local package for the synthetic article (loaded by main.tex).
+% Macros live here instead of the document, so renderers must follow \usepackage
+% to a project-local .sty to know them.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{localnotes}[2026/09/29 v0.1 synthetic test package]
+
+\RequirePackage{amsmath,amssymb,amsthm,mathtools,bm}
+\RequirePackage{xcolor}
+\RequirePackage{tikz}
+\RequirePackage[numbers,sort&compress]{natbib}
+\RequirePackage{hyperref}
+\RequirePackage[capitalise,noabbrev]{cleveref}
+
+% ---- package option ----
+\newif\ifln@draft
+\DeclareOption{draft}{\ln@drafttrue}
+\ProcessOptions\relax
+
+% ---- theorems (amsthm) ----
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{remark}
+\newtheorem*{remark}{Remark}
+
+% ---- vectors and sets ----
+\newcommand*{\vx}{\bm{x}}
+\newcommand*{\vz}{\bm{z}}
+\newcommand*{\vtheta}{\bm{\theta}}
+\renewcommand{\vec}[1]{\bm{#1}}
+\newcommand{\Reals}{\mathbb{R}}
+% xparse-style signature: \set{x}[condition]  (MathJax cannot read \NewDocumentCommand)
+\NewDocumentCommand{\set}{m o}{%
+  \left\{ #1 \IfValueT{#2}{\;\middle|\; #2} \right\}}
+
+% ---- paired delimiters (mathtools) ----
+\DeclarePairedDelimiterX{\inp}[2]{\langle}{\rangle}{#1, #2}
+\DeclarePairedDelimiter{\abs}{\lvert}{\rvert}
+\DeclarePairedDelimiter{\norm}{\lVert}{\rVert}
+
+% ---- operators ----
+\DeclareMathOperator{\softmax}{softmax}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator*{\Exp}{\mathbb{E}}
+
+% ---- optional arguments with defaults ----
+\newcommand{\loss}[1][\vtheta]{\mathcal{L}(#1)}
+\newcommand{\mse}[2][]{\operatorname{MSE}_{#1}\!\left(#2\right)}
+
+% ---- plain TeX and \let ----
+\def\mask{\mathsf{M}}
+\def\vis{\mathsf{V}}
+\let\oldepsilon\epsilon
+\renewcommand{\epsilon}{\varepsilon}
+
+% ---- text helpers and an environment ----
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newenvironment{keypoint}[1][Key point]
+  {\par\medskip\noindent\textbf{#1.}\ \itshape}
+  {\par\medskip}
+
+\ifln@draft
+  \renewcommand{\todo}[1]{}
+\fi
+
+\endinput

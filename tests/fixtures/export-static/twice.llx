@@ -1,0 +1,17 @@
+llxname{figure}{Figure}
+llxinfo{tocdepth}{2}
+llxstep{section}{1}{}{main.tex}{5}
+llxtoc{section}{\protect \numberline {1}One}{}{main.tex}{5}
+llxin{parts}{common.tex}{6}
+llxstep{enumi}{{1.}}{parts}{common.tex}{2}
+llxstep{enumi}{{2.}}{parts}{common.tex}{3}
+llxout{parts}{common.tex}
+llxstep{equation}{1}{parts}{common.tex}{6}
+llxstep{section}{2}{}{main.tex}{8}
+llxtoc{section}{\protect \numberline {2}Two}{}{main.tex}{8}
+llxin{}{umsa.fd}{9}
+llxout{}{umsa.fd}
+llxin{parts}{common.tex}{9}
+llxstep{enumi}{{1.}}{parts}{common.tex}{2}
+llxstep{enumi}{{2.}}{parts}{common.tex}{3}
+llxout{parts}{common.tex}

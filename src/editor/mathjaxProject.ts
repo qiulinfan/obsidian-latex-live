@@ -20,7 +20,8 @@
 //   Renders      side-effect free: a definition inside a formula (`\def\x{..} \x`) applies to
 //                that formula only (the definition tables are restored after it).
 //   Glyph CSS    shared output jax: MathJax's stylesheet gets these renders' glyphs
-//                (texRender installs it).
+//                (texRender installs it). The HTML export passes an output jax of its own
+//                (src/export/math.ts), so its page gets only its own glyphs.
 //   Fallback     without the internals (a MathJax upgrade), Obsidian's public tex2chtml
 //                renders without project macros (`isolated` false, one console warning).
 //                Definitions are never fed to the global instance.
@@ -179,8 +180,17 @@ export class ProjectMath {
     return this.jax !== null;
   }
 
-  /** A renderer for `input`, creating nodes in `doc` (the window Obsidian's MathJax runs in). */
-  static create(mj: MathJaxLike, doc: Document, input: ProjectMathInput): ProjectMath {
+  /**
+   * A renderer for `input`, creating nodes in `doc` (the window Obsidian's MathJax runs in).
+   * `options.output` replaces Obsidian's shared CHTML output jax (the HTML export's own, whose
+   * stylesheet then holds only its renders' glyphs); `options.tagSide` is TeX's `leqno`.
+   */
+  static create(
+    mj: MathJaxLike,
+    doc: Document,
+    input: ProjectMathInput,
+    options: { output?: unknown; tagSide?: "left" | "right" } = {},
+  ): ProjectMath {
     const epoch = inputEpoch(input);
     const unsupported = input.unsupported ?? new Map<string, string>();
     const failed = [...unsupported.values()].map((statement) => ({ statement, message: "No MathJax equivalent" }));
@@ -199,9 +209,10 @@ export class ProjectMath {
         throw err;
       },
       macros: SHIMS,
+      ...(options.tagSide ? { tagSide: options.tagSide } : {}),
     });
     // Obsidian's document options: no menu, no assistive MathML, its safe protocols.
-    const mdoc = x.mathjax.mathjax.document(doc, { ...mj.config?.options, InputJax: tex, OutputJax: mj.startup!.output });
+    const mdoc = x.mathjax.mathjax.document(doc, { ...mj.config?.options, InputJax: tex, OutputJax: options.output ?? mj.startup!.output });
     // Definitions need the parse only, not the CHTML output.
     const compiled = x.core?.MathItem?.STATE?.COMPILED;
     const text = textOptions(tex);

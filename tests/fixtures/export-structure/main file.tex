@@ -1,0 +1,17 @@
+% Synthetic file graph: spaces/Unicode are filenames, the prose is intentionally tiny.
+\documentclass{article}
+\usepackage{import}
+\usepackage{subfiles}
+\usepackage{graphicx}
+\usepackage{listings}
+\newenvironment{keypoint}[2][Default heading]{\par\noindent\textbf{#1: #2.}\ \itshape}{\par}
+\newenvironment{nestedpoint}[1]{\begin{keypoint}[Nested]{#1}}{\end{keypoint}}
+\begin{document}
+\section{Root}\label{sec:root}
+\import{parts one/}{chapter one}
+\input{root only}
+\subfile{子目录/子文档}
+\begin{nestedpoint}{Result}
+Native body with $\nestedmacro+1$ and a reference to \ref{sec:root}.
+\end{nestedpoint}
+\end{document}

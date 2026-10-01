@@ -1,0 +1,92 @@
+llxinfo{equation-tag-side}{right}
+llxinfo{today}{September 30, 2026}
+llxname{contents}{Contents}
+llxname{listfigure}{List of Figures}
+llxname{listtable}{List of Tables}
+llxname{figure}{Figure}
+llxname{table}{Table}
+llxname{bib}{Bibliography}
+llxname{ref}{References}
+llxname{index}{Index}
+llxname{part}{Part}
+llxname{appendix}{Appendix}
+llxname{abstract}{Abstract}
+llxname{proof}{Proof}
+llxenv{keypoint}{macro:->\@protected@testopt \keypoint \\keypoint {Key point}}
+llxenv{definition}{macro:->\@thm [definition]{\let \thm@swap \@gobble \th@definition }{theorem}{Definition}}
+llxenv{lemma}{macro:->\@thm [lemma]{\let \thm@swap \@gobble \th@plain }{theorem}{Lemma}}
+llxenv{proof}{macro:->\@protected@testopt \proof \\proof {\proofname }}
+llxenv{theorem}{macro:->\@thm {\let \thm@swap \@gobble \th@plain }{theorem}{Theorem}}
+llxenv{remark}{macro:->\@thm {\th@remark }{}{Remark}}
+llxinfo{fontsize}{10.95}
+llxinfo{tocdepth}{3}
+llxinfo{secnumdepth}{3}
+llxinfo{today}{September 30, 2026}
+llxinfo{title-date}{September 2026}
+llxstep{footnote}{\textasteriskcentered }{}{main.tex}{17}
+llxin{}{umsa.fd}{17}
+llxout{}{umsa.fd}
+llxin{}{umsb.fd}{17}
+llxout{}{umsb.fd}
+llxin{sections}{intro.tex}{23}
+llxstep{section}{1}{sections}{intro.tex}{2}
+llxstep{bookmark@seq@number}{1}{sections}{intro.tex}{2}
+llxtoc{section}{\protect \numberline {1}Introduction}{sections}{intro.tex}{2}
+llxopen{0}
+llxclose{0}
+llxfrag{0}{8.21248pt}{2.7375pt}{53.1581pt}{3}
+llxopen{1}
+llxblock{1}{3}
+llxclose{1}
+llxstep{equation}{1}{sections}{intro.tex}{12}
+llxout{sections}{intro.tex}
+llxin{sections}{method.tex}{24}
+llxstep{section}{2}{sections}{method.tex}{1}
+llxstep{bookmark@seq@number}{2}{sections}{method.tex}{1}
+llxtoc{section}{\protect \numberline {2}Method}{sections}{method.tex}{1}
+llxstep{theorem}{2.1}{sections}{method.tex}{4}
+llxstep{theorem}{2.2}{sections}{method.tex}{9}
+llxstep{equation}{2}{sections}{method.tex}{11}
+llxstep{equation}{2}{sections}{method.tex}{11}
+llxstep{equation}{2a}{sections}{method.tex}{19}
+llxstep{equation}{2b}{sections}{method.tex}{19}
+llxin{sections/proofs}{lemma-proof.tex}{23}
+llxout{sections/proofs}{lemma-proof.tex}
+llxstep{equation}{3}{sections}{method.tex}{26}
+llxstep{page}{2}{sections}{method.tex}{40}
+llxout{sections}{method.tex}
+llxin{sections}{results.tex}{25}
+llxstep{section}{3}{sections}{results.tex}{1}
+llxstep{bookmark@seq@number}{3}{sections}{results.tex}{1}
+llxtoc{section}{\protect \numberline {3}Results}{sections}{results.tex}{1}
+llxstep{table}{1}{sections}{results.tex}{8}
+llxopen{2}
+llxclose{2}
+llxfrag{2}{105.14894pt}{0.0pt}{177.41072pt}{6}
+llxstep{figure}{1}{sections}{results.tex}{32}
+llxstep{figure}{2}{sections}{results.tex}{38}
+llxstep{theorem}{3.1}{sections}{results.tex}{41}
+llxstep{equation}{3}{sections}{results.tex}{43}
+llxstep{equation}{4}{sections}{results.tex}{55}
+llxstep{enumi}{{(i)}}{sections}{results.tex}{59}
+llxstep{Item}{1}{sections}{results.tex}{59}
+llxstep{enumi}{{(ii)}}{sections}{results.tex}{60}
+llxstep{Item}{2}{sections}{results.tex}{60}
+llxstep{page}{3}{sections}{results.tex}{61}
+llxout{sections}{results.tex}
+llxin{sections}{appendix.tex}{28}
+llxstep{section}{A}{sections}{appendix.tex}{1}
+llxstep{bookmark@seq@number}{4}{sections}{appendix.tex}{1}
+llxtoc{section}{\protect \numberline {A}Additional derivations}{sections}{appendix.tex}{1}
+llxstep{equation}{5}{sections}{appendix.tex}{4}
+llxout{sections}{appendix.tex}
+llxin{}{main.bbl}{31}
+llxout{}{main.bbl}
+llxinfo{natbib}{numbers,sort,compress}
+llxinfo{natbib-open}{[}
+llxinfo{natbib-close}{]}
+llxinfo{natbib-sep}{,}
+llxinfo{natbib-aysep}{,}
+llxinfo{natbib-cmt}{, }
+llxinfo{natbib-default-cite}{auto}
+llxstep{page}{4}{}{main.tex}{33}

@@ -1,0 +1,16 @@
+\section{Additional derivations}\label{app:derivations}
+
+For completeness, the gradient of the linear loss is
+\begin{equation}\label{eq:grad}
+  \nabla_W \mse[\mask]{W} = -2\,\mask^\top\bigl(\mask\vx - \mask W \vis\vx\bigr)(\vis\vx)^\top ,
+\end{equation}
+and with a Gram matrix
+\[
+  G = \begin{pmatrix}
+    \inp{\vx_1}{\vx_1} & \cdots & \inp{\vx_1}{\vx_n} \\
+    \vdots & \ddots & \vdots \\
+    \inp{\vx_n}{\vx_1} & \cdots & \inp{\vx_n}{\vx_n}
+  \end{pmatrix} \succeq 0
+\]
+the empirical version of \eqref{eq:objective} is $\frac{1}{n}\sum_{i=1}^{n} \norm{\mask(\vx_i - W\vis\vx_i)}^2$.
+Compare with \cref{thm:monotone} and \cref{sec:intro}.

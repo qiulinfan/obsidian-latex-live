@@ -48,30 +48,83 @@ export function referencedFiles(text: string, rootDir: string): string[] {
   return fileReferences(stripComments(text), rootDir).map((r) => r.path);
 }
 
+export interface FileReference {
+  at: number;
+  path: string;
+  /** import.sty's search path, in priority order, for the file being read. */
+  inputDirs: string[];
+  /** subfiles discards the preamble and text after end{document}. */
+  bodyOnly: boolean;
+}
+
+/** TeX consumes filename quotes, while spaces and Unicode inside them are literal. */
+export function literalTexPath(name: string): string {
+  const text = name.trim();
+  return text.startsWith('"') && text.endsWith('"') ? text.slice(1, -1) : text;
+}
+
+/**
+ * Resolve one file-read command under import/subfiles' current input@path. `exists` lets an
+ * unsaved buffer or the export planner provide the same priority without touching its source.
+ */
+export function resolveFileReference(
+  rootDir: string, command: string, name: string, directory: string | null = null,
+  inputDirs: readonly string[] = [rootDir], exists: (path: string) => boolean = existsSync,
+): Omit<FileReference, "at"> | null {
+  const text = literalTexPath(name);
+  if (!text || /[\\#]/.test(text)) return null;
+  const file = extname(text) ? text : `${text}.tex`;
+  const imported = /^(?:sub)?(?:import|inputfrom|includefrom)$/.test(command);
+  const bodyOnly = command === "subfile" || command === "subfileinclude";
+  let dirs = [...inputDirs];
+  let paths: string[];
+  if (imported) {
+    const dir = literalTexPath(directory ?? "");
+    if (/[\\#]/.test(dir)) return null;
+    const base = command.startsWith("sub") ? (inputDirs[0] ?? rootDir) : rootDir;
+    const absDir = resolve(base, dir);
+    dirs = [absDir, ...inputDirs.filter((d) => d !== absDir)];
+    paths = [resolve(absDir, file)];
+  } else if (bodyOnly) {
+    const path = resolve(inputDirs[0] ?? rootDir, file);
+    dirs = [dirname(path), ...inputDirs.filter((d) => d !== dirname(path))];
+    paths = [path];
+  } else paths = isAbsolute(file) ? [file] : inputDirs.map((d) => resolve(d, file));
+  const path = paths.find(exists) ?? paths[0];
+  return path ? { path, inputDirs: dirs, bodyOnly } : null;
+}
+
+/** Import-aware references, with the context the child inherits, in document order. */
+export function contextualFileReferences(src: string, rootDir: string, inputDirs: readonly string[] = [rootDir], exists?: (path: string) => boolean): FileReference[] {
+  const out: FileReference[] = [];
+  const add = (at: number, command: string, name: string, dir: string | null = null) => {
+    const ref = resolveFileReference(rootDir, command, name, dir, inputDirs, exists);
+    if (ref) out.push({ at, ...ref });
+  };
+  for (const m of src.matchAll(/\\(input|include|subfile|subfileinclude)\s*\{([^}]+)\}/g)) add(m.index ?? 0, m[1], m[2]);
+  for (const m of src.matchAll(/\\((?:sub)?(?:import|includefrom|inputfrom))\*?\s*\{([^}]*)\}\s*\{([^}]+)\}/g)) add(m.index ?? 0, m[1], m[3], m[2]);
+  return out.sort((a, b) => a.at - b.at);
+}
+
+/** A subfile's effective source, retaining offsets and lines for definitions and references. */
+export function subfileSource(src: string): string {
+  const code = src.replace(/(^|[^\\])%.*$/gm, (comment: string, before: string) => before + " ".repeat(comment.length - before.length));
+  const begin = /\\begin\s*\{document\}/.exec(code);
+  if (!begin) return src;
+  const from = begin.index + begin[0].length;
+  const end = /\\end\s*\{document\}/.exec(code.slice(from));
+  const to = end ? from + end.index : src.length;
+  const blank = (text: string) => text.replace(/[^\r\n]/g, " ");
+  return blank(src.slice(0, from)) + src.slice(from, to) + blank(src.slice(to));
+}
+
 /**
  * The \input-like references of comment-free source with their offsets, in document order.
  * Paths resolve against `rootDir` (TeX reads them from the root document's folder); a name
  * without an extension is a `.tex` file.
  */
 export function fileReferences(src: string, rootDir: string): { at: number; path: string }[] {
-  const out: { at: number; path: string }[] = [];
-  const add = (at: number, p: string) => {
-    const trimmed = p.trim();
-    if (!trimmed) return;
-    const withExt = extname(trimmed) ? trimmed : `${trimmed}.tex`;
-    out.push({ at, path: isAbsolute(withExt) ? withExt : resolve(rootDir, withExt) });
-  };
-  for (const m of src.matchAll(
-    /\\(?:input|include|subfile|subfileinclude)\s*\{([^}]+)\}/g,
-  )) {
-    add(m.index ?? 0, m[1]);
-  }
-  for (const m of src.matchAll(
-    /\\(?:sub)?(?:import|includefrom|inputfrom)\*?\s*\{([^}]*)\}\s*\{([^}]+)\}/g,
-  )) {
-    add(m.index ?? 0, join(m[1], m[2]));
-  }
-  return out.sort((a, b) => a.at - b.at);
+  return contextualFileReferences(src, rootDir).map(({ at, path }) => ({ at, path }));
 }
 
 /**
@@ -102,7 +155,7 @@ export function findRoot(file: string, stopDir: string): string {
     } catch {
       entries = [];
     }
-    const roots: { path: string; refs: string[] }[] = [];
+    const roots: { path: string; refs: FileReference[] }[] = [];
     for (const name of entries.slice(0, MAX_CANDIDATES_PER_DIR)) {
       const candidate = join(dir, name);
       if (candidate === target) continue;
@@ -113,8 +166,8 @@ export function findRoot(file: string, stopDir: string): string {
         continue;
       }
       if (!hasDocumentclass(t)) continue;
-      const refs = referencedFiles(t, dir).map((p) => resolve(p));
-      if (refs.includes(target)) return candidate;
+      const refs = contextualFileReferences(stripComments(t), dir);
+      if (refs.some((r) => r.path === target)) return candidate;
       roots.push({ path: candidate, refs });
     }
     for (const r of roots) if (reaches(r.refs, dir, target)) return r.path;
@@ -130,16 +183,19 @@ export function findRoot(file: string, stopDir: string): string {
  * Whether the files a root document inputs (`refs`) pull in `target` through their own
  * inputs, breadth first. Nested paths resolve against the root's folder, as TeX reads them.
  */
-function reaches(refs: string[], rootDir: string, target: string): boolean {
+function reaches(refs: FileReference[], rootDir: string, target: string): boolean {
   const queue = [...refs];
   const seen = new Set<string>();
   while (queue.length && seen.size < MAX_REACHED_FILES) {
-    const file = queue.shift()!;
+    const ref = queue.shift()!;
+    const file = ref.path;
     if (file === target) return true;
-    if (seen.has(file)) continue;
-    seen.add(file);
+    const context = `${file}|${ref.inputDirs.join("|")}|${ref.bodyOnly}`;
+    if (seen.has(context)) continue;
+    seen.add(context);
     try {
-      queue.push(...referencedFiles(readFileSync(file, "utf8"), rootDir).map((p) => resolve(p)));
+      const src = stripComments(readFileSync(file, "utf8"));
+      queue.push(...contextualFileReferences(ref.bodyOnly ? subfileSource(src) : src, rootDir, ref.inputDirs));
     } catch {
       // a missing input
     }
@@ -251,13 +307,18 @@ export function preambleFiles(root: string): Set<string> {
   const preamble = preambleOf(text);
   if (preamble === null) return out;
   const rootDir = dirname(root);
-  const queue = referencedFiles(preamble, rootDir);
-  while (queue.length && out.size < MAX_REACHED_FILES) {
-    const file = resolve(queue.shift()!);
-    if (out.has(file)) continue;
+  const queue = contextualFileReferences(stripComments(preamble), rootDir);
+  const seen = new Set<string>();
+  while (queue.length && seen.size < MAX_REACHED_FILES) {
+    const ref = queue.shift()!;
+    const file = ref.path;
+    const context = `${file}|${ref.inputDirs.join("|")}|${ref.bodyOnly}`;
+    if (seen.has(context)) continue;
+    seen.add(context);
     out.add(file);
     try {
-      queue.push(...referencedFiles(readFileSync(file, "utf8"), rootDir));
+      const src = stripComments(readFileSync(file, "utf8"));
+      queue.push(...contextualFileReferences(ref.bodyOnly ? subfileSource(src) : src, rootDir, ref.inputDirs));
     } catch {
       // a missing input
     }

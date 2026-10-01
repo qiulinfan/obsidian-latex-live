@@ -1,0 +1,27 @@
+% !TEX program = xelatex
+% Synthetic homework notes for the HTML export tests: the packages real course notes load with
+% elegantbook (inputenc next to ctex, chinesefont=nofont with the fonts set by hand, listings,
+% algorithm + algpseudocode, pdfpages, tocdepth 2). All content is invented.
+\documentclass[lang=cn,11pt,chinesefont=nofont]{elegantbook}
+\usepackage[utf8]{inputenc}
+\setCJKmainfont[BoldFont=FandolSong-Bold.otf,ItalicFont=FandolKai-Regular.otf]{FandolSong-Regular.otf}
+\setCJKsansfont[BoldFont=FandolHei-Bold.otf]{FandolHei-Regular.otf}
+\setCJKmonofont{FandolFang-Regular.otf}
+\usepackage{pdfpages}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\setcounter{tocdepth}{2}
+
+\title{算法作业示例}
+\author{测试学生 Test Student}
+\date{2026 年 9 月}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\mainmatter
+\include{hw1}
+
+\end{document}

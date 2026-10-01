@@ -137,6 +137,30 @@ test("projectDefinitions: an open editor's unsaved text replaces its file", () =
   assert.equal(projectDefinitions(join(BOOK, "main.tex")).statements.at(-1), "\\newcommand{\\Lip}{L}", "disk copy unchanged");
 });
 
+test("projectDefinitions: nested imports, repeated contexts, and body-only subfiles preserve source order", () => {
+  const dir = project({
+    "main.tex": "\\documentclass{article}\n\\newcommand{\\same}{S}\n\\import{a/}{../shared}\n\\newcommand{\\middle}{M}\n\\import{b/}{../shared}\n\\subfile{子目录/part}\n\\newcommand{\\last}{L}\n",
+    "shared.tex": "\\input{localdefs}\n\\providecommand{\\same}{unused}\n",
+    "a/localdefs.tex": "\\newcommand{\\inA}{A}\n\\renewcommand{\\same}{A}\n",
+    "b/localdefs.tex": "\\newcommand{\\inB}{B}\n\\renewcommand{\\same}{B}\n",
+    "子目录/part.tex": "\\documentclass[../main]{subfiles}\n\\newcommand{\\ignored}{X}\n\\input{neverread}\n\\begin{document}\n\\newcommand{\\inside}{I}\n\\input{local}\n\\end{document}\n\\newcommand{\\ignoredtail}{X}\n",
+    "子目录/local.tex": "\\newcommand{\\submacro}{U}\n",
+  });
+  try {
+    const d = projectDefinitions(join(dir, "main.tex"));
+    assert.deepEqual(d.statements, [
+      "\\newcommand{\\same}{S}", "\\newcommand{\\inA}{A}", "\\renewcommand{\\same}{A}",
+      "\\newcommand{\\middle}{M}", "\\newcommand{\\inB}{B}", "\\renewcommand{\\same}{B}",
+      "\\newcommand{\\inside}{I}", "\\newcommand{\\submacro}{U}", "\\newcommand{\\last}{L}",
+    ]);
+    assert.ok(d.macros.has("inA") && d.macros.has("inB") && d.macros.has("submacro"));
+    assert.ok(!d.macros.has("ignored") && !d.macros.has("ignoredtail"));
+    assert.equal(d.files.filter((f) => f === join(dir, "shared.tex")).length, 1, "files remain a unique dependency list");
+    const unsaved = projectDefinitions(join(dir, "main.tex"), new Map([[join(dir, "b", "localdefs.tex"), "\\newcommand{\\inB}{Unsaved}\\renewcommand{\\same}{B}"]]));
+    assert.ok(unsaved.statements.includes("\\newcommand{\\inB}{Unsaved}"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("projectDefinitions: a definer alias defined in one file is followed in the files read after it", () => {
   const dir = project({
     "main.tex": "\\documentclass{book}\n\\newcommand{\\nc}{\\newcommand}\n\\input{macros}\n\\begin{document}\n\\include{ch1}\n\\end{document}\n",

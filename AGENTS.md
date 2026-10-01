@@ -34,7 +34,7 @@
     parser depends on both.
   - Every TeX run goes through `runTex` (`src/tex/run.ts`: its own process
     group, the stall watchdog, a timeout, an `AbortSignal` that kills the group;
-    `Compiler.exec` uses it; `fragment.ts` still spawns with
+    `Compiler.exec`, the export's probe and its dvisvgm run use it, `fragment.ts` still spawns with
     the same rules): no log or output growth and under 2 % CPU of the process
     group for 30 s kills the group and adds `stallMessage` as an error. XeLaTeX
     on macOS blocks forever in a CoreText font download (ctex's default fontset)
@@ -495,6 +495,110 @@
   `\the<counter>` from its head's number (`boxNumber`), a float's from its label's .aux entry, a float
   as a minipage with `\@captype`.
   Cards are `lsp-lp-paper ll-fragment` (`is-inverted` as crops), drawn as PNG data URLs.
+- HTML export (`src/export/`, docs/design.md "HTML 导出"): pure Node-compatible source,
+  math, probe, fragments and page pipeline. Tests use `tests/support/exportHost.ts`.
+  - Flush the current project input graph from editor buffers, bibliographies,
+    recorded dependencies and same-root views, including files outside the root
+    folder. A requested build must see a subsequent full `start` before accepting
+    its result: an already running full build can have read older sources.
+    External outputs write to a unique adjacent temporary file and rename only
+    after the write succeeds and cancellation is checked. Vault outputs retain
+    the adapter's writer. PDF hosts receive the export signal; loading/rendering
+    cancels without waiting for a pending page or encoding promise.
+  - Native `\newenvironment` expansions preserve original-site provenance; constructs
+    requiring TeX remain fragments. File visits carry import directories and subfile
+    body boundaries. Assets and listings resolve by visit site and load before emit.
+    Absolute in-project inputs are shadowed through exact kernel input aliases, not
+    basename substitutions; instrumented source bytes outside inserts stay unchanged.
+  - Each fragment drawing is identified by both static id and probe visit (`data-id`,
+    `data-visit`). Fonts, CSS and DOM ids are unique per drawing. `StepQueue.drop` is
+    limited to that fragment's owning visit, including its nested input steps. Never
+    select a repeated drawing by page order or reuse its first occurrence.
+  - Probe `today` and `title-date` values come from TeX before `maketitle` clears its
+    fields. LuaLaTeX HTML export is explicitly outside the first-release scope;
+    its DVI probe can return success while losing luamplib drawings. Reject it early.
+  - `node scripts/regen-export-fixtures.mjs` regenerates the synthetic `.llx` and SVG
+    evidence after probe/plan changes. `scripts/prepare-editor-fixture.mjs` prepares
+    the GUI source fixture and its generated image assets in a fresh scratch folder.
+    `scripts/gen-export-large-fixture.mjs` makes the 65-page performance project;
+    export-smoke accepts its absolute folder. Keep PDFs and screenshots outside Git.
+  - The work folder is `exportDirFor(outDirFor(root))` = `<build folder>-export`, a sibling of
+    the build folder, never inside it (`readAuxLabels` scans the build folder three levels
+    deep); labels and page numbers are always read from the build folder itself.
+  - The probe pass compiles the plan's instrumented copies (`<work>/src/<key>`) with
+    `\RequirePackage{llxprobe}\input{<root file>}`, cwd the work folder and
+    `TEXINPUTS=.:<work>/src:<root folder>:` (+ the user's), in DVI mode. Inserts never add a line
+    break (`\begin{llxfrag}{7}` right before a construct, `\end{llxfrag}` right after): a copy
+    has the original's lines and its bytes outside the inserts (`tests/exportPlan.test.ts`).
+    `llxprobe.sty` is a string in `probe.ts`, written on every export.
+  - `.llx` records are positioned by visit (`llxin`/`llxout` from the `file/before`/`file/after`
+    hooks), never by their file fields: right after a visit ends TeX still names the child file
+    with the parent's line. Plan visits map to the probe's by file key and occurrence; files are
+    keyed by their path from the root's folder with forward slashes and extension.
+  - The parser (`texTree.ts`) follows latexHighlight's lexical rules (MATH_ENVS,
+    VERBATIM_ENVS, `\iffalse`) and the signature table (`signatures.ts`); unified-latex is a
+    devDependency used only by the differential test in `tests/exportTree.test.ts`, which also
+    checks that `main.js` never bundles it.
+  - Math goes through `ExportMath` (`math.ts`): a `ProjectMath` with a CHTML output jax of its own
+    (`ProjectMath.create`'s optional `{ output, tagSide }`), never Obsidian's shared one, so the
+    page's stylesheet holds only its own glyphs; `stylesheet(html)` keeps the glyph rules of the
+    page's `mjx-c` class combinations, the family classes it uses and their `@font-face` rules with
+    the woff files as data URIs (host `math().font`: Obsidian fetches MathJax's `fontURL`, tests read
+    `node_modules/mathjax`). Parse MathJax's CSS string-aware (the `{` glyph is `content: "{"`).
+    The plan's `mathOk` is answered from ExportMath's render cache, filled before planning with the
+    UI yielding; the plan never renders synchronously. Display numbering follows amsmath as the
+    probe measured it (math.ts's file comment: equation steps and restores for its own `\tag`,
+    eqnarray's undone last step, a trailing `\\` numbers an empty row); every number the emitter
+    takes goes into `report.numbers`, which `tests/exportFidelity.test.ts` compares with the probe,
+    the .aux and the PDF's text (`gs -sDEVICE=txtwrite`, skipped without gs).
+  - Citations: biblatex's numbers are the probe's `llxcite` records and a bibliography lists the
+    entries its `llx@bib` steps name (`\AtEveryBibitem`, registered in `begindocument/before`);
+    natbib's and LaTeX's labels are the .aux's `\bibcite` (natbib counts with `\advance`, never
+    `\stepcounter`), natbib's mode and punctuation the probe's `enddocument` records. `joinCjk`
+    never joins across a formula (MathJax markup has no text) and drops spaces next to full-width
+    punctuation, as xeCJK does.
+  - TeX fragments (`fragments.ts`): every probe page goes through `runDvisvgm` (`dvisvgm --page=1-
+    --exact-bbox --currentcolor --font-format=woff2`, through `runTex`) and is matched to its fragment
+    by the marker the probe writes on it (`<g class="llx-ref" data-id data-y>`), never by page order;
+    `data-y` is the baseline (pdfLaTeX y=0, XeLaTeX -64.03 for the same box). `llxopen`/`llxclose`
+    bracket each fragment in the `.llx`, and the emitter drops a fragment's steps by its id
+    (`StepQueue.drop(id)`), never by lines (a caption on an inline picture's line keeps its step),
+    recording those of the counters the page shows as drawn in `report.numbers`. `prepareFragment` prefixes ids,
+    classes and font families per fragment (each page embeds its own font subsets and an inline
+    SVG's `<style>` is global), sanitizes (an SVG element allowlist; `on*`, `javascript:` and outside
+    references go; a `<` that starts no tag it read is escaped), turns black into `currentColor`,
+    lightens colours under 3:1 on the dark background in a dark theme, maps Kangxi radicals in text to
+    the ideographs (dvisvgm names a Fandol glyph `⾮` for `非`), and sizes in em of
+    `llxinfo{fontsize}`. A fragment's sibling nodes up to its end (`\tikz`'s path) are skipped.
+  - Images (`images.ts`) are read before the emit and embedded as data URIs; PDF pages come from the
+    host's `pdfImages` (Obsidian: `pdfPagePngs` in `pdfRenderer.ts`, pdf.js at 2x, one document per
+    file), and a host without it gets a report item, never a failed export. Tables are `tables.ts`
+    (column specs, rows, booktabs/`\hline`/`\cline` rules); the plan makes tabulars with multirow or
+    colortbl commands fragments.
+  - The look is `profiles.ts` (elegantbook and standard profiles, from what the installed classes
+    print); the emitter writes structure and classes, never literal colours or fonts. A colour is a
+    page variable (`var(--llx-c-<colorId>)`: TeX's value in light mode, `darkText`/`darkFill`
+    computed in TS for dark mode, >= 4.5 against the lightest dark surface `#303034`), xcolor
+    expressions mixed from the probe's colours; a name without the probe comes from `fallbackName`.
+    An environment the plan made a fragment whose census meaning is `\@thm` (a class's
+    \newtheorem) is emitted as a theorem (not when it holds a picture); amsthm's style comes from the
+    census too.
+  - `exportHtml` is `prepareExport` (files and processes) then `emitExport` (the DOM only:
+    `ExportImages` resolves its files in `load`, the emit touches no file system).
+    `scripts/export-smoke.mjs` prepares the three fixtures in Node and emits them in headless Chrome
+    with MathJax 3.2.2 as Obsidian loads it, then checks fonts, glyph widths, box frames, overflow
+    against the device width, inline fragment baselines, dark contrast >= 4.5 and console errors at
+    1000 px and 375 px, light and dark (skipped without Chrome or TeX; screenshots and pages in
+    `$TMPDIR/latex-live-export-smoke/`). Run it after changing `profiles.ts`, `html.ts` or the
+    emitter's markup. The command's math host takes MathJax's own startup document
+    (`MathJax.startup.document.document`): its HTML handler accepts no other window's.
+  - `tests/fixtures/export-book`, `export-article` and `export-homework` are synthetic and small
+    (images under 20 KB, the one-page PDF under 30 KB); `export-static/*.llx` are probe outputs
+    of the first two, planned with MathJax's checks as the exporter plans (regenerate them from an
+    export of fresh copies, `<work>/main.llx`, when the probe or the plan changes);
+    `export-static/fragments/` holds dvisvgm's pages of `fragments/main.tex` on both engines
+    (regenerate from `<work>/frag/` when the probe's markers change). `emitDoc` in
+    `tests/support/exportHost.ts` runs the emitter on a synthetic document with a handwritten `.llx`.
 - Build output goes to `$TMPDIR/obsidian-latex-live/<hash of root>/`, never
   into the vault.
 - Desktop only (`isDesktopOnly: true`).

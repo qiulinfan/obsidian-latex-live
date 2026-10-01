@@ -1,0 +1,22 @@
+% !TEX root = ../main.tex
+\section{Introduction}\label{sec:intro}
+
+Masked reconstruction hides a random subset of coordinates of $\vx \in \Reals^d$ and asks a
+model $f_{\vtheta}$ to recover them~\citep{doe2023masked}. Write the mask as a diagonal
+matrix $\mask = \diag(m_1, \dots, m_d)$ with $m_i \in \set{0, 1}$ and the visible part as
+$\vis = I - \mask$. The set of admissible masks with ratio $\rho$ is
+\[
+  \mathcal{M}_\rho = \set{\mask}[\tr \mask = \rho d],
+\]
+and the objective is the mean squared error on the hidden coordinates,
+\begin{equation}\label{eq:objective}
+  \loss = \Exp_{\mask \sim \mathcal{M}_\rho} \norm*{\mask\bigl(\vx - f_{\vtheta}(\vis \vx)\bigr)}^2 .
+\end{equation}
+\Cref{sec:method} derives a bound for linear $f_{\vtheta}$ and \cref{sec:results} checks
+it numerically. \Citet{roe2022views} give a related multi-view argument; see also
+\citep[Sec.~3]{doe2023masked}.
+
+\begin{keypoint}[Notation]
+  Bold lower-case letters are vectors, $\inp{\vx}{\vz}$ is the Euclidean inner product and
+  $\abs{\cdot}$ the absolute value. \todo{unify notation with the appendix}
+\end{keypoint}

@@ -1,0 +1,45 @@
+% !TEX program = xelatex
+% Synthetic test book for LaTeX Live (elegantbook + ctex, multi-file).
+% All content is invented for testing; nothing here comes from a real book.
+
+% ctex's default macOS fontset falls back to STXihei/STFangsong on macOS 27, and
+% XeLaTeX then hangs in a CoreText font download. Fandol ships with TeX Live and
+% loads by file name. Delete this line to reproduce the hang.
+\PassOptionsToPackage{fontset=fandol}{ctex}
+\documentclass[lang=cn,11pt,chinese,thmcnt=chapter]{elegantbook}
+
+\usepackage{mathtools}
+\usepackage{tikz-cd}
+\usetikzlibrary{arrows.meta,positioning,calc,angles,quotes}
+
+\input{macros}
+\addbibresource{refs.bib}
+
+% Uncomment to compile only the chapter being edited (future \includeonly work).
+% \includeonly{chapters/ch2}
+
+\title{合成测试书：概率、线性代数与优化}
+\subtitle{A Synthetic Book for Editor and Preview Testing}
+\author{测试作者 Test Author}
+\institute{示例研究所 Example Institute}
+\date{2026 年 9 月}
+\version{0.1}
+\extrainfo{本书内容全部为测试用途而编写。}
+
+\begin{document}
+
+\maketitle
+\frontmatter
+\tableofcontents
+
+\mainmatter
+\include{chapters/ch1}
+\include{chapters/ch2}
+\include{chapters/ch3}
+
+\appendix
+\include{chapters/appendix}
+
+\printbibliography[heading=bibintoc,title=参考文献]
+
+\end{document}

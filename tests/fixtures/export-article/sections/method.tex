@@ -1,0 +1,40 @@
+\section{Method}\label{sec:method}
+% No magic comment here: the root is found because main.tex \input's this file.
+
+\begin{definition}[Linear reconstructor]\label{def:linear}
+  A linear reconstructor is $f_{W}(\vz) = W\vz$ with $W \in \Reals^{d \times d}$. Its
+  loss under a fixed mask is $\mse[\mask]{W} = \norm{\mask(\vx - W\vis\vx)}^2$.
+\end{definition}
+
+\begin{lemma}\label{lem:bias-variance}
+  Let $\Sigma = \Exp[\vx\vx^\top]$. For every fixed mask,
+  \begin{subequations}\label{eq:bv}
+    \begin{align}
+      \Exp \mse[\mask]{W}
+        &= \tr\bigl(\mask \Sigma \mask\bigr)
+         - 2\tr\bigl(\mask W \vis \Sigma \mask\bigr)
+         + \tr\bigl(\mask W \vis \Sigma \vis W^\top \mask\bigr) \label{eq:bv-expand} \\
+        &\ge \tr\bigl(\mask \Sigma \mask\bigr)
+         - \tr\bigl(\mask \Sigma \vis (\vis \Sigma \vis)^{+} \vis \Sigma \mask\bigr). \label{eq:bv-bound}
+    \end{align}
+  \end{subequations}
+\end{lemma}
+
+\input{sections/proofs/lemma-proof}
+
+The minimiser is available in closed form,
+\begin{equation}
+  W^\star = \Sigma \vis (\vis \Sigma \vis)^{+}, \tag{$\star$}\label{eq:wstar}
+\end{equation}
+so \eqref{eq:bv-bound} is attained and \cref{lem:bias-variance} is tight. For a
+nonlinear model we only use the softmax attention form
+$f_{\vtheta}(\vz) = V \softmax\bigl(K^\top \vz / \sqrt{d}\bigr)$.
+
+The piecewise schedule of the mask ratio is
+\[
+  \rho_t =
+  \begin{cases}
+    \rho_0, & t \le T_0, \\
+    \rho_0 + (\rho_1 - \rho_0)\dfrac{t - T_0}{T - T_0}, & t > T_0.
+  \end{cases}
+\]

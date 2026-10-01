@@ -1,0 +1,51 @@
+% Project macros, read by main.tex through \input{macros}.
+% Hover/live-preview renderers must pick these up to render formulas correctly.
+
+% ---- 0 arguments ----
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\sigmaF}{\mathcal{F}}
+\newcommand{\dd}{\mathop{}\!\mathrm{d}}
+\newcommand*{\iid}{\stackrel{\text{i.i.d.}}{\sim}}
+
+% ---- 1 argument ----
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\abs}[1]{\left\lvert #1 \right\rvert}
+\newcommand{\vect}[1]{\boldsymbol{#1}}
+\newcommand{\set}[1]{\left\{ #1 \right\}}
+
+% ---- 2 arguments ----
+\newcommand{\inner}[2]{\left\langle #1, #2 \right\rangle}
+\newcommand{\pdv}[2]{\frac{\partial #1}{\partial #2}}
+
+% ---- optional argument ----
+% \E{X} -> E[X];  \E[Q]{X} -> E_Q[X]
+\newcommand{\E}[2][]{\mathbb{E}_{#1}\left[ #2 \right]}
+% \KL{P}{Q} or \KL[\text{fwd}]{P}{Q}: three parameters, the first optional
+\newcommand{\KL}[3][]{D_{\mathrm{KL}}^{#1}\left( #2 \,\middle\|\, #3 \right)}
+% optional argument with a non-empty default
+\newcommand{\loss}[1][\theta]{\mathcal{L}(#1)}
+
+% ---- operators ----
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\rank}{rank}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+% ---- mathtools (MathJax has no \DeclarePairedDelimiter) ----
+\DeclarePairedDelimiter{\ceil}{\lceil}{\rceil}
+\DeclarePairedDelimiter{\floor}{\lfloor}{\rfloor}
+
+% ---- plain TeX definitions ----
+\def\eps{\varepsilon}
+\def\T{^{\mathsf{T}}}
+\def\given{\mid}
+\let\oldphi\phi
+\renewcommand{\phi}{\varphi}
+
+% ---- text-mode helpers ----
+\newcommand{\term}[1]{\textbf{\emph{#1}}}
+\newcommand{\zhen}[2]{#1（#2）}

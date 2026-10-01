@@ -1,0 +1,9 @@
+\documentclass[../main file.tex]{subfiles}
+% This preamble is deliberately ignored when the root includes the subfile.
+\input{never read}
+\begin{document}
+\section{Subfile body}\label{sec:subfile}
+\input{child notes}
+\includegraphics[width=8pt]{图像.png}
+\end{document}
+\input{never read after end}

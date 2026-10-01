@@ -1,0 +1,97 @@
+\chapter{概率空间与期望}\label{chap:prob}
+
+本章用最少的记号建立概率论的语言。English and 中文 are mixed on purpose so that
+hover, completion and live preview see realistic text around the formulas.
+
+\section{基本定义}\label{sec:prob-basics}
+
+\begin{definition}{概率空间 Probability space}{prob-space}
+  一个\term{概率空间}是三元组 $(\Omega, \sigmaF, \Prob)$，其中 $\Omega$ 是样本空间，
+  $\sigmaF$ 是 $\Omega$ 上的 $\sigma$-代数，$\Prob\colon \sigmaF \to [0,1]$ 满足
+  $\Prob(\Omega) = 1$ 且对两两不交的 $A_1, A_2, \dots \in \sigmaF$ 有
+  \[
+    \Prob\Bigl(\bigcup_{i=1}^{\infty} A_i\Bigr) = \sum_{i=1}^{\infty} \Prob(A_i).
+  \]
+\end{definition}
+
+随机变量 $X\colon \Omega \to \R$ 的期望写作 $\E{X} = \int_\Omega X \dd\Prob$；
+换一个测度 $Q$ 时写作 $\E[Q]{X}$。若 $X_1, \dots, X_n \iid P$，样本均值为
+\(\bar X_n = \frac{1}{n}\sum_{i=1}^n X_i\)。
+
+示性函数的定义用 \texttt{cases} 环境：
+\begin{equation}\label{eq:indicator}
+  \mathbf{1}_A(\omega) =
+  \begin{cases}
+    1, & \omega \in A, \\
+    0, & \text{否则 (otherwise)}.
+  \end{cases}
+\end{equation}
+
+\begin{note}
+  式~\eqref{eq:indicator} 的期望就是概率：$\E{\mathbf{1}_A} = \Prob(A)$。
+  价格写成 \$5 时美元符号被转义，不是数学；\verb|$x$| 里的美元符号也不是数学。
+\end{note}
+
+% 注释里的公式不应被渲染：$\alpha + \beta$ \[ \int f \]
+
+\section{方差与条件期望}\label{sec:variance}
+
+方差有两种等价写法：
+\begin{align}
+  \Var(X) &= \E{(X - \E{X})^2} \label{eq:var-def} \\
+          &= \E{X^2} - \bigl(\E{X}\bigr)^2. \label{eq:var-short}
+\end{align}
+协方差 $\Cov(X, Y) = \E{XY} - \E{X}\E{Y}$，且 $\Var(X + Y) = \Var(X) + \Var(Y) + 2\Cov(X, Y)$。
+
+\begin{theorem}{全期望公式 Law of total expectation}{total-exp}
+  若 $\E{\abs{X}} < \infty$，则
+  \begin{equation}\label{eq:total-exp}
+    \E{X} = \E{\E{X \given Y}}.
+  \end{equation}
+\end{theorem}
+
+\begin{proof}
+  对离散的 $Y$，
+  \begin{align*}
+    \E{\E{X \given Y}}
+      &= \sum_{y} \Prob(Y = y)\, \E{X \given Y = y} \\
+      &= \sum_{y} \sum_{x} x\, \Prob(X = x, Y = y)
+       = \E{X}.
+  \end{align*}
+  一般情形由单调类定理得到，细节见~\cite[第 2 章]{zhang2020notes}。
+\end{proof}
+
+\begin{example}[抛硬币 Coin tossing]
+  设 $X \sim \mathrm{Bernoulli}(p)$，则 $\E{X} = p$，由~\eqref{eq:var-short} 得
+  $\Var(X) = p - p^2 = p(1-p)$。取 $p = \tfrac12$ 时方差最大。
+\end{example}
+
+\begin{remark}
+  定理~\ref{thm:total-exp} 在第~\ref{chap:linalg} 章会以投影的形式重新出现：
+  条件期望是 $L^2$ 中到子空间的正交投影，参见命题~\ref{pro:psd} 和图~\ref{fig:projection}。
+\end{remark}
+
+\section{集中不等式}\label{sec:concentration}
+
+常用的几个不等式：
+\begin{enumerate}[(a)]
+  \item Markov：对 $a > 0$，$\Prob(\abs{X} \ge a) \le \E{\abs{X}} / a$；
+  \item Chebyshev：$\Prob(\abs{X - \E{X}} \ge \eps) \le \Var(X)/\eps^2$；
+  \item Hoeffding：若 $X_i \in [a_i, b_i]$ 独立，则
+    \begin{itemize}
+      \item 单侧界 $\Prob(\bar X_n - \E{\bar X_n} \ge t) \le \exp\!\left(-\frac{2n^2t^2}{\sum_i (b_i - a_i)^2}\right)$；
+      \item 双侧界再乘以 $2$。
+    \end{itemize}
+\end{enumerate}
+
+\begin{description}
+  \item[弱大数定律] $\bar X_n \to \E{X_1}$ 依概率收敛；
+  \item[强大数定律] 几乎必然收敛，见~\cite{li2019lln,smith2021concentration}。
+\end{description}
+
+Plain \TeX{} display math is deprecated but common in real notes:
+$$
+  \KL{P}{Q} = \int \log\frac{\dd P}{\dd Q} \dd P \ge 0,
+$$
+and the forward divergence with an optional argument is $\KL[\text{fwd}]{P}{Q}$.%
+\footnote{脚注里的数学：$\KL{P}{P} = 0$。}

@@ -1,0 +1,22 @@
+% Nested \input from chapters/appendix.tex. Deliberately WITHOUT a "% !TEX root" comment:
+% root detection has to cope with a file that main.tex only reaches through another file.
+\begin{table}[htbp]
+  \centering
+  \caption{宏与渲染结果}\label{tab:notation}
+  \begin{tabular}{lll}
+    \toprule
+    源码 & 结果 & 参数 \\
+    \midrule
+    \verb|\R|, \verb|\N|, \verb|\Prob| & $\R$, $\N$, $\Prob$ & 0 \\
+    \verb|\norm{x}| & $\norm{x}$ & 1 \\
+    \verb|\inner{x}{y}| & $\inner{x}{y}$ & 2 \\
+    \verb|\E{X}|, \verb|\E[Q]{X}| & $\E{X}$, $\E[Q]{X}$ & 可选 + 1 \\
+    \verb|\KL[a]{P}{Q}| & $\KL[a]{P}{Q}$ & 可选 + 2 \\
+    \verb|\loss|, \verb|\loss[w]| & $\loss$, $\loss[w]$ & 可选（默认 $\theta$） \\
+    \verb|\Var|, \verb|\argmin| & $\Var$, $\argmin_x$ & 算子 \\
+    \verb|\ceil{x}| & $\ceil{x}$ & mathtools \\
+    \verb|\eps|, \verb|x\T| & $\eps$, $x\T$ & \verb|\def| \\
+    \verb|\phi| & $\phi$ (\verb|\oldphi|: $\oldphi$) & \verb|\renewcommand| \\
+    \bottomrule
+  \end{tabular}
+\end{table}

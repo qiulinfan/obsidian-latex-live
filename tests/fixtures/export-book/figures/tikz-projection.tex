@@ -1,0 +1,15 @@
+% !TEX root = ../main.tex
+% TikZ figure, \input from chapters/ch2.tex (nested input, so it carries a magic comment).
+\begin{tikzpicture}[scale=1.4, >={Stealth[length=2.5mm]}]
+  \coordinate (O) at (0,0);
+  \coordinate (X) at (3,0.6);
+  \coordinate (Y) at (1.8,1.9);
+  \coordinate (H) at ($(O)!(Y)!(X)$);
+  \draw[gray!60, thin] (-0.4,-0.08) -- (3.6,0.72) node[right, black] {$\operatorname{span}\{x\}$};
+  \draw[->, thick, blue!70!black] (O) -- (X) node[below right] {$x$};
+  \draw[->, thick, orange!80!black] (O) -- (Y) node[above left] {$y$};
+  \draw[->, thick, teal] (O) -- (H) node[below] {$\hat y$};
+  \draw[dashed] (Y) -- (H) node[midway, right] {$y - \hat y$};
+  \pic[draw, angle radius=2.2mm] {right angle = Y--H--O};
+  \fill (O) circle (1pt) node[below left] {$0$};
+\end{tikzpicture}

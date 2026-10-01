@@ -1,0 +1,2 @@
+# latexmk configuration: elegantbook with lang=cn needs XeLaTeX.
+$pdf_mode = 5;
