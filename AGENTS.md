@@ -653,6 +653,10 @@
   `node scripts/theorem-graph-smoke.mjs` (real Chrome; fails if unavailable), plus the theorem
   index/content/service/UI tests. This script also verifies source/live themes, node expansion,
   source links, cycles, narrow windows and dragging over a live reference while held.
+- The independent kgdistiller CLI bridge follows
+  [docs/kgdistiller-export.md](docs/kgdistiller-export.md). Keep graph identity
+  decisions in kgdistiller and reuse the existing renderer; bridge tests and
+  the full suite share one bundle cache and must run sequentially.
 - Build output goes to `$TMPDIR/obsidian-latex-live/<hash of root>/`, never
   into the vault.
 - Desktop only (`isDesktopOnly: true`).
