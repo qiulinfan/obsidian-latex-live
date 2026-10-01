@@ -20,7 +20,7 @@ import { Definitions, emptyDefinitions, projectDefinitions } from "../tex/macros
 import { includeName, preambleFiles } from "../tex/project";
 import { latexCompletionSource } from "./latexCompletion";
 import { latexLiveLanguage } from "./latexLive";
-import { theoremGraphHover } from "./theoremGraphView";
+import { latexTooltipPortal, theoremGraphHover } from "./theoremGraphView";
 import {
   EditorEphemeralState,
   applyEphemeralState,
@@ -416,6 +416,7 @@ export class TexView extends TextFileView {
         },
       },
       extensions: [
+        latexTooltipPortal(),
         theoremGraphHover({
           load: (view, key, signal) => {
             const project = this.projectInfo();

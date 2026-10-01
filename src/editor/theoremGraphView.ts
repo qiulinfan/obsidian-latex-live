@@ -1,6 +1,6 @@
 import type { Extension, Text } from "@codemirror/state";
-import { Prec } from "@codemirror/state";
-import { EditorView, ViewPlugin, closeHoverTooltip, hoverTooltip, type Tooltip, type TooltipView, type ViewUpdate } from "@codemirror/view";
+import { Compartment, Prec } from "@codemirror/state";
+import { EditorView, ViewPlugin, closeHoverTooltip, hoverTooltip, tooltips, type Tooltip, type TooltipView, type ViewUpdate } from "@codemirror/view";
 import { argText, parseTex, type TexNode } from "../export/texTree";
 import type { TheoremGraph, TheoremNode, TheoremSource } from "../tex/theoremGraph";
 import { scanLatex } from "./latexScan";
@@ -13,6 +13,46 @@ export interface TheoremGraphHoverOptions {
   openSource(source: TheoremSource): void | Promise<void>;
   subscribe?(view: EditorView, onChange: () => void): () => void;
   hoverTime?: number;
+}
+
+/** Obsidian panes clip fixed children, so use CM's supported external tooltip parent. */
+export function latexTooltipPortal(): Extension {
+  const config = new Compartment();
+  const lifecycle = ViewPlugin.define(view => new TooltipPortal(view, config), {
+    eventHandlers: {
+      // A pane can be adopted by a popout document without a state transaction.
+      mousemove(_event, view) { view.plugin(lifecycle)?.sync(); return false; },
+      focus(_event, view) { view.plugin(lifecycle)?.sync(); return false; },
+    },
+  });
+  return [config.of([]), lifecycle];
+}
+
+class TooltipPortal {
+  private parent: HTMLElement | null = null;
+  private pending = false;
+  private stopped = false;
+  constructor(private view: EditorView, private config: Compartment) { this.sync(); }
+  update(): void { this.sync(); }
+  sync(): void {
+    if (this.stopped || this.pending || (this.parent?.ownerDocument === this.view.dom.ownerDocument && this.parent.isConnected)) return;
+    this.pending = true;
+    // ViewPlugin constructors and updates must not dispatch synchronously.
+    queueMicrotask(() => {
+      this.pending = false; if (this.stopped) return;
+      const doc = this.view.dom.ownerDocument, previous = this.parent;
+      const parent = doc.createElement("div");
+      parent.className = "ll-tooltip-portal ll-editor-content lsp-cm-view";
+      Object.assign(parent.style, { position: "absolute", top: "0", left: "0", width: "0", height: "0", overflow: "visible", zIndex: "var(--layer-popover, 500)" });
+      // Preserve the existing scoped editor CSS. CM adds its theme classes inside this.
+      const scope = parent.appendChild(doc.createElement("div")); scope.className = "cm-editor";
+      Object.assign(scope.style, { height: "0", background: "transparent" });
+      doc.body.appendChild(parent); this.parent = parent;
+      this.view.dispatch({ effects: this.config.reconfigure(tooltips({ parent: scope })) });
+      previous?.remove();
+    });
+  }
+  destroy(): void { this.stopped = true; this.parent?.remove(); this.parent = null; }
 }
 
 const refs = new WeakMap<Text, readonly TheoremReferenceTarget[]>();
@@ -106,17 +146,28 @@ class HoverLife {
   private stopped = false;
   private wasComposing = false;
   private unsubscribe?: () => void;
-  private readonly win: Window;
+  private win: Window | null = null;
   constructor(private view: EditorView, private options: TheoremGraphHoverOptions, private close: () => void) {
-    this.win = view.dom.ownerDocument.defaultView ?? window;
-    this.win.addEventListener("mouseup", this.up, true);
-    this.win.addEventListener("pointercancel", this.up, true);
-    this.win.addEventListener("blur", this.up);
+    this.syncWindow();
     this.unsubscribe = options.subscribe?.(view, () => this.invalidate());
   }
-  down(): void { this.holding = true; this.invalidate(); }
+  private syncWindow(): void {
+    const win = this.view.dom.ownerDocument.defaultView ?? window;
+    if (win === this.win) return;
+    this.unlistenWindow(); this.win = win;
+    win.addEventListener("mouseup", this.up, true);
+    win.addEventListener("pointercancel", this.up, true);
+    win.addEventListener("blur", this.up);
+  }
+  private unlistenWindow(): void {
+    this.win?.removeEventListener("mouseup", this.up, true);
+    this.win?.removeEventListener("pointercancel", this.up, true);
+    this.win?.removeEventListener("blur", this.up);
+  }
+  down(): void { this.syncWindow(); this.holding = true; this.invalidate(); }
   private readonly up = () => { this.holding = false; };
   update(update: ViewUpdate): void {
+    this.syncWindow();
     const now = composing(update.view), entered = now && !this.wasComposing; this.wasComposing = now;
     if (update.docChanged || update.selectionSet || entered) this.invalidate();
   }
@@ -126,6 +177,7 @@ class HoverLife {
     this.popup?.destroy(); this.popup = null; if (active) this.close();
   }
   async load(target: TheoremReferenceTarget): Promise<Tooltip | null> {
+    this.syncWindow();
     this.controller?.abort();
     const controller = this.controller = new AbortController();
     const generation = ++this.generation;
@@ -153,9 +205,7 @@ class HoverLife {
   }
   destroy(): void {
     this.stopped = true; this.generation++; this.controller?.abort(); this.popup?.destroy(); this.unsubscribe?.();
-    this.win.removeEventListener("mouseup", this.up, true);
-    this.win.removeEventListener("pointercancel", this.up, true);
-    this.win.removeEventListener("blur", this.up);
+    this.unlistenWindow(); this.win = null;
   }
 }
 

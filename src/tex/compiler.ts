@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { existsSync, promises as fsp } from "fs";
-import { basename, delimiter, dirname, extname, join, resolve, sep } from "path";
+import { basename, delimiter, dirname, extname, join, relative, resolve, sep } from "path";
 import { texEnv, texTool, workingBiber } from "./binaries";
 import { ParsedLog, parseLog } from "./logParser";
 import { Engine, logicalMapper, preambleOf } from "./project";
@@ -23,8 +23,10 @@ export interface CompileOptions {
 export interface CompileResult {
   mode: BuildMode;
   engine: Engine;
-  /** The run produced a PDF (possibly with errors). */
+  /** A current PDF was supplied: newly written (possibly with errors), or verified up to date. */
   pdfWritten: boolean;
+  /** latexmk verified the existing PDF as up to date without running TeX. */
+  pdfReused?: boolean;
   pdfPath: string;
   pdfData: Uint8Array | null;
   log: ParsedLog;
@@ -189,14 +191,14 @@ export class Compiler {
       basename(this.root),
     ];
     await this.removeLog(o.outDir);
-    const { output, stalled } = await this.exec(
+    const executed = await this.exec(
       texTool(o.binDir, "latexmk"),
       args,
       o,
       this.logPath(o.outDir, this.jobName),
     );
     const rawLog = await this.readLog(o.outDir, this.jobName);
-    const run = { rawLog, output, stalled, log: parseLog(rawLog, this.rootDir) };
+    const run = { ...executed, rawLog, log: parseLog(rawLog, this.rootDir) };
     return this.finish("full", o, run, started, 1, false);
   }
 
@@ -210,11 +212,12 @@ export class Compiler {
   ): Promise<CompileResult> {
     const pdfPath = join(o.outDir, `${this.jobName}.pdf`);
     let pdfData: Uint8Array | null = null;
-    let pdfWritten = run.log.pages !== null;
-    if (!pdfWritten && mode === "full" && existsSync(pdfPath)) {
-      // latexmk may skip TeX entirely when nothing changed.
-      pdfWritten = (await fsp.stat(pdfPath)).mtimeMs >= started - 1000;
-    }
+    // A successful latexmk no-op has no new log or PDF. Its current invocation must
+    // explicitly confirm this root and output; an old log or recent mtime is no authority.
+    const unchanged = mode === "full" && !run.rawLog && run.code === 0 &&
+      !run.stalled && !run.timedOut &&
+      await latexmkUnchanged(run.output, this.root, pdfPath, o.engine);
+    let pdfWritten = run.log.pages !== null || unchanged;
     if (pdfWritten) {
       try {
         pdfData = new Uint8Array(await fsp.readFile(pdfPath));
@@ -230,19 +233,41 @@ export class Compiler {
         line: null,
         message: stallMessage(o.engine, o.stallMs ?? STALL_MS),
       });
-    } else if (!run.rawLog && run.output.trim()) {
+    } else if (run.timedOut) {
+      run.log.diagnostics.push({
+        severity: "error",
+        file: null,
+        line: null,
+        message: `${mode === "full" ? "latexmk" : o.engine} exceeded the compilation time limit.`,
+      });
+    } else if (run.code !== 0 && !run.log.diagnostics.some((d) => d.severity === "error")) {
+      run.log.diagnostics.push({
+        severity: "error",
+        file: null,
+        line: null,
+        message: outputTail(run.output) || `${mode === "full" ? "latexmk" : o.engine} ${run.code === null ? "was terminated" : `exited with code ${run.code}`}.`,
+      });
+    } else if (unchanged && !pdfWritten) {
+      run.log.diagnostics.push({
+        severity: "error",
+        file: null,
+        line: null,
+        message: "latexmk reported an up-to-date PDF, but that PDF could not be read.",
+      });
+    } else if (!run.rawLog && !unchanged && run.code === 0) {
       // No log at all (engine missing, bad option): surface what it printed.
       run.log.diagnostics.push({
         severity: "error",
         file: null,
         line: null,
-        message: run.output.trim().split(/\r?\n/).slice(-3).join(" "),
+        message: outputTail(run.output) || `${mode === "full" ? "latexmk" : o.engine} finished without a TeX log.`,
       });
     }
     return {
       mode,
       engine: o.engine,
       pdfWritten,
+      ...(unchanged && pdfWritten ? { pdfReused: true } : {}),
       pdfPath,
       pdfData,
       log: run.log,
@@ -270,7 +295,7 @@ export class Compiler {
       basename(this.root),
     ];
     await this.removeLog(o.outDir);
-    const { output, stalled } = await this.exec(
+    const executed = await this.exec(
       texTool(o.binDir, o.engine),
       args,
       o,
@@ -278,7 +303,7 @@ export class Compiler {
       fmtBase ? { TEXFORMATS: dirname(fmtBase) + delimiter } : {},
     );
     const rawLog = await this.readLog(o.outDir, this.jobName);
-    return { rawLog, output, stalled, log: parseLog(rawLog, this.rootDir) };
+    return { ...executed, rawLog, log: parseLog(rawLog, this.rootDir) };
   }
 
   /** Format path when a current preamble format exists; else build one. */
@@ -418,7 +443,7 @@ export class Compiler {
     o: CompileOptions,
     log: string,
     extraEnv: NodeJS.ProcessEnv = {},
-  ): Promise<{ output: string; stalled: boolean }> {
+  ): Promise<TexRunResult> {
     if (this.disposed) throw new Error("compiler disposed");
     let run: TexRunResult;
     try {
@@ -434,16 +459,41 @@ export class Compiler {
       throw err;
     }
     if (this.disposed) throw new Error("compiler disposed");
-    return { output: run.output, stalled: run.stalled };
+    return run;
   }
 }
 
-interface EngineRun {
+interface EngineRun extends TexRunResult {
   rawLog: string;
-  output: string;
   log: ParsedLog;
-  /** The stall watchdog stopped the run. */
-  stalled: boolean;
+}
+
+const outputTail = (output: string): string => output.trim().split(/\r?\n/).slice(-3).join(" ");
+
+/** latexmk's current, successful no-work protocol for precisely this document and PDF. */
+async function latexmkUnchanged(output: string, root: string, pdf: string, engine: Engine): Promise<boolean> {
+  const lines = output.split(/\r?\n/);
+  if (!lines.includes(`Latexmk: Nothing to do for '${basename(root)}'.`)) return false;
+  const physicalPdf = await fsp.realpath(pdf).catch(() => resolve(pdf));
+  const physicalRoot = await fsp.realpath(root).catch(() => resolve(root));
+  // latexmk shortens project-local targets relative to its working directory,
+  // even when -outdir is absolute. Keep the same exact root/output authority.
+  const relativePdf = relative(dirname(root), pdf);
+  const physicalRelativePdf = relative(dirname(physicalRoot), physicalPdf);
+  const paths = [resolve(pdf), physicalPdf, relativePdf, physicalRelativePdf,
+    "./" + relativePdf, "./" + physicalRelativePdf]
+    .map((p) => p.replace(/\\/g, "/"));
+  for (const line of lines) {
+    const targets = /^Latexmk: All targets \((.*)\) are up-to-date$/.exec(line)?.[1].replace(/\\/g, "/");
+    if (!targets) continue;
+    // The selected -pdf/-pdflua pipeline has one PDF target; -pdfxe also reports
+    // its XDV. Compare complete lists: unquoted spaces in paths are ambiguous,
+    // so matching a suffix could mistake another directory for our output.
+    if (paths.includes(targets)) return true;
+    if (engine === "xelatex" && paths.some((xdv) => paths.some((p) =>
+      targets === xdv.slice(0, -4) + ".xdv " + p))) return true;
+  }
+  return false;
 }
 
 /** A public latexmk dependency hook, bounded to this build's generated biblatex request ledger. */

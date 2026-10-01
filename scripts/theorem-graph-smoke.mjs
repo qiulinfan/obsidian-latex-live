@@ -17,7 +17,7 @@ const mathjax = join(root, 'node_modules/mathjax/es5');
 const entry = String.raw`
 import { EditorState } from '@codemirror/state';
 import { EditorView, lineNumbers } from '@codemirror/view';
-import { theoremGraphHover } from './src/editor/theoremGraphView';
+import { latexTooltipPortal, theoremGraphHover } from './src/editor/theoremGraphView';
 import { latexLiveLanguage } from './src/editor/latexLive';
 import { liveInput, livePreview, livePreviewCompartment } from './src/editor/shared/livePreview';
 import { keyArbiter } from './src/editor/shared/keyArbiter';
@@ -51,7 +51,7 @@ window.mount = async(live=false,dark=false)=>{
  document.body.classList.toggle('theme-dark',dark);
  math=ProjectMath.create(window.MathJax,document,{statements:[],physics:false,unsupported:new Map()});
  const ext=live?livePreview({language:latexLiveLanguage({refs:()=>refs}),renderer:{epoch:0,render:()=>({ok:false,message:'unused'})}}):[];
- editor=new EditorView({parent:document.getElementById('host'),state:EditorState.create({doc:text,selection:{anchor:text.length},extensions:[keyArbiter({}),lineNumbers(),liveInput(),livePreviewCompartment.of(ext),theoremGraphHover(options)]})});
+ editor=new EditorView({parent:document.getElementById('host'),state:EditorState.create({doc:text,selection:{anchor:text.length},extensions:[keyArbiter({}),latexTooltipPortal(),lineNumbers(),liveInput(),livePreviewCompartment.of(ext),theoremGraphHover(options)]})});
  window.editor=editor;window.calls=calls={load:0,render:0,open:0};
  await new Promise(r=>setTimeout(r,150));return true;
 };
@@ -63,7 +63,9 @@ window.refPoint = ()=>{
 window.__ready=true;
 `;
 const css = readFileSync(join(root,'styles.css'),'utf8');
-const skin = `:root {--background-primary:#fff;--background-secondary:#f4f4f5;--background-modifier-border:#ccc;--text-normal:#222;--text-muted:#666;--interactive-accent:#566bc0;--text-accent:#566bc0;--font-interface:system-ui;--font-text:system-ui;--radius-s:4px;--radius-m:8px} body{margin:24px;font-family:system-ui;background:var(--background-primary);color:var(--text-normal)}body.theme-dark{--background-primary:#202024;--background-secondary:#29292e;--background-modifier-border:#555;--text-normal:#eee;--text-muted:#aaa;--text-accent:#aabcff}#host{height:560px;max-width:800px}.cm-editor{height:100%;font-size:16px}.cm-content{padding:20px}button{font:inherit;cursor:pointer;color:inherit;background:var(--background-secondary);border:1px solid var(--background-modifier-border)}`;
+// Reproduce Obsidian's clipped, transformed editor beside a separate PDF pane.
+// The synthetic background tests actual pointer hit targets; it is not product footage.
+const skin = `:root {--background-primary:#fff;--background-secondary:#f4f4f5;--background-modifier-border:#ccc;--text-normal:#222;--text-muted:#666;--interactive-accent:#566bc0;--text-accent:#566bc0;--font-interface:system-ui;--font-text:system-ui;--radius-s:4px;--radius-m:8px} body{margin:24px;font-family:system-ui;background:var(--background-primary);color:var(--text-normal)}body.theme-dark{--background-primary:#202024;--background-secondary:#29292e;--background-modifier-border:#555;--text-normal:#eee;--text-muted:#aaa;--text-accent:#aabcff}#host{height:560px;width:400px;max-width:100%;overflow:hidden;transform:translateZ(0);position:relative;z-index:1}.pdf-placeholder{position:absolute;left:424px;top:24px;width:620px;height:560px;background:#dde0e5;z-index:2}.cm-editor{height:100%;font-size:16px}.cm-content{padding:20px}button{font:inherit;cursor:pointer;color:inherit;background:var(--background-secondary);border:1px solid var(--background-modifier-border)}`;
 let chrome, server, ws;
 const results=[];
 const check=(name,pass,detail)=>{results.push({name,pass,detail});console.log((pass?'ok  ':'FAIL')+' '+name+(detail===undefined?'':': '+JSON.stringify(detail)));};
@@ -83,7 +85,7 @@ try {
    b.onLoad({filter:/.*/,namespace:'no-io'},()=>({loader:'js',contents:"module.exports=new Proxy({sep:'/'},{get:(o,k)=>k==='__esModule'?false:k in o?o[k]:()=>{throw new Error('Unexpected Node IO in UI smoke: '+String(k));}})"}));
  }}]});
  writeFileSync(join(work,'bundle.js'),built.outputFiles[0].text);
- writeFileSync(join(work,'index.html'),`<!doctype html><html><head><meta charset="utf-8"><style>${css}${skin}</style><script>window.MathJax={tex:{inlineMath:[],displayMath:[],processEscapes:false,processEnvironments:false,processRefs:false},startup:{typeset:false},options:{enableMenu:false,renderActions:{assistiveMml:[]}}}</script><script src="/mathjax/tex-chtml-full.js"></script></head><body><div class="lsp-cm-view"><div id="host"></div></div><script src="/bundle.js"></script></body></html>`);
+ writeFileSync(join(work,'index.html'),`<!doctype html><html><head><meta charset="utf-8"><style>${css}${skin}</style><script>window.MathJax={tex:{inlineMath:[],displayMath:[],processEscapes:false,processEnvironments:false,processRefs:false},startup:{typeset:false},options:{enableMenu:false,renderActions:{assistiveMml:[]}}}</script><script src="/mathjax/tex-chtml-full.js"></script></head><body><div class="pdf-placeholder">Synthetic PDF pane behind the tooltip</div><div class="lsp-cm-view"><div id="host"></div></div><script src="/bundle.js"></script></body></html>`);
  server=createServer((req,res)=>{const path=decodeURIComponent(new URL(req.url,'http://x').pathname);const base=path.startsWith('/mathjax/')?mathjax:work;const file=join(base,path.startsWith('/mathjax/')?path.slice(9):path);if(!file.startsWith(base+sep)||!existsSync(file)){res.writeHead(404).end();return;}res.writeHead(200,{'content-type':({'.js':'text/javascript','.html':'text/html','.woff':'font/woff'})[extname(file)]??'application/octet-stream'}).end(readFileSync(file));});
  await new Promise(ok=>server.listen(0,'127.0.0.1',ok));
  chrome=spawn(chromeBin,['--headless=new','--remote-debugging-port=0',`--user-data-dir=${join(work,'profile')}`,'--no-first-run','--disable-extensions','--disable-background-timer-throttling','about:blank'],{detached:true,stdio:['ignore','ignore','pipe']});
@@ -104,6 +106,9 @@ try {
   const target=await point('.ll-theorem-graph-node[data-node-id="base"]');
   check(label+' one-layer graph',!!target&&await evaluate('document.querySelectorAll(".ll-theorem-graph-node").length===2'));
   if(!target)continue;
+  check(label+' second column extends beyond clipped editor pane',await evaluate(`document.getElementById('host').getBoundingClientRect().right<${target.x}`));
+  check(label+' second column is actual pointer hit target',await evaluate(`!!document.elementFromPoint(${target.x},${target.y})?.closest('.ll-theorem-graph-node[data-node-id=base]')`));
+  check(label+' external popup preserves native styles',await evaluate(`(()=>{const p=document.querySelector('.ll-tooltip-portal');const t=document.querySelector('.ll-theorem-graph');return !!p&&p.parentElement===document.body&&!!t.closest('.ll-editor-content.lsp-cm-view')&&getComputedStyle(t).backgroundColor===getComputedStyle(document.body).backgroundColor})()`));
   await click(target);await sleep(180);
   check(label+' pointer enters and node expands',await evaluate('!!document.querySelector(".ll-theorem-graph-detail mjx-container")'));
   const sourceButton=await point('.ll-theorem-graph-source');if(sourceButton){await click(sourceButton);check(label+' source jump',await evaluate('calls.open===1'));}

@@ -172,7 +172,7 @@ export class LatexPreviewView extends ItemView {
         errors
           ? `${errors} error${errors > 1 ? "s" : ""}`
           : r.pdfWritten
-            ? "Compiled"
+            ? r.pdfReused ? "Up to date" : "Compiled"
             : "No output",
         `${secs}s`,
         r.mode === "full" ? "latexmk" : ENGINE_LABEL[r.engine],
