@@ -260,16 +260,37 @@ const revealing = (state: EditorState): boolean => inputOf(state).focused || sea
 class InputPlugin {
   private readonly win: Window;
   private destroyed = false;
+  private focusSyncPending = false;
 
   constructor(private readonly view: EditorView) {
     this.win = view.dom.ownerDocument.defaultView ?? window;
     this.win.addEventListener("mouseup", this.up, true);
     this.win.addEventListener("dragend", this.up, true);
     this.win.addEventListener("blur", this.up);
-    // A state set on a focused editor (setState, HistoryCache) starts out unfocused.
+    this.syncFocus();
+  }
+
+  update(): void {
+    if (this.view.hasFocus !== inputOf(this.view.state).focused) this.syncFocus();
+  }
+
+  private syncFocus(): void {
+    if (this.focusSyncPending) return;
+    this.focusSyncPending = true;
+    // A new state starts unfocused. CodeMirror can also drop its queued focus effect
+    // when another update (a render landing, for example) changes the state first.
+    // Reconcile the current state after updates, never dispatch from a plugin update.
     queueMicrotask(() => {
+      this.focusSyncPending = false;
+      const { view } = this;
+      // compositionend's refresh will sync it once the IME no longer owns the DOM.
+      if (view.composing) return;
       if (!this.destroyed && view.hasFocus !== inputOf(view.state).focused) {
-        view.dispatch({ effects: setFocus.of(view.hasFocus) });
+        // The lost transaction may also carry other focus mirrors (cursor preview).
+        // Apply the view's focus hooks together, just as CodeMirror would have done.
+        const state = view.state;
+        const effects = state.facet(EditorView.focusChangeEffect).flatMap((f) => f(state, view.hasFocus) ?? []);
+        view.dispatch({ effects });
       }
     });
   }

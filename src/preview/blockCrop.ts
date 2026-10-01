@@ -131,20 +131,32 @@ export const NOTE_CHANGED = "Changed since the last compile.";
  * nearest to `line` (where it starts now); null when the compile never saw this text.
  */
 export function compiledLines(source: string, text: string, line: number): { from: number; to: number } | null {
+  const found = compiledOccurrence(source, text, line);
+  return found && { from: found.from, to: found.to };
+}
+
+/** The occurrence stays distinct when a later compile shifts identical blocks' lines. */
+function compiledOccurrence(source: string, text: string, line: number): { from: number; to: number; occurrence: number } | null {
   if (!text) return null;
   let best: number | null = null;
+  let occurrence = 0;
+  let bestOccurrence = 0;
   let at = 1;
   let scanned = 0;
   for (let i = source.indexOf(text); i >= 0; i = source.indexOf(text, i + 1)) {
     for (let k = source.indexOf("\n", scanned); k >= 0 && k < i; k = source.indexOf("\n", k + 1)) at++;
     scanned = i;
-    if (best === null || Math.abs(at - line) < Math.abs(best - line)) best = at;
+    if (best === null || Math.abs(at - line) < Math.abs(best - line)) {
+      best = at;
+      bestOccurrence = occurrence;
+    }
+    occurrence++;
     if (at > line) break; // later ones are further away
   }
   if (best === null) return null;
   let lines = 0;
   for (let k = text.indexOf("\n"); k >= 0; k = text.indexOf("\n", k + 1)) lines++;
-  return { from: best, to: best + lines };
+  return { from: best, to: best + lines, occurrence: bestOccurrence };
 }
 
 /** A line that only opens a block: `\begin{env}` with its arguments, `\[` or `$$`, and a \label or a comment. */
@@ -303,8 +315,8 @@ interface RootCrops {
   /** The drawings done (render answers from here synchronously). */
   done: Map<string, CropImage>;
   /** compiledLines per file, current line and text (the nearest occurrence is the line's). */
-  lines: Map<string, { from: number; to: number } | null>;
-  /** A request source -> the block it is for (file, kind, text), for `previous`. */
+  lines: Map<string, { from: number; to: number; occurrence: number } | null>;
+  /** A request source -> its block (file, kind, text, occurrence), for `previous`. */
   blocks: Map<string, string>;
   urls: string[];
   /** The current result of its root (drawings finishing after it was retired are revoked at once). */
@@ -316,13 +328,13 @@ export class CropService {
   private roots = new Map<string, RootCrops>();
   /** Blob URLs of each root's result before the current one, revoked with the next. */
   private retired = new Map<string, string[]>();
-  /** Per root: the last request source that drew each block (file, kind, text). */
+  /** Per root: the last request source that drew each block's distinct occurrence. */
   private drawn = new Map<string, Map<string, string>>();
   private readonly children = new Set<ChildProcess>();
   private running = 0;
   private waiting: (() => void)[] = [];
   /** Hovers waiting for the first compile to end. */
-  private idlers = new Set<() => void>();
+  private idlers = new Map<string, Set<() => void>>();
   private disposed = false;
 
   constructor(private readonly host: CropHost) {}
@@ -333,6 +345,7 @@ export class CropService {
    * still shows), or why there is none.
    */
   locate(root: string, file: string, text: string, line: number, kind: CropKind): CropLocation {
+    if (this.disposed) return { note: NOTE_NO_PREVIEW };
     const session = this.host.session(root);
     if (!session) return { note: NOTE_NO_PREVIEW };
     const r = this.current(root, session);
@@ -341,10 +354,10 @@ export class CropService {
     if (source === undefined) return { note: NOTE_NOT_COMPILED };
     const memo = `${file}\u0000${line}\u0000${text}`;
     let lines = r.lines.get(memo);
-    if (lines === undefined) r.lines.set(memo, (lines = compiledLines(source, text, line)));
+    if (lines === undefined) r.lines.set(memo, (lines = compiledOccurrence(source, text, line)));
     if (!lines) return { note: NOTE_CHANGED };
     const src = [r.compiled.seq, lines.from, lines.to, kind, this.host.inverted() ? 1 : 0, file].join("|");
-    const block = `${file}\u0000${kind}\u0000${text}`;
+    const block = `${file}\u0000${kind}\u0000${lines.occurrence}\u0000${text}`;
     r.blocks.set(src, block);
     const was = this.drawn.get(root)?.get(block);
     return { src, previous: was && was !== src ? was : null };
@@ -356,6 +369,7 @@ export class CropService {
    * preview's scheduler never waits on it.
    */
   render(root: string, src: string): RenderResult | Promise<RenderResult> {
+    if (this.disposed) return { ok: false, message: "The preview was closed.", quiet: true };
     const parts = src.split("|");
     const [seq, from, to] = parts.slice(0, 3).map(Number);
     const kind = parts[3] as CropKind;
@@ -401,7 +415,7 @@ export class CropService {
     let where = this.locate(root, file, text, line, kind);
     const session = this.host.session(root);
     if (wait && "note" in where && where.note === NOTE_COMPILING && session) {
-      await this.idle(session);
+      await this.idle(root, session);
       where = this.locate(root, file, text, line, kind);
     }
     if ("note" in where) return where;
@@ -410,25 +424,30 @@ export class CropService {
   }
 
   /** Until the session's compile ends (a result or a failure), its release, or IDLE_WAIT_MS. */
-  private idle(session: CropSession): Promise<void> {
+  private idle(root: string, session: CropSession): Promise<void> {
+    if (this.disposed) return Promise.resolve();
     return new Promise((done) => {
       const finish = () => {
         off();
         clearTimeout(timer);
-        this.idlers.delete(finish);
+        const pending = this.idlers.get(root);
+        pending?.delete(finish);
+        if (!pending?.size) this.idlers.delete(root);
         done();
       };
       const off = session.onEvent((e) => {
         if (e !== "start") finish();
       });
       const timer = setTimeout(finish, IDLE_WAIT_MS);
-      this.idlers.add(finish);
+      let pending = this.idlers.get(root);
+      if (!pending) this.idlers.set(root, (pending = new Set()));
+      pending.add(finish);
     });
   }
 
   /** The session of `root` went away (preview closed): its document, drawings and blocks go. */
   release(root: string): void {
-    for (const finish of [...this.idlers]) finish();
+    for (const finish of [...(this.idlers.get(root) ?? [])]) finish();
     const r = this.roots.get(root);
     this.roots.delete(root);
     if (r) this.drop(r);
@@ -442,7 +461,7 @@ export class CropService {
     this.disposed = true;
     for (const child of this.children) child.kill();
     this.children.clear();
-    for (const root of [...this.roots.keys(), ...this.retired.keys()]) this.release(root);
+    for (const root of new Set([...this.roots.keys(), ...this.retired.keys(), ...this.idlers.keys()])) this.release(root);
     for (const wake of this.waiting.splice(0)) wake();
   }
 

@@ -87,6 +87,11 @@
   `/* shared:editor.css begin */` and `/* shared:editor.css end */`, and the
   editor container carries the neutral class `lsp-cm-view` next to
   `ll-editor-content`.
+- The shared live input plugin reconciles actual DOM focus in a coalesced microtask
+  after updates, applying every `EditorView.focusChangeEffect` hook together.
+  CodeMirror can drop its queued focus transaction after another update; repairing
+  only the live field leaves cursor preview unfocused. Defer reconciliation during
+  IME composition. Keep the focus/blur race regressions in both repositories.
 - Render hover (`renderHover`, `src/editor/shared/renderHover.ts`; its test
   `tests/renderHover.test.ts` is identical in both repositories) is `Prec.high`, so
   its section stays above texlab's and lint's wherever the view mounts it. An async

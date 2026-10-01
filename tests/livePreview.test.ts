@@ -23,6 +23,7 @@ import {
   WidgetType,
   activateHover,
   keymap,
+  showTooltip,
 } from "@codemirror/view";
 import { HistoryCache, setTypingDiagnostics, typingDiagnostics } from "../src/editor/shared/editorKit";
 import {
@@ -42,7 +43,7 @@ import {
   renderStats,
   replacedAt,
 } from "../src/editor/shared/livePreview";
-import { renderHover } from "../src/editor/shared/renderHover";
+import { cursorPreview, renderHover } from "../src/editor/shared/renderHover";
 import { fakeYolo } from "./support/fakeYolo";
 import { GOLDEN, STATES, matrixRow, press, setup, sleep } from "./support/keyMatrix";
 
@@ -261,6 +262,42 @@ test("T-S1 the search panel's current match reveals the formula it is in (the fo
   assert.equal(widgets(view), 0);
   await blur(view);
   assert.equal(widgets(view), 1, "no panel, no focus: rendered");
+  view.destroy();
+});
+
+test("T-S1 blur survives updates before CodeMirror's queued focus transaction", async () => {
+  const { view } = await mount("$x$ b", { anchor: 1 });
+  assert.equal(widgets(view), 0, "focused: the inline formula is source");
+  view.contentDOM.blur();
+  move(view, 2);
+  view.dispatch({ effects: refreshLive.of([]) });
+  await sleep(0);
+  assert.equal(view.hasFocus, false, "the content DOM lost focus");
+  assert.equal(widgets(view), 1, "blurred: the formula renders again");
+  view.destroy();
+});
+
+test("T-S1 focus reconciliation keeps the cursor preview's focus effect with live input's", async () => {
+  const preview = cursorPreview({
+    enabled: () => true,
+    target: (state) => scanMath(state.doc).find((c) => c.from <= state.selection.main.head && state.selection.main.head <= c.to) ?? null,
+    render: (c) => node(c.src) as HTMLElement,
+  });
+  const { view } = await mount("$x$ b", { focus: false, extensions: [preview] });
+  const hasTooltip = () => view.state.facet(showTooltip).some((tip) => tip !== null);
+  assert.equal(hasTooltip(), false, "blurred: no cursor preview");
+  view.focus();
+  move(view, 1);
+  view.dispatch({ effects: refreshLive.of([]) });
+  await sleep(0);
+  assert.equal(widgets(view), 0, "the formula is source");
+  assert.equal(hasTooltip(), true, "both focus hooks landed together");
+  view.contentDOM.blur();
+  move(view, 2);
+  view.dispatch({ effects: refreshLive.of([]) });
+  await sleep(0);
+  assert.equal(widgets(view), 1, "blurred: the formula renders again");
+  assert.equal(hasTooltip(), false, "blur also reaches the cursor preview");
   view.destroy();
 });
 
@@ -732,6 +769,31 @@ test("T-S7 real ArrowDown/ArrowUp through keyArbiter stop on a block and reveal 
   press(c.view, "ArrowUp");
   assert.equal(head(c.view), c.view.state.doc.line(4).to);
   assert.equal(widgets(c.view), 0);
+  c.view.destroy();
+  c.bridge.destroy();
+});
+
+test("T-S7 focus survives a render refresh before CodeMirror's queued focus transaction", async () => {
+  const doc = ["top", "$$", "a", "$$", "end"].join("\n");
+  const c = setup(null, { doc, extensions: [liveInput(), livePreviewCompartment.of(livePreview({ language, renderer: new SyncRenderer() }))] });
+  await settle();
+  await blur(c.view);
+  assert.equal(widgets(c.view), 1, "blurred: the display is rendered");
+  c.view.focus();
+  // The first update makes CodeMirror queue its focus effect. A render refresh changes
+  // the state before that microtask, so CodeMirror discards the queued transaction.
+  move(c.view, c.view.state.doc.line(2).from);
+  c.view.dispatch({ effects: refreshLive.of([]) });
+  await sleep(0);
+  assert.equal(c.view.hasFocus, true, "the content DOM kept focus");
+  assert.equal(replacedAt(c.view.state, head(c.view)), false, "the cursor's block is source");
+  assert.equal(widgets(c.view), 0, "the focused selection reveals the display");
+  // jsdom has no line geometry: submit the goal-column moves the arrow command
+  // produces, verifying that hidden/atomic ranges cannot trap the cursor here.
+  step(c.view, c.view.state.doc.line(3).from);
+  assert.equal(lineOf(c.view), 3, "Down enters the display body");
+  step(c.view, c.view.state.doc.line(4).from);
+  assert.equal(lineOf(c.view), 4, "Down reaches its closing line");
   c.view.destroy();
   c.bridge.destroy();
 });
@@ -1622,6 +1684,7 @@ test("focus is read again when the state is replaced on a focused editor", async
     }),
   );
   await sleep(0);
+  assert.equal(view.hasFocus, true, "replacing the state keeps DOM focus");
   assert.equal(widgets(view), 0, "still focused: still revealed");
   view.destroy();
 });

@@ -181,6 +181,74 @@ test("locate: identical blocks each crop from their own occurrence, whichever is
   crops.dispose();
 });
 
+test("a new compile keeps each identical block's own previous drawing after lines shift", async () => {
+  const root = "/p/main.tex", file = "/p/ch.tex";
+  const block = "\\begin{align}\n a&=b\\\\\n\\intertext{same}\n c&=d\n\\end{align}";
+  const source = ["before", block, "middle", "padding", "padding", "padding", block, "after"].join("\n");
+  let compiled: CompiledPdf = { seq: 1, pdfPath: "/p/main.pdf", pdf: new Uint8Array(), source: () => source, synctex: 1 };
+  const crops = new CropService({
+    session: () => ({ compiling: null, compiled, onEvent: () => () => {} }),
+    binDir: () => null,
+    openPdf: () => Promise.reject(new Error("unused")),
+    inverted: () => false,
+    document,
+  });
+  const locate = (line: number) => {
+    const where = crops.locate(root, file, block, line, "math");
+    assert.ok("src" in where);
+    return where;
+  };
+  const first = locate(2), second = locate(11);
+  // Substitute only completed PDF drawings; locate/render/shown use the real service.
+  const cache = crops as unknown as { roots: Map<string, { done: Map<string, { url: string; width: number; height: number; continues: boolean }> }> };
+  for (const where of [first, second]) {
+    const [, from, to] = where.src.split("|");
+    cache.roots.get(root)!.done.set(`math|${from}-${to}|${file}`, { url: `data:,old-${from}`, width: 1, height: 1, continues: false });
+    assert.ok((await crops.render(root, where.src)).ok);
+  }
+  compiled = { ...compiled, seq: 2, source: () => "\n\n" + source };
+  assert.equal(locate(4).previous, first.src);
+  assert.equal(locate(13).previous, second.src, "the second number cannot temporarily replace the first");
+  crops.dispose();
+});
+
+test("release wakes only its root's first-compile hover; dispose wakes all remaining hovers", async () => {
+  const listeners = new Map<string, Set<(e: SessionEvent) => void>>();
+  const sessions = new Map<string, CropSession>();
+  for (const root of ["/p/a.tex", "/p/b.tex"]) {
+    const callbacks = new Set<(e: SessionEvent) => void>();
+    listeners.set(root, callbacks);
+    sessions.set(root, {
+      compiling: "fast", compiled: null,
+      onEvent: (cb) => { callbacks.add(cb); return () => callbacks.delete(cb); },
+    });
+  }
+  const crops = new CropService({
+    session: (root) => sessions.get(root) ?? null,
+    binDir: () => null,
+    openPdf: () => Promise.reject(new Error("unused")),
+    inverted: () => false,
+    document,
+  });
+  let aDone = false, bDone = false;
+  const a = crops.hover("/p/a.tex", "/p/a.tex", "$x$", 1, "math", true).then(() => { aDone = true; });
+  const b = crops.hover("/p/b.tex", "/p/b.tex", "$x$", 1, "math", true).then(() => { bDone = true; });
+  assert.equal(listeners.get("/p/a.tex")!.size, 1);
+  assert.equal(listeners.get("/p/b.tex")!.size, 1);
+  sessions.delete("/p/a.tex");
+  crops.release("/p/a.tex");
+  await a;
+  assert.ok(aDone);
+  assert.equal(bDone, false);
+  assert.equal(listeners.get("/p/a.tex")!.size, 0);
+  assert.equal(listeners.get("/p/b.tex")!.size, 1);
+  crops.dispose();
+  await waitFor(() => bDone, 500);
+  await b;
+  assert.equal(listeners.get("/p/b.tex")!.size, 0);
+  assert.deepEqual(crops.locate("/p/b.tex", "/p/b.tex", "$x$", 1, "math"), { note: NOTE_NO_PREVIEW });
+});
+
 // ---- Real TeX ------------------------------------------------------------------------------
 
 const binDir = process.env.TEXBIN ?? resolveTexBinDir("");
