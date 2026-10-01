@@ -282,9 +282,12 @@ export class ExportImages {
   }
 
   /** Read the plan's images (PDF pages through the host's cancellable renderer). */
-  async load(plan: ExportPlan, signal: AbortSignal): Promise<void> {
+  async load(plan: ExportPlan, signal: AbortSignal, sites?: ReadonlySet<string>): Promise<void> {
     const pdfPages = new Map<string, Request[]>();
     for (const r of ExportImages.requests(plan, this.paths)) {
+      // Interactive source cards only read the images their selected source slice uses.
+      // The context walk still sees preceding graphicspath/import declarations.
+      if (sites && !sites.has(r.site)) continue;
       if (signal.aborted) throw abortError("The export was cancelled.");
       if (r.listing) {
         const name = literalTexPath(r.name).replace(/^\\subfix\{([^{}\\#]*)\}$/, "$1");

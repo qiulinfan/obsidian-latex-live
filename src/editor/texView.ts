@@ -20,6 +20,7 @@ import { Definitions, emptyDefinitions, projectDefinitions } from "../tex/macros
 import { includeName, preambleFiles } from "../tex/project";
 import { latexCompletionSource } from "./latexCompletion";
 import { latexLiveLanguage } from "./latexLive";
+import { theoremGraphHover } from "./theoremGraphView";
 import {
   EditorEphemeralState,
   applyEphemeralState,
@@ -62,6 +63,8 @@ export class TexView extends TextFileView {
   private applyingExternal = false;
   /** A save was skipped because an IME composition was open; compositionend reschedules it. */
   private saveAfterComposition = false;
+  /** Last committed text: theorem cards never read a pending IME composition. */
+  private committedData = "";
   /** The file uses CRLF line breaks (CodeMirror keeps LF); saves write them back. */
   private crlf = false;
   private project: { abs: string; at: number; root: string; defs: Definitions } | null = null;
@@ -144,8 +147,14 @@ export class TexView extends TextFileView {
     return this.crlf ? text.replace(/\n/g, "\r\n") : text;
   }
 
+  getCommittedText(): string {
+    return this.committedData;
+  }
+
   setViewData(data: string, clear: boolean): void {
     this.data = data;
+    if (!this.editor || clear) this.committedData = data.replace(/\r\n?/g, "\n");
+    this.plugin.theoremGraphs?.invalidate();
     // CodeMirror joins lines with LF; keep a CRLF file CRLF (its first line break decides),
     // so opening and switching away never rewrites it.
     this.crlf = /^[^\n]*\r\n/.test(data);
@@ -372,6 +381,8 @@ export class TexView extends TextFileView {
         isFolder: (path) => this.isFolder(path),
       }),
       onEdit: (view, changes, startDoc) => {
+        this.committedData = view.state.doc.toString();
+        plugin.theoremGraphs.invalidate();
         const abs = this.absolutePath();
         if (abs) {
           plugin.texlab.change(abs, view.state.doc, changes, startDoc);
@@ -405,6 +416,17 @@ export class TexView extends TextFileView {
         },
       },
       extensions: [
+        theoremGraphHover({
+          load: (view, key, signal) => {
+            const project = this.projectInfo();
+            return project && !DATA_EXTENSIONS.has(this.file?.extension ?? "")
+              ? plugin.theoremGraphs.load(project.root, key, signal)
+              : Promise.resolve(null);
+          },
+          renderContent: (view, node, signal) => plugin.theoremGraphs.content(node, view.dom.ownerDocument, signal),
+          openSource: (source) => void plugin.openLocation(source.file, source.line),
+          subscribe: (_view, onChange) => plugin.theoremGraphs.subscribe(onChange),
+        }),
         EditorView.domEventHandlers({
           compositionend: () => {
             if (this.saveAfterComposition) this.scheduleSave();

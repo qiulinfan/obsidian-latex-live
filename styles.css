@@ -772,3 +772,61 @@
 .ll-export-report .ll-problem {
   padding-left: 0;
 }
+
+/* Current-project theorem cards and explicit proof-reference graph. */
+.ll-theorem-graph {
+  width: min(760px, 90vw);
+  max-height: min(620px, 70vh);
+  overflow: auto;
+  padding: 12px;
+  box-sizing: border-box;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0002;
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small, 14px);
+  line-height: 1.5;
+}
+.ll-theorem-graph-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ll-theorem-graph-help, .ll-theorem-graph-notices { font-size: .85em; color: var(--text-muted); }
+.ll-theorem-graph-help { margin: 6px 0; }
+.ll-theorem-graph-notices p { margin: 4px 0; }
+.ll-theorem-diagram { position: relative; display: flex; align-items: flex-start; gap: 28px; width: max-content; padding: 8px 20px 8px 0; }
+.ll-theorem-column { display: flex; flex-direction: column; gap: 16px; width: 330px; flex: none; }
+.ll-theorem-node { position: relative; z-index: 1; border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 8px; background: var(--background-secondary); }
+.ll-theorem-node.is-selected { border-color: var(--interactive-accent); }
+.ll-theorem-graph-node { display: block; width: 100%; height: auto; white-space: normal; text-align: left; font-weight: 600; padding: 6px; }
+.ll-theorem-node small { color: var(--text-muted); }
+.ll-theorem-node-actions { display: flex; gap: 6px; margin: 6px 0; }
+.ll-theorem-graph button { flex-shrink: 0; }
+.ll-theorem-graph button:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
+.ll-theorem-graph-detail { max-width: 100%; overflow: auto; margin-top: 8px; }
+.ll-theorem-arrows { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; color: var(--interactive-accent); overflow: visible; }
+.ll-theorem-arrows > path { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.ll-theorem-graph-content { font-family: var(--font-text); overflow-wrap: break-word; }
+.ll-theorem-graph-content h4 { margin: 8px 0 4px; font-size: 1em; }
+.ll-theorem-graph-content p { margin: 6px 0; }
+.ll-theorem-graph-content section + section { border-top: 1px solid var(--background-modifier-border); margin-top: 10px; padding-top: 4px; }
+.ll-theorem-graph-content pre, .ll-theorem-graph-content mjx-container[display="true"] { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.ll-theorem-graph-content pre { white-space: pre-wrap; padding: 6px; background: var(--background-primary); font-size: .9em; }
+.ll-theorem-graph-content a[data-ll-theorem-key] { color: var(--text-accent); text-decoration: underline; cursor: pointer; }
+.ll-theorem-graph-content .llx-list { padding-left: 0; }
+.ll-theorem-graph-content .llx-list li { display: flex; gap: .6em; margin: .3em 0; }
+.ll-theorem-graph-content .llx-label { flex-shrink: 0; }
+.ll-theorem-graph-content .llx-bf { font-weight: 700; }
+.ll-theorem-graph-content .llx-it { font-style: italic; }
+.ll-theorem-graph-content .llx-tt { font-family: var(--font-monospace); }
+.ll-theorem-graph-content .llx-display { max-width: 100%; overflow-x: auto; }
+.ll-theorem-graph-content .llx-source { white-space: pre-wrap; font-family: var(--font-monospace); }
+.ll-theorem-graph-content .llx-kai { font-family: KaiTi, "Kaiti SC", var(--font-text); }
+.ll-theorem-graph-content .llx-fs { font-family: FangSong, STFangsong, var(--font-text); }
+.ll-theorem-graph-content .llx-sc { font-variant: small-caps; }
+.ll-theorem-graph-content .llx-thm-head { font-weight: 600; }
+.ll-theorem-graph-content .llx-qed { float: right; }
+.ll-theorem-graph-content img { max-width: 100%; height: auto; }
+.ll-theorem-graph-content table { border-collapse: collapse; max-width: 100%; }
+.ll-theorem-graph-content td, .ll-theorem-graph-content th { padding: 3px 6px; }
+.ll-theorem-graph-content .llx-missing, .ll-theorem-graph-content .llx-math-error { color: var(--text-error, #be3030); }
+.ll-theorem-render-note, .ll-theorem-footnote { font-size: .85em; color: var(--text-muted); }

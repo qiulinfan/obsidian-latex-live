@@ -6,7 +6,7 @@ import { CropKind, CropLocation, NOTE_CHANGED } from "../preview/blockCrop";
 import { AuxCheckpoint, AuxLabel, readAuxCheckpoints, readAuxLabels } from "../tex/aux";
 import { BibEntry, bibFiles, readBib } from "../tex/bib";
 import { IMAGE_FORMATS, findGraphics, graphicsPaths } from "../tex/graphics";
-import { projectDefinitions } from "../tex/macros";
+import { projectDefinitions, type Definitions } from "../tex/macros";
 import { includeName, stripComments } from "../tex/project";
 import { sameTheorems, theoremMap } from "../tex/theorems";
 import { boxNumber, cropKindOf } from "./latexLive";
@@ -485,6 +485,28 @@ export class TexRender {
     this.refs.clear();
     this.renderers.clear();
     this.images.clear();
+  }
+
+  /** A source card's formula, using its committed project snapshot and private MathJax. */
+  sourceMath(root: string, src: string, display: boolean, doc: Document, defs: Definitions, refs: LatexRefs): HTMLElement {
+    const mj = this.mathJax();
+    if (!mj) throw new MathError("MathJax is not available.");
+    const input = { statements: defs.statements, physics: defs.packages.has("physics"), unsupported: defs.unsupported };
+    let r = this.roots.get(root);
+    if (!r) {
+      r = { math: ProjectMath.create(mj, this.host.mathJax.document, input), files: new Set(defs.files), cache: new Map(), timer: null };
+      this.roots.set(root, r);
+    } else if (r.math.epoch !== inputEpoch(input)) {
+      r.math = ProjectMath.create(mj, this.host.mathJax.document, input);
+      r.files = new Set(defs.files);
+      r.cache.clear();
+      this.renderers.get(root)?.changed();
+    }
+    // A card may have newer labels than a debounced editor refresh; don't mix cache entries.
+    const node = r.math.render(src, display, new Map(), formulaRefs(refs));
+    this.installStyles(mj);
+    if (this.sheet) this.copyStyles(this.sheet, doc);
+    return doc.importNode(node, true) as HTMLElement;
   }
 
   /** A live request (see Live): its source has its numbers already. Images: see Images. */

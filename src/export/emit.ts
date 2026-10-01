@@ -43,7 +43,7 @@ import {
   type Profile,
   type Rgb,
 } from "./profiles";
-import type { ReportBuilder, ReportItem, ShownNumber } from "./report";
+import { ReportBuilder, type ReportItem, type ShownNumber } from "./report";
 import { CITES } from "./signatures";
 import { tableHtml, tableLayout } from "./tables";
 import { argText, given, parseTex, walkTex, type TexArg, type TexNode } from "./texTree";
@@ -315,8 +315,119 @@ export async function emitHtml(input: EmitInput): Promise<EmitOutput> {
   return new Emitter(input).run();
 }
 
+export interface SourceSlice {
+  key: string;
+  visit: number;
+  /** Original nodes from this plan file, with their original offsets and identity. */
+  nodes: readonly TexNode[];
+  /** Owned nested proofs omitted from the statement card; never clone their parents. */
+  excluded?: readonly { key: string; visit: number; from: number; to: number }[];
+}
+
+export interface SourceSliceOutput {
+  body: string;
+  footnotes: Footnote[];
+  colors: Map<string, Rgb>;
+  items: ReportItem[];
+}
+
+const SLICE_MAX_CHARS = 64_000, SLICE_MAX_NODES = 5_000, SLICE_MAX_VISITS = 64;
+const sourceNodes = new WeakMap<PlanFile, Set<TexNode>>();
+let sliceSerial = 0;
+
+function boundedSourceSlice(plan: ExportPlan, source: SourceSlice): ReadonlySet<string> {
+  const excluded = new Set((source.excluded ?? []).map((r) => `${r.visit}|${r.key}|${r.from}|${r.to}`));
+  const allowed = (key: string, visit: number): { file: PlanFile; nodes: Set<TexNode> } => {
+    const file = plan.files.get(key);
+    if (!file || plan.visits[visit]?.key !== key) throw new Error("Source slice does not match the plan visit.");
+    let nodes = sourceNodes.get(file);
+    if (!nodes) { nodes = new Set(); walkTex(file.nodes, (n) => { nodes!.add(n); }); sourceNodes.set(file, nodes); }
+    return { file, nodes };
+  };
+  for (const r of source.excluded ?? []) {
+    const { nodes } = allowed(r.key, r.visit);
+    if (![...nodes].some((n) => n.t === "env" && n.from === r.from && n.to === r.to)) throw new Error("Source exclusion is not an original environment range.");
+  }
+  let count = 0, chars = 0;
+  const visits = new Set<number>();
+  const active = new Set<number>();
+  const scan = (nodes: readonly TexNode[], key: string, visit: number, depth: number) => {
+    if (depth > 64 || active.has(visit)) throw new Error("Source slice input nesting is too deep or cyclic.");
+    const original = allowed(key, visit);
+    visits.add(visit);
+    if (visits.size > SLICE_MAX_VISITS) throw new Error("Source slice exceeds the input visit limit.");
+    active.add(visit);
+    const walk = (list: readonly TexNode[], nesting: number) => {
+      if (nesting > 64) throw new Error("Source slice node nesting is too deep.");
+      for (const n of list) {
+        if (!original.nodes.has(n)) throw new Error("Source slice contains a reconstructed or foreign AST node.");
+        if (n.t === "env" && n.name === "document") throw new Error("Source slice requires content nodes, not a full document.");
+        if (excluded.has(`${visit}|${key}|${n.from}|${n.to}`)) continue;
+        if (++count > SLICE_MAX_NODES) throw new Error("Source slice exceeds the node limit.");
+        // Leaves and command headers are counted once, not once per enclosing environment.
+        if (n.t === "env") {
+          const args = n.args.flatMap((a) => a.body ?? []);
+          chars += n.bodyFrom - n.from + n.to - n.bodyTo - args.reduce((s, c) => s + c.to - c.from, 0);
+          walk(args, nesting + 1);
+          walk(n.body, nesting + 1);
+        } else if (n.t === "group") { chars += n.to - n.from - n.body.reduce((s, c) => s + c.to - c.from, 0); walk(n.body, nesting + 1); }
+        else if (n.t === "macro" && !n.code) { const args = n.args.flatMap((a) => a.body ?? []); chars += n.to - n.from - args.reduce((s, c) => s + c.to - c.from, 0); walk(args, nesting + 1); }
+        else { chars += n.to - n.from; }
+        if (chars > SLICE_MAX_CHARS) throw new Error("Source slice exceeds the character limit.");
+        if (n.t === "macro" && isInput(n) && !n.code) {
+          const target = plan.inputTargets.get(`${visit}@${n.from}`);
+          if (target !== undefined) scan(visitNodes(plan, target), plan.visits[target].key, target, depth + 1);
+        }
+      }
+    };
+    walk(nodes, 0);
+    active.delete(visit);
+  };
+  scan(source.nodes, source.key, source.visit, 0);
+  return excluded;
+}
+
+/** Validate the original bounded input closure before a caller reads any images/resources. */
+export function validateSourceSlice(plan: ExportPlan, source: SourceSlice): void {
+  boundedSourceSlice(plan, source);
+}
+
+/** A bounded statement/proof view: no IO, build, probe, document header or global stylesheet. */
+export async function emitSourceSlice(input: EmitInput, source: SourceSlice, options: { idPrefix?: string } = {}): Promise<SourceSliceOutput> {
+  if (input.signal.aborted) throw abortError("The source preview was cancelled.");
+  const { plan } = input;
+  const excluded = boundedSourceSlice(plan, source);
+  const prefix = options.idPrefix ?? `ll-slice-${++sliceSerial}-`;
+  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(prefix)) throw new Error("Source slice idPrefix must be a safe HTML ID prefix.");
+  const report = new ReportBuilder();
+  const queue = input.log ? new StepQueue(input.log, plan.visits) : null;
+  return new Emitter({ ...input, queue, report }, true, excluded).runSlice(source, prefix);
+}
+
+/** Namespace only real tag attributes/CSS, never an `id="..."` written as source text. */
+function namespaceSlice(body: string, footnotes: readonly Footnote[], prefix: string, labels: ReadonlySet<string>): { body: string; footnotes: Footnote[] } {
+  const tags = /<(?:[^<>"']|"[^"]*"|'[^']*')*>/g;
+  const decode = (s: string) => s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const ids = new Map<string, string>();
+  const gather = (html: string) => { for (const tag of html.matchAll(tags)) for (const m of tag[0].matchAll(/\sid="([^"]*)"/g)) ids.set(decode(m[1]), prefix + decode(m[1])); };
+  gather(body);
+  for (const f of footnotes) { if (f.id) ids.set(f.id, prefix + f.id); if (f.ref) ids.set(f.ref, prefix + f.ref); gather(f.html); }
+  const cssUrls = (s: string) => s.replace(/url\(\s*(["']?)#([^\s)"']+)\1\s*\)/g, (all, quote: string, id: string) => ids.has(id) ? `url(${quote}#${ids.get(id)}${quote})` : all);
+  const rewrite = (html: string) => html.replace(tags, (tag) => {
+    let label = "";
+    tag = tag.replace(/\sid="([^"]*)"/g, (_all, raw: string) => { const id = decode(raw); if (labels.has(id)) label = ` data-ll-tex-label="${attr(id)}"`; return ` id="${attr(ids.get(id)!)}"`; });
+    if (label) tag = tag.replace(/\s*\/?>$/, (end) => label + end);
+    tag = tag.replace(/\s(href|xlink:href)="(#[^"]*)"/g, (all, name: string, raw: string) => {
+      let id: string; try { id = decodeURIComponent(decode(raw).slice(1)); } catch { return all; }
+      return ids.has(id) ? ` ${name}="${attr(hrefId(ids.get(id)!))}"` : all;
+    });
+    return cssUrls(tag);
+  }).replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/g, (_all, begin: string, css: string, end: string) => begin + cssUrls(css) + end);
+  return { body: rewrite(body), footnotes: footnotes.map((f) => ({ ...f, id: ids.get(f.id) ?? f.id, ref: ids.get(f.ref) ?? f.ref, html: rewrite(f.html) })) };
+}
+
 class Emitter {
-  private readonly frontmatter: PaperFrontmatter;
+  private readonly frontmatter: PaperFrontmatter | null;
   private readonly className: string;
   private nextVisit = 1;
   private headings: Heading[] = [];
@@ -326,6 +437,9 @@ class Emitter {
   private header: TitleBlock | null = null;
   private tocTitle: string | null = null;
   private ids = new Set<string>();
+  private sourceLabels = new Set<string>();
+  private sliceWorkNodes = 0;
+  private sliceExpandedChars = 0;
   private counts: Record<string, number> = {};
   private numbers: ShownNumber[] = [];
   private enumDepth = 0;
@@ -348,8 +462,8 @@ class Emitter {
   /** After \appendix: chapters print `附录 A`, `Appendix A`. */
   private appendix = false;
 
-  constructor(private readonly o: EmitInput) {
-    this.frontmatter = collectFrontmatter(o.plan);
+  constructor(private readonly o: EmitInput, private readonly sliceMode = false, private readonly excluded: ReadonlySet<string> = new Set()) {
+    this.frontmatter = sliceMode ? null : collectFrontmatter(o.plan);
     const root = o.plan.files.get(o.plan.rootKey)!;
     const dc = root.nodes.find((n) => n.t === "macro" && n.name === "documentclass");
     this.className = this.frontmatter?.className ?? (dc?.t === "macro" ? argText(root.src, dc.args[dc.args.length - 1]).trim() : "");
@@ -360,7 +474,7 @@ class Emitter {
     for (const [env, def] of [...o.theorems, ...this.census]) if (def.numbered) this.shownCounters.add(this.theoremCounter(env, def));
     for (const f of o.plan.fragments) this.fragments.set(`${f.key}@${f.from}`, f);
     let min = Infinity;
-    for (const f of o.plan.files.values()) {
+    for (const f of sliceMode ? [] : o.plan.files.values()) {
       const scan = (nodes: readonly TexNode[]) => {
         for (const n of nodes) {
           if (n.t === "macro" && n.name in LEVELS) min = Math.min(min, LEVELS[n.name]);
@@ -399,6 +513,24 @@ class Emitter {
     };
   }
 
+  async runSlice(source: SourceSlice, prefix: string): Promise<SourceSliceOutput> {
+    const file = this.o.plan.files.get(source.key)!;
+    const ctx: Ctx = { file, visit: source.visit, float: null, depth: 0, metadata: true };
+    const body = await this.flowAsync(source.nodes, ctx);
+    for (const [name, u] of this.unknown) this.o.report.add({ severity: "warning", kind: "unknown-macro", message: `\\${name}: not rendered, its arguments kept as text`, count: u.count, file: u.file, line: u.line });
+    // No full-document linked()/orphan drain: references outside this card remain navigation
+    // targets, and counters outside its bounded source were never this renderer's responsibility.
+    const namespaced = namespaceSlice(body, this.footnotes, prefix, this.sourceLabels);
+    return { ...namespaced, colors: this.colors, items: [...this.o.report.items] };
+  }
+
+  /** Expansions must remain bounded too, not only the authored source/input closure. */
+  checkSliceWork(): void {
+    if (!this.sliceMode) return;
+    if (this.o.signal.aborted) throw abortError("The source preview was cancelled.");
+    if (++this.sliceWorkNodes > SLICE_MAX_NODES * 4) throw new Error("Source slice exceeds the expanded node limit.");
+  }
+
   /**
    * `html` with every link to an id the page lacks as plain text (a label inside a construct the
    * page does not show, a citation of a bibliography it does not print): one report item each.
@@ -416,6 +548,7 @@ class Emitter {
   // ---- flow: paragraphs and blocks ------------------------------------------------------------
 
   private skipFrontmatter(n: TexNode, ctx: Ctx): boolean {
+    if (this.sliceMode && this.excluded.has(`${ctx.visit}|${ctx.file.key}|${n.from}|${n.to}`)) return true;
     if (!this.frontmatter) return false;
     if (ctx.metadata) return false;
     if (this.frontmatter.maketitle?.node === n && !this.header && !(n.t === "macro" && n.name === "maketitle")) this.titleBlock(ctx, n, () => []);
@@ -439,6 +572,7 @@ class Emitter {
       if (n.t === "macro" && isInput(n)) {
         const child = this.inputOf(n, ctx);
         if (child) flow.block(await this.flowAsync(visitNodes(this.o.plan, child.visit), child));
+        else if (this.sliceMode) flow.block(this.missingInput(n, ctx));
         continue;
       }
       flow.add(n, () => nodes.slice(i + 1));
@@ -459,14 +593,19 @@ class Emitter {
     const { plan } = this.o;
     const site = `${ctx.visit}@${n.from}`;
     const index = plan.inputTargets.get(site);
-    if (index === undefined || index !== this.nextVisit) {
+    if (index === undefined || (!this.sliceMode && index !== this.nextVisit)) {
       const key = plan.inputKeys.get(site);
       if (key && plan.missing.has(key)) this.note("build", `${key}: file not found or outside the project`, ctx, n);
       return null;
     }
-    this.nextVisit++;
+    if (!this.sliceMode) this.nextVisit++;
     const v = plan.visits[index];
     return { file: plan.files.get(v.key)!, visit: index, float: null, depth: 0 };
+  }
+
+  private missingInput(n: TexNode, ctx: Ctx): string {
+    this.note("build", "Input was not available in the cached source plan; shown as source", ctx, n);
+    return `<pre class="llx-source">${esc(ctx.file.src.slice(n.from, n.to))}</pre>`;
   }
 
   /** Skip the visits a construct the emitter does not descend into would open (a fragment's). */
@@ -494,7 +633,7 @@ class Emitter {
     if (frag && frag.kind === "block") return this.fragment(frag, ctx);
     if (isInput(n)) {
       const child = this.inputOf(n, ctx);
-      return child ? this.flow(visitNodes(this.o.plan, child.visit), child) : "";
+      return child ? this.flow(visitNodes(this.o.plan, child.visit), child) : this.sliceMode ? this.missingInput(n, ctx) : "";
     }
     if (n.name in LEVELS) return this.heading(n, ctx, rest);
     // A box around a table or a picture (`\resizebox{\linewidth}{!}{..}`): its content, at the text's width.
@@ -569,7 +708,8 @@ class Emitter {
   }
 
   inlineNode(n: TexNode, ctx: Ctx): string {
-    if (!ctx.metadata && this.skipFrontmatter(n, ctx)) return "";
+    this.checkSliceWork();
+    if ((this.sliceMode || !ctx.metadata) && this.skipFrontmatter(n, ctx)) return "";
     switch (n.t) {
       case "text":
         return texLigatures(n.s);
@@ -599,7 +739,7 @@ class Emitter {
     if (frag) return this.fragment(frag, ctx);
     if (isInput(n)) {
       const child = this.inputOf(n, ctx);
-      return child ? this.flow(visitNodes(this.o.plan, child.visit), child) : "";
+      return child ? this.flow(visitNodes(this.o.plan, child.visit), child) : this.sliceMode ? this.missingInput(n, ctx) : "";
     }
     const name = n.name;
     const body = (i: number) => this.inline(n.args[i]?.body ?? [], ctx);
@@ -730,6 +870,7 @@ class Emitter {
 
   /** A context for TeX that is not the file's text (no fragment or visit lookups by offset), its numbers taken in `at`. */
   private textCtx(text: string, ctx: Ctx, at: Span): Ctx {
+    if (this.sliceMode && (this.sliceExpandedChars += text.length) > SLICE_MAX_CHARS * 4) throw new Error("Source slice exceeds the expanded character limit.");
     return { ...ctx, file: { ...ctx.file, key: "", src: text, lines: [0] }, at, depth: ctx.depth + 1 };
   }
 
@@ -1042,6 +1183,7 @@ class Emitter {
       }
     }
     const base = n.name.replace(/\*$/, "");
+    if (label) this.sourceLabels.add(label);
     const name = this.o.log?.names.get(base) || (def.user ? def.name : fallbackName(this.o.profile, base) || def.name);
     const titleHtml = title ? joinCjk(this.inline(title.body ?? [], ctx)) : "";
     // The head: the name (a [title] in its place for amsthm's proof and elegantbook's custom), the
@@ -1371,6 +1513,11 @@ class Emitter {
     const cls = missing ? "llx-ref is-missing" : "llx-ref";
     const starred = n.args[0]?.kind === "s" && given(n.args[0]);
     const target = keys.find((k) => this.o.refs.labels.has(k));
+    if (this.sliceMode && keys.length) {
+      const key = target ?? keys[0];
+      const data = ` data-ll-tex-ref="${attr(key)}" data-ll-tex-refs="${attr(JSON.stringify(keys))}"`;
+      return starred ? `<span class="${cls}"${data}>${esc(text)}</span>` : `<a class="${cls}" href="${attr(hrefId(key))}"${data}>${esc(text)}</a>`;
+    }
     return starred || !target ? `<span class="${cls}">${esc(text)}</span>` : `<a class="${cls}" href="${attr(hrefId(target))}">${esc(text)}</a>`;
   }
 
@@ -1682,6 +1829,7 @@ class Emitter {
   anchor(key: string): string {
     if (!key || this.ids.has(key)) return "";
     this.ids.add(key);
+    this.sourceLabels.add(key);
     return `<a id="${attr(key)}"></a>`;
   }
 
@@ -1746,6 +1894,7 @@ class Flow {
   }
 
   add(n: TexNode, rest: () => TexNode[]): void {
+    this.em.checkSliceWork();
     if (this.em.insideDrawn(n, this.ctx)) return;
     if (n.t === "text") {
       this.raw += n.s;

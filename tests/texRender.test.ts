@@ -16,10 +16,35 @@ import { mathAt } from "../src/editor/latexScan";
 import { TexCrops, TexFragments, TexRender, fragmentBody } from "../src/editor/texRender";
 import { NOTE_CHANGED, NOTE_NO_PREVIEW } from "../src/preview/blockCrop";
 import { obsidianMathJax } from "./support/mathjax";
+import { emptyDefinitions } from "../src/tex/macros";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const glyphs = (el: Element): string[] => [...el.querySelectorAll("mjx-c")].map((c) => c.className.split(" ")[0]);
 const chars = (el: Element): string => glyphs(el).map((c) => String.fromCodePoint(parseInt(c.slice(5), 16))).join("");
+
+test("TexRender source cards: committed definitions stay private, reuse the root input, and install glyph styles in a popout", async () => {
+  const t = await setup();
+  const counter = await countTexInputs();
+  try {
+    await t.render.load();
+    const defs = emptyDefinitions();
+    defs.statements.push(String.raw`\newcommand{\cardMacro}{a}`);
+    const refs = t.render.refsOf(t.root);
+    const popout = new JSDOM("<html><head></head><body></body></html>").window.document;
+    const first = t.render.sourceMath(t.root, String.raw`\cardMacro`, false, popout, defs, refs);
+    assert.equal(chars(first), "𝑎");
+    assert.equal(first.ownerDocument, popout);
+    assert.ok(popout.head.querySelector("style"));
+    t.render.sourceMath(t.root, String.raw`\cardMacro+1`, false, popout, defs, refs);
+    assert.equal(counter.count, 1);
+    const changed = { ...defs, statements: [String.raw`\newcommand{\cardMacro}{b}`] };
+    assert.equal(chars(t.render.sourceMath(t.root, String.raw`\cardMacro`, false, popout, changed, refs)), "𝑏");
+    assert.equal(counter.count, 2);
+    // The public Obsidian renderer still has no project cardMacro definition.
+    const global = t.MathJax.tex2chtml!(String.raw`\cardMacro`, { display: false }) as Element;
+    assert.notEqual(chars(global), "𝑏");
+  } finally { counter.restore(); t.done(); }
+});
 
 /** TeX inputs MathJax builds from now on (each one a ProjectMath (re)build). */
 async function countTexInputs(): Promise<{ count: number; restore(): void }> {

@@ -105,6 +105,24 @@ export interface LatexLiveEnv {
 /** TikZ pictures and tables: PDF crops (#14). */
 export const CROP_ENVS = new Set(["tikzpicture", "tikzcd", "pgfpicture", "circuitikz", "tabular", "tabular*", "tabularx", "longtable"]);
 
+/** LaTeX-only metadata for reference inspection; normal widget editing/drag events stay CM's. */
+class ReferenceWidget extends TextWidget {
+  constructor(text: string, cls: string, title: string, readonly command: string, readonly key: string, readonly from: number, readonly to: number) {
+    super(text, cls, title);
+  }
+  eq(other: TextWidget): boolean {
+    return other instanceof ReferenceWidget && super.eq(other) && other.command === this.command && other.key === this.key && other.from === this.from && other.to === this.to;
+  }
+  updateDOM(dom: HTMLElement): boolean {
+    super.updateDOM(dom);
+    dom.dataset.llRefCommand = this.command;
+    dom.dataset.llRefKey = this.key;
+    dom.dataset.llRefFrom = String(this.from);
+    dom.dataset.llRefTo = String(this.to);
+    return true;
+  }
+}
+
 /** A tcolorbox (elegantbook's theorems): pgf moves what is inside, so SyncTeX misplaces it. */
 const movesContent = (env: string, theorems: TheoremMap): boolean => {
   const spec = theorems.get(env)?.spec;
@@ -237,7 +255,11 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
           c.kind === "ref"
             ? { ...refText(c.command, c.keys, env.refs()), title: doc.sliceString(c.from, c.to) }
             : citeText(c.keys, c.prenote, c.postnote, env.refs());
-        widget = new TextWidget(chip.text, `lsp-lp-chip is-${c.kind}${chip.missing ? " is-missing" : ""}`, chip.title);
+        const cls = `lsp-lp-chip is-${c.kind}${chip.missing ? " is-missing" : ""}`;
+        const literal = c.kind === "ref" && c.command === "ref" ? /\\ref\*?\s*\{([^{}]*)\}/.exec(doc.sliceString(c.from, c.to))?.[1].trim() : undefined;
+        widget = literal !== undefined
+          ? new ReferenceWidget(chip.text, cls, chip.title, "ref", literal, c.from, c.to)
+          : new TextWidget(chip.text, cls, chip.title);
       }
       ctx.replace(c.from, c.to, Decoration.replace({ widget }));
     },

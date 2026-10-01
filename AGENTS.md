@@ -636,6 +636,23 @@
     `export-static/fragments/` holds dvisvgm's pages of `fragments/main.tex` on both engines
     (regenerate from `<work>/frag/` when the probe's markers change). `emitDoc` in
     `tests/support/exportHost.ts` runs the emitter on a synthetic document with a handwritten `.llx`.
+- Proof-reference popups stay local to the current LaTeX project. `src/tex/theoremGraph.ts`
+  indexes original AST nodes and exact input visits from the source plan, including committed
+  unsaved buffers. Only literal `\ref` calls in associated proof bodies create edges; native
+  proof-title references select an owner, and duplicate source labels remain ambiguous.
+  `src/editor/theoremGraphs.ts` owns bounded project snapshots and lazy source cards; its
+  bibliography and aux data belong to that same committed snapshot. `emitSourceSlice` validates
+  original node identity, visit and size before any image IO, follows original input targets,
+  and excludes contained proofs from statement content. Cards reuse the project's private
+  MathJax and never run a build, probe or fragment compile. Unavailable drawings stay source.
+  `theoremGraphHover` is LaTeX-specific: plain source refs, math refs and live chip metadata share
+  the same literal key. Normal chip clicks and drag selection remain CodeMirror's. Mouse holds,
+  IME, edits, selection changes, project invalidation and destruction abort pending popups/cards;
+  window release/cancel/blur listeners are removed on dispose. Keep every style scoped to
+  `.ll-theorem-graph`; shared modules and keys are unchanged. After UI changes run
+  `node scripts/theorem-graph-smoke.mjs` (real Chrome; fails if unavailable), plus the theorem
+  index/content/service/UI tests. This script also verifies source/live themes, node expansion,
+  source links, cycles, narrow windows and dragging over a live reference while held.
 - Build output goes to `$TMPDIR/obsidian-latex-live/<hash of root>/`, never
   into the vault.
 - Desktop only (`isDesktopOnly: true`).

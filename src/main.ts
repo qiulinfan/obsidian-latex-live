@@ -17,12 +17,13 @@ import { isLive, renderStats } from "./editor/shared/livePreview";
 import { YoloBridge } from "./editor/shared/yoloBridge";
 import type { MathJaxLike } from "./editor/mathjaxProject";
 import { TexRender } from "./editor/texRender";
+import { TheoremGraphs } from "./editor/theoremGraphs";
 import { TexView, VIEW_TYPE_TEX } from "./editor/texView";
 import { registerExport } from "./export/command";
 import { TexlabServer, resolveTexlab, texlabSettings } from "./lsp/texlab";
 import { CropService } from "./preview/blockCrop";
 import { FragmentService } from "./preview/fragments";
-import { openPdf, pdfPageImage } from "./preview/pdfRenderer";
+import { openPdf, pdfPageImage, pdfPagePngs } from "./preview/pdfRenderer";
 import { LatexPreviewView, VIEW_TYPE_PREVIEW } from "./preview/previewView";
 import { LatexSession, SessionEvent, outDirFor } from "./session";
 import {
@@ -45,6 +46,8 @@ export default class LatexLivePlugin extends Plugin {
   texlab!: TexlabServer;
   /** Project math for hover rendering (one private MathJax instance per root). */
   texRender!: TexRender;
+  /** Source-backed proof references and lazy statement/proof cards for each open project. */
+  theoremGraphs!: TheoremGraphs;
   /** PDF crops of blocks from the previewed sessions' last compiles (hover and live preview). */
   crops!: CropService;
   /** Fragment compiles for the hover: what MathJax and the crops cannot show (design 4.7). */
@@ -114,6 +117,13 @@ export default class LatexLivePlugin extends Plugin {
       crops: this.crops,
       fragments: this.fragments,
       fragmentFallback: () => this.settings.texFragmentFallback,
+    });
+    this.theoremGraphs = new TheoremGraphs({
+      buffers: () => this.editorBuffers(true),
+      outDirFor,
+      prepareMath: () => this.texRender.load(),
+      math: (root, src, display, doc, defs, refs) => this.texRender.sourceMath(root, src, display, doc, defs, refs).outerHTML,
+      pdfImages: async (abs, want, signal) => pdfPagePngs(new Uint8Array(await readFile(abs, { signal })), want, 2, signal),
     });
 
     this.registerView(VIEW_TYPE_TEX, (leaf) => new TexView(leaf, this));
@@ -211,13 +221,14 @@ export default class LatexLivePlugin extends Plugin {
       this.app.vault.on("rename", (f, old) => {
         this.histories.rename(old, f.path);
         this.texRender.filesChanged();
+        this.theoremGraphs.invalidate();
       }),
     );
     // Live preview's images resolve again (a figure saved, deleted or moved). After the layout
     // is ready: the vault's initial scan creates every file.
     this.app.workspace.onLayoutReady(() => {
-      this.registerEvent(this.app.vault.on("create", () => this.texRender.filesChanged()));
-      this.registerEvent(this.app.vault.on("delete", () => this.texRender.filesChanged()));
+      this.registerEvent(this.app.vault.on("create", () => { this.texRender.filesChanged(); this.theoremGraphs.invalidate(); }));
+      this.registerEvent(this.app.vault.on("delete", () => { this.texRender.filesChanged(); this.theoremGraphs.invalidate(); }));
     });
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => this.onActiveLeaf(leaf)),
@@ -225,6 +236,7 @@ export default class LatexLivePlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("css-change", () => {
         this.refreshPreviews();
+        this.theoremGraphs.invalidate();
         for (const v of this.texViews()) if (v.editorView) syncDarkTheme(v.editorView);
       }),
     );
@@ -237,6 +249,7 @@ export default class LatexLivePlugin extends Plugin {
     this.crops.dispose();
     this.fragments.dispose();
     this.texRender.dispose();
+    this.theoremGraphs.dispose();
     window.clearTimeout(this.restartTimer);
     void this.texlab.dispose();
   }
@@ -331,11 +344,11 @@ export default class LatexLivePlugin extends Plugin {
   }
 
   /** The text of the open LaTeX editors by absolute path (unsaved edits included). */
-  private editorBuffers(): Map<string, string> {
+  private editorBuffers(committed = false): Map<string, string> {
     const out = new Map<string, string>();
     for (const v of this.texViews()) {
       const abs = v.absolutePath();
-      if (abs && v.editorView) out.set(abs, v.editorView.state.doc.toString());
+      if (abs && v.editorView) out.set(abs, committed ? v.getCommittedText() : v.editorView.state.doc.toString());
     }
     return out;
   }
@@ -353,7 +366,7 @@ export default class LatexLivePlugin extends Plugin {
   /** Called by sessions after every event: update editor diagnostics, label numbers and crops. */
   sessionChanged(s: LatexSession, e: SessionEvent): void {
     if (s.last) this.refreshDiagnostics();
-    if (e === "result") this.texRender.compiled(s.root);
+    if (e === "result") { this.texRender.compiled(s.root); this.theoremGraphs.invalidate(); }
     // A compile that ended: live crops of its new PDF, or those held back while it ran.
     if (e !== "start") this.texRender.cropsChanged(s.root);
   }
@@ -514,6 +527,7 @@ export default class LatexLivePlugin extends Plugin {
     if (!(f instanceof TFile)) return;
     const abs = this.absolutePath(f.path);
     this.texRender.fileModified(abs);
+    this.theoremGraphs.invalidate();
     for (const s of this.sessions.values()) {
       const deps = s.compiler.deps;
       const fresh = deps.size === 0 && abs.startsWith(s.compiler.rootDir + sep);
