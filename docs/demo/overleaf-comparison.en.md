@@ -50,7 +50,7 @@ The current published USD prices are below. The annual column is the whole-year 
 | Standard | $25 | $199 | 10 | 10 uses / included |
 | Pro | $45 | $399 | Unlimited | Max, subject to fair use / included |
 
-LaTeX Live is now open source under MIT-0; the current plugin code has no subscription allowance. Local hardware, environment maintenance, optional Obsidian services and external AI still have their own costs. [License](../../LICENSE), [current configuration](../../src/settings.ts). “No plugin subscription” therefore does not mean the whole workflow is cost-free.
+LaTeX Live is now open source under MIT; the current plugin code has no subscription allowance. Local hardware, environment maintenance, optional Obsidian services and external AI still have their own costs. [License](../../LICENSE), [current configuration](../../src/settings.ts). “No plugin subscription” therefore does not mean the whole workflow is cost-free.
 
 **A stronger fit for LaTeX Live:** existing Obsidian users familiar with local TeX, primarily writing mathematical notes or theory papers independently, who want to read through theorems and proofs within the source and share a reading edition. **A stronger fit for Overleaf:** frequent coauthoring, online advisor comments, tracked review/history and publisher template entry points, or teams that do not want to maintain TeX for every author. Local `.tex` reading and Overleaf coauthoring can also coexist, with agreed synchronization and environment versions; the current plugin has no automatic collaboration protocol between the two.
 

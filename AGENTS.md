@@ -716,7 +716,7 @@
   native timings and raw video. Storyboard and caption libraries live in [docs/demo](docs/demo/).
   Keep raw videos, screenshots, compiled recorders, profiles and credentials outside Git.
 
-- Public source and authored documentation use MIT-0. Upstream libraries, external programs,
+- Public source and authored documentation use MIT. Upstream libraries, external programs,
   fonts and referenced/demo materials retain their original terms; do not relabel those.
   README.md and README_zh-CN.md are user-facing release documentation.
 - `node scripts/check-release.mjs` verifies the public identity, exact x.y.z tag, package and

@@ -1,6 +1,6 @@
 # Third-party notices
 
-LaTeX Live's own software and authored documentation are MIT-0. Third-party code, libraries, fonts, applications and referenced materials retain their original terms.
+LaTeX Live's own software and authored documentation are MIT. Third-party code, libraries, fonts, applications and referenced materials retain their original terms.
 
 The production Obsidian bundle uses this repository's source and does not bundle a TeX engine, texlab, MathJax, pdf.js, CodeMirror or Lezer. Obsidian supplies its runtime APIs, CodeMirror/Lezer, MathJax and pdf.js. The user's separately installed TeX distribution and texlab are separate programs.
 
@@ -12,6 +12,6 @@ The production Obsidian bundle uses this repository's source and does not bundle
 - [YOLO](https://github.com/Lapis0x0/obsidian-yolo): a separately installed optional AI-completion provider, never bundled by this plugin.
 - TeX engines, packages, bibliography processors and dvisvgm retain the licenses of the separately installed distribution. Synthetic fixtures use them for validation; installing this plugin does not install those dependencies.
 
-`docs/demo/source-provenance.md` records attribution and demo authorization for third-party notes. This project's MIT-0 license does not grant a general license to those notes.
+`docs/demo/source-provenance.md` records attribution and demo authorization for third-party notes. This project's MIT license does not grant a general license to those notes.
 
 Development-only packages retain the license identifiers and notices shipped by their packages. No development dependency is relicensed by this repository's LICENSE file.
