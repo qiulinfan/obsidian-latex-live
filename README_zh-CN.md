@@ -11,28 +11,97 @@
 
 <p align="center"><a href="./README.md">English</a> | <b>简体中文</b></p>
 
-## 主要体验
+## 边改边编译，源码与 PDF 双向跳转
 
-![源码编辑与本机编译的 PDF](./docs/assets/writing-preview.png)
+修改公式，查看原生 PDF 更新。再从光标定位到 PDF，或双击 PDF 回到对应源码行；多文件项目也能沿章节跳转。
 
-直接使用原来的 `.tex` 文件。在编辑器里阅读支持的公式和定理框，编辑时展开源码，再用本机 TeX 生成的 PDF 核对结果。
+![LaTeX Live 与 Overleaf 的真实同稿自动编译](./docs/assets/showcase/same-source-overleaf-zh.gif)
 
-悬停定理引用，可以打开当前项目的证明引用图，点击节点查看陈述和证明，并跳回源行。需要方便阅读和分享的版本时，可以导出自包含 HTML。
+同一份一页文档，分别做三次热编辑：**LaTeX Live 0.1.1 中位数约 0.87 秒**看到新 PDF，**Overleaf 云端免费账户的中位数观测区间约 3.7–4.1 秒**。两边均使用 pdfLaTeX / TeX Live 2026；本地时间包含默认 400 ms 延迟，并使用导言区缓存。这是本次机器与账户的写作流程实测；[源码、全部样本与录制方法](./docs/demo/same-source-speed.md)均已保留。
 
-## 功能
+![源码到 PDF，再从 PDF 回到源码](./docs/assets/showcase/bidirectional-synctex-zh.gif)
 
-| 功能 | 用途 |
-| --- | --- |
-| 源码与实时编辑 | 就地显示支持的数学、标题、列表、定理框、图片和引用芯片，并保留可编辑源码。 |
-| 真实 PDF 预览 | 调用已安装的 pdfLaTeX、XeLaTeX 或 LuaLaTeX；通过 latexmk 完成文献与多轮构建。 |
-| 双向 SyncTeX | 将光标定位到 PDF，双击 PDF 返回源码，支持多文件项目。 |
-| 语言辅助 | 接入独立安装的 texlab，提供补全、snippet、诊断和悬停信息。 |
-| 公式预览 | 使用项目宏显示悬停公式，可选光标预览以及支持范围内的 TeX/PDF 回退。 |
-| 证明引用图 | 根据证明正文中的字面 `\ref` 建图，展开陈述与证明，打开源文件位置。 |
-| HTML 导出 | 输出章节、数学、定理框、引用、文献、内嵌资源和支持的图形，并提供导出报告。 |
-| 可选 YOLO 补全 | 使用独立 YOLO 插件的真实 ghost 候选；Tab 接受，Enter 不接受 AI 文本。 |
+## 在自己的模板里阅读，也能直接编辑
 
-引用图表示源码中的显式证明引用，不代表经过机器验证的逻辑依赖。未知环境和不支持的宏保留源码，或使用支持的回退方式。
+保留原来的 `.tex` 工程和文档类。公式、带编号的定理框和引用就地显示；光标进入公式时恢复源码，改完继续阅读。PDF 仍由原模板排版。
+
+![ElegantBook 中实际修改公式、查看更新并切换模式](./docs/assets/showcase/elegantbook-live-editing-zh.gif)
+
+ElegantBook 只是其中一种。**AMS、IEEE** 论文类也录下了相同的编辑流程；模板画廊还展示了生物领域的 **PLOS** 和物理领域的 **REVTeX**。已测试的模板还包括 Springer Nature、AASTeX、LNCS 和 ACM。未支持的构造保留源码，或使用支持范围内的 TeX/PDF 回退。详见[模板兼容范围](./docs/template-compatibility.md)。
+
+<details>
+<summary>展开查看 AMS / IEEE 编辑，以及 PLOS / REVTeX 阅读模式</summary>
+
+![在 AMS 与 IEEE 模板里实际修改公式](./docs/assets/showcase/template-editing-gallery-zh.gif)
+
+![生物与物理的期刊模板阅读模式](./docs/assets/showcase/paper-template-coverage-zh.gif)
+
+AMS / IEEE 片段包含实际修改；PLOS / REVTeX 展示完成全文构建后的实时阅读模式，属于模板展示，不是冷编译基准。
+
+</details>
+
+## 悬浮引用，沿证明继续阅读
+
+悬浮定理引用，在小窗查看证明引用图。点击节点，展开该定理的陈述和证明；可以继续沿引用浏览，也可以直接打开对应源文件位置。
+
+![引用悬浮、展开定理与证明，再打开源码](./docs/assets/showcase/ref-proof-graph-zh.gif)
+
+图中的关系来自当前 LaTeX 项目证明里的字面 `\ref`，表示明确写出的证明引用关系，不是经过逻辑验证的定理依赖。
+
+## 更多写作细节
+
+<details>
+<summary>公式预览、补全与占位符、YOLO、TeX 图形、诊断和 HTML 导出</summary>
+
+### 写公式时，就能看到公式
+
+悬浮与光标预览使用项目宏和公式编号。数学的即时显示与完整 PDF 编译分别进行。
+
+![随光标显示公式预览](./docs/assets/showcase/formula-cursor-preview-zh.gif)
+
+### 少敲几次按键
+
+texlab 提供命令补全与 snippet。Tab 在占位符间移动，Enter 续写环境和列表；统一的按键处理让补全、占位符与可选 AI 建议协同工作。
+
+![命令补全、占位符与环境续写](./docs/assets/showcase/smart-writing-zh.gif)
+
+### 接入自己选择的 AI 补全
+
+单独安装 [YOLO](https://github.com/Lapis0x0/obsidian-yolo)，即可在 LaTeX 编辑器中使用真实的 ghost text 建议。Tab 接受，Enter 继续写作，撤销还原源码。此片段从生成完成后开始，不用于比较模型速度。
+
+![Tab 接受实际 YOLO 建议，再撤销](./docs/assets/showcase/yolo-writing-zh.gif)
+
+### 在编辑器里读 TeX 图形
+
+支持范围内的 TikZ 和表格可显示实际编译 PDF 的裁剪，让图形与周围的数学内容一起阅读。
+
+![编辑器中的实际 TeX 图形裁剪](./docs/assets/showcase/native-tex-figures-zh.gif)
+
+### 修复错误，继续写作
+
+真实 TeX 诊断回到源码编辑器；修复期间保留已有 PDF。构建控件和诊断放在滚动 PDF 上方的独立区域。
+
+![实际未定义命令错误及恢复编译](./docs/assets/showcase/diagnostics-recovery-zh.gif)
+
+### 分享可独立阅读的 HTML
+
+导出自包含 HTML，保留数学、定理框、引用、文献、图片与支持范围内的 SVG 图形。读者无需 Obsidian 就能沿引用和目录跳转；导出报告列出未支持的内容。
+
+![实际导出的 HTML：SVG、代码、引用与目录跳转](./docs/assets/showcase/html-reading-edition-zh.gif)
+
+### 直接看一次实时编译
+
+![实际修改与 PDF 更新，正常速度播放](./docs/assets/showcase/live-compilation-zh.gif)
+
+</details>
+
+所有 GIF 都截取自真实应用，并按正常速度播放；部分使用固定细节裁剪，模板合集由明确区分的录制片段组成。英文字幕版本位于[英文 README](./README.md)。[录制来源与收据](./docs/demo/showcase-provenance.json)可供核对。
+
+## 与 Overleaf 的区别
+
+这里展示的优势是一条连贯的阅读与写作流程：支持模板语义的就地编辑、理解项目宏的数学预览、确定性的证明引用小窗、可组合的编辑工具，以及方便分享的数学阅读版。
+
+Overleaf 也提供[自动编译](https://docs.overleaf.com/getting-started/recompiling-your-project)、[双向 SyncTeX](https://docs.overleaf.com/navigating-in-the-editor/working-with-the-pdf-viewer/moving-between-the-editor-and-pdf)、[AI 工具](https://docs.overleaf.com/integrations-and-add-ons/ai-features)和 [HTML 转换](https://docs.overleaf.com/managing-projects-and-files/importing-and-exporting-files)。多人合著时，它的一体化协作、评论和审阅流程仍有优势。[完整对比](./docs/demo/overleaf-comparison.md)包含同稿实测、能力差异和尚未实测的部分。
 
 ## 快速开始
 
@@ -95,5 +164,7 @@ PDF 版式由原来的 class 和 TeX 工具链决定。已测试的例子包括 
 ## 致谢与许可证
 
 基于 Obsidian、CodeMirror、texlab、MathJax、pdf.js 和 TeX 生态，可选 AI 补全由 [YOLO](https://github.com/Lapis0x0/obsidian-yolo) 提供。
+
+数学笔记片段经原作者授权，改编自 [Onion20040508/notes](https://github.com/Onion20040508/notes)，保留来源署名和原有条款；同稿对比与新录制的短模板例子为原创演示材料。
 
 项目自行拥有的软件与文档使用 [MIT](./LICENSE)：允许商用、修改和闭源分发，须保留版权与许可声明。第三方软件、字体和引用材料继续遵循各自原有许可证，详见[第三方通知](./THIRD_PARTY_NOTICES.md)。

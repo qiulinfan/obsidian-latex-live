@@ -4,7 +4,7 @@ LaTeX Live 的主要价值，是把原生 `.tex` 项目放进 Obsidian 的日常
 
 **Overleaf 已有 Visual Editor、自动编译、双向 SyncTeX、AI 工具和 HTML 导出。** 因此，LaTeX Live 的差异应通过具体阅读流程与导出保真证据展示，不能宣传为这些能力的唯一提供者。[编辑器](https://docs.overleaf.com/getting-started/how-do-i-use-overleaf)、[SyncTeX](https://docs.overleaf.com/navigating-in-the-editor/working-with-the-pdf-viewer/moving-between-the-editor-and-pdf)、[AI](https://docs.overleaf.com/integrations-and-add-ons/ai-features)、[格式转换](https://docs.overleaf.com/managing-projects-and-files/importing-and-exporting-files)。
 
-核对日期：**2026-09-30**。本文比较当前仓库的 LaTeX Live 0.1.0 与 Overleaf Cloud 官方公开能力，不是登录后的同稿对照实验。文中的「已验证」来自本仓库代码、回归和运行记录；「官方能力」来自所链接的现行文档；「推断」是由工作方式得出的适用性判断。来源与未核实项记录在 [overleaf-sources.json](overleaf-sources.json)。
+官方能力核对日期：**2026-09-30**。原能力验收记录来自 LaTeX Live 0.1.0；**2026-10-01** 新增已发布 0.1.1 与已登录 Overleaf 的一页同稿热编辑实测，详见[原稿、样本与方法](same-source-speed.md)。文中的「已验证」来自本仓库代码、回归和运行记录；「官方能力」来自所链接的现行文档；「推断」是由工作方式得出的适用性判断。来源与未核实项记录在 [overleaf-sources.json](overleaf-sources.json)。
 
 ## 能力与实际意义
 
@@ -20,7 +20,7 @@ LaTeX Live 的主要价值，是把原生 `.tex` 项目放进 Obsidian 的日常
 | 阅读 HTML 与格式转换 | **已验证**：单个无 JavaScript 的 HTML，章节/定理/引用/脚注语义重排；图片、SVG 及使用到的数学字体内嵌，脱离 Obsidian 阅读；有警告报告。正文用系统字体，复杂表格/绘图可为 SVG。 | 当前已用 Pandoc 导出 HTML、Word、Markdown；官方说明转换结构而不复现所有 class/package 的视觉样式，复杂宏可能无法转换。[导入/导出](https://docs.overleaf.com/managing-projects-and-files/importing-and-exporting-files) | 差异是**本插件已测的自包含资源、原生编号/引用和模板语义保留**，不是「只有它能导出 HTML」。未实测 Overleaf HTML 的资源封装与同稿保真，不能宣布全面胜出。 |
 | 投稿模板与复杂 TeX | **已验证**：PDF 使用未修改的本机 class/package；阅读层/HTML 另有支持边界。PLOS、Springer Nature、REVTeX、AASTeX、AMS、LNCS、ACM、IEEE 的原创短稿共 11 配置验收通过。 | 模板库含出版者官方模板，部分支持直接投稿；云端提供标准 TeX Live 包和历史版本。[模板](https://docs.overleaf.com/templates/creating-a-project-from-a-template)、[TeX Live](https://docs.overleaf.com/troubleshooting-and-support/tex-live) | 本插件不局限于 ElegantBook，但 11 配置不是全部模板兼容声明。两者最终投稿版式均应以原生 PDF 为准。 |
 | 引擎、版本与定制工具 | **已验证**：PDF 支持安装好的 pdfLaTeX/XeLaTeX/LuaLaTeX；识别项目引擎设置，使用本机包、字体、BibTeX/Biber/latexmk。**当前 HTML 不支持 LuaLaTeX**。本机环境版本由用户维护。 | 项目可选择 TeX Live 版本及 pdfLaTeX/LaTeX/XeLaTeX/LuaLaTeX；可上传依赖并用 `latexmkrc` 定制规则。年度版本稳定，Labs rolling 为实验环境。[引擎](https://docs.overleaf.com/getting-started/recompiling-your-project/selecting-a-tex-live-version-and-latex-compiler)、[依赖](https://docs.overleaf.com/managing-projects-and-files/adding-latex-dependencies)、[latexmkrc](https://docs.overleaf.com/managing-projects-and-files/the-latexmkrc-file)、[版本](https://docs.overleaf.com/troubleshooting-and-support/tex-live) | **推断**：本机工具链更便于与个人计算/构建流程组合；Overleaf 的共享环境和逐项目版本选择降低合作者之间的配置差异。不能说它不允许自定义编译。 |
-| 大工程与性能 | **本机测量**：65 页夹具冷 HTML 导出 11.335 s、新鲜构建导出 2.931 s；5891 行章节的原生方向键样本 p95 6 ms。详见下表。 | 官方当前 Free 编译上限 10 s，premium 240 s；每项目 2000 文件、可编辑材料 7 MB；提供图片/绘图等超时优化指南。[额度](https://docs.overleaf.com/getting-started/free-and-premium-plans/plan-limits)、[超时指南](https://docs.overleaf.com/troubleshooting-and-support/fixing-and-preventing-compile-timeouts) | 超时额度不等于耗时或 CPU 性能。没有同稿、同版本、同缓存态、同档位的 Overleaf 测量，不能作速度排名。本机也受硬件与实现上限限制。 |
+| 大工程与性能 | **本机测量**：65 页夹具冷 HTML 导出 11.335 s、新鲜构建导出 2.931 s；5891 行章节的原生方向键样本 p95 6 ms。详见下表。 | 官方当前 Free 编译上限 10 s，premium 240 s；每项目 2000 文件、可编辑材料 7 MB；提供图片/绘图等超时优化指南。[额度](https://docs.overleaf.com/getting-started/free-and-premium-plans/plan-limits)、[超时指南](https://docs.overleaf.com/troubleshooting-and-support/fixing-and-preventing-compile-timeouts) | 超时额度不等于耗时或 CPU 性能。已补充一页同稿、同年度 TeX Live 的热编辑观测；没有控制两边硬件、全部缓存和服务资源，不能作普遍速度排名。本机也受硬件与实现上限限制。 |
 | 离线、数据位置与隐私 | **已验证的架构**：源码无需上传即可本机编辑/编译；备份与同步由用户选择。启用外部 AI、同步或工具后的网络行为不由本插件统一保证。 | 可下载源码、通过 premium Git 集成在本地工作再同步；云端项目默认私有。另有自托管 Community Edition/Server Pro。AI 文档说明可能发送必要上下文给第三方且不用于模型训练。[Git](https://docs.overleaf.com/integrations-and-add-ons/git-integration-and-github-synchronization/git-integration)、[共享权限](https://docs.overleaf.com/collaborating/sharing-a-project)、[自托管](https://docs.overleaf.com/on-premises/welcome/server-pro-vs.-community-edition)、[AI 数据说明](https://docs.overleaf.com/integrations-and-add-ons/ai-features) | 选择本机处理可以减少必要的云端源码传输，但不等于整体安全审计。不能把 Overleaf 一概描述为公开或完全没有离线选择。 |
 | 实时合著、评论与审阅 | **当前边界**：没有内置多人同时编辑、权限管理、批注线程或审阅修订；外部文件同步/Git 不是这些功能的等价替代。 | 同项目协作、评论/回复/解决、编辑/审阅权限；premium Track Changes 支持接受/拒绝修订，项目拥有者的权限可共享给合作者。[评论](https://docs.overleaf.com/collaborating/commenting)、[修订](https://docs.overleaf.com/collaborating/track-changes)、[共享](https://docs.overleaf.com/collaborating/sharing-a-project) | 需要导师或团队直接在线审阅时，Overleaf 的整合流程更完整。 |
 | 历史与可复现 | **当前边界**：普通源码可纳入用户自己的完整 Git 分支/脚本工作流，但插件不自动提供协作历史或锁定 TeX/字体环境。模板测试有版本/校验值收据。 | History 可比较、恢复、下载、标记版本；Free 可看最近 24 小时及标记版本，完整历史属 premium。Git bridge 有分支、tag、LFS 等限制。[历史](https://docs.overleaf.com/writing-and-editing/history-and-versioning)、[Git 边界](https://docs.overleaf.com/integrations-and-add-ons/git-integration-and-github-synchronization/git-integration) | 云端历史与完整本地 Git 各有职责；保留源码不自动保证换机后得到字节一致的 PDF。 |
@@ -37,7 +37,7 @@ LaTeX Live 的主要价值，是把原生 `.tex` 项目放进 Obsidian 的日常
 | 实际 Obsidian 的 5891 行章节；16 次方向键；另测 190 行定理内 20 次移动 | p95 6 ms / 6.2 ms | 小样本编辑响应；不是完整项目编译或小窗展开延迟。 |
 | 5702 行源码的证明引用索引 | 冷读取 42.4 ms、缓存读取 0.7 ms | 单次 Node 数据服务测量，不包括卡片渲染/图片加载或完整 UI。 |
 
-以上沿用本仓库已有测量，**本次未重跑、未上传同稿到 Overleaf**；机器配置与统计采样不足以作跨产品通用基准。Overleaf 的编译上限是套餐资源边界，不能拿「10 s timeout」与「11.335 s 本机导出」比较得出胜负。[本机记录](../design.md)、[官方额度](https://docs.overleaf.com/getting-started/free-and-premium-plans/plan-limits)。
+以上四项沿用本仓库已有测量，**未因本次展示重跑**；另已上传原创一页稿件到 Overleaf，完成[三次自动编译实测](same-source-speed.md)。机器配置与统计采样不足以作跨产品通用基准。Overleaf 的编译上限是套餐资源边界，不能拿「10 s timeout」与「11.335 s 本机导出」比较得出胜负。[本机记录](../design.md)、[官方额度](https://docs.overleaf.com/getting-started/free-and-premium-plans/plan-limits)。
 
 ## 成本、适用人群与尚未验证的部分
 
@@ -60,7 +60,7 @@ LaTeX Live 仓库现以 MIT 开源，当前插件代码没有订阅额度；本�
 
 - 证明小窗的 Chrome 回归与真实 Obsidian 索引/富内容已验证；2026-10-01 原生窗口录像补充了自动化指针悬停、节点点击和展开的实证。操作系统层跨块拖选未由本次录像替代，不能写成全部原生 UI 已验收。
 - 未测的模板/宏不能承诺语义阅读层或 HTML 全支持；实时文献芯片仍是作者/年份摘要，不等于每种期刊的引用样式。复杂图的源码/SVG 回退、LuaLaTeX HTML 限制及系统正文字体均须保留在演示中。
-- 未做 Overleaf 的登录后交互、同稿 HTML 保真或性能实测，也未做本插件完整无障碍认证。官方索引已有新的 [Working offline](https://docs.overleaf.com/writing-and-editing/working-offline) 页面，但本次正文读取失败，浏览器短时掉线和持久离线的具体边界尚未核实；不能沿用旧资料断言完全不支持离线编辑。
+- 已做 Overleaf 登录后的上传、源码修改与自动编译观测；同稿 HTML 保真、资源等价的引擎性能基准及本插件完整无障碍认证仍未做。官方索引已有新的 [Working offline](https://docs.overleaf.com/writing-and-editing/working-offline) 页面，但本次正文读取失败，浏览器短时掉线和持久离线的具体边界尚未核实；不能沿用旧资料断言完全不支持离线编辑。
 
 
 ### 原生录制更新（2026-10-01）
@@ -68,3 +68,9 @@ LaTeX Live 仓库现以 MIT 开源，当前插件代码没有订阅额度；本�
 ScreenCaptureKit 的独立窗口原片已录得真实 Obsidian 的指针悬停与节点点击：两节点证明引用图，以及含 17 个数学渲染的陈述/证明展开。录制发现的窗格裁切问题已通过 CodeMirror 官方外部提示窗容器修复。这些是对原生应用的自动化输入，不是同稿 Overleaf 会话或逻辑证明验证；原片及事件/QC 收据保留。操作系统层跨块拖选和上文其他未测边界不由这段录像替代。
 
 另已实录原生双向 SyncTeX、十个论文模板配置的 PDF，以及 YOLO 的实际附件答复、Tab 接受与撤销、Enter 不接受 AI、审阅片段后的原生粘贴和零错误完整构建。成功片保留真实模型等待时间；YOLO 请求超时与录制驱动失败原片也保留。这里的聊天和模型服务来自外部 YOLO，并不是 LaTeX Live 内置助手。最终本仓库完整测试 740/740、浏览器小窗检查 44/44 与生产构建通过。
+
+### 同稿自动编译更新（2026-10-01）
+
+使用同一份原创一页源码，pdfLaTeX / TeX Live 2026，三次把 `x^2` 改为 `x^3`。已发布 LaTeX Live 0.1.1 在 Apple M5 / 32 GB 上编辑到新 PDF 显示的中位数为 **0.874 秒**；Overleaf 云端免费账户开启自动编译，PDF 更新的中位数观测区间为 **3.665–4.086 秒**。本地包含默认 400 ms 保存延迟并使用导言区缓存，两边都已经热构建；它比较本次写作流程，不代表所有文档或硬件。
+
+[全部样本、源码及测量方法](same-source-speed.md) · [中英文 GIF 与来源](showcase-provenance.json)。新录制还包含 ElegantBook、AMS 与 IEEE 的实际公式修改、就地渲染恢复和 PDF 更新。原有 PLOS / REVTeX 片段属于模板画廊，不能描述为实际修改或冷编译基准。

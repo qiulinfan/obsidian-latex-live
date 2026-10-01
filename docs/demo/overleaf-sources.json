@@ -3,11 +3,18 @@
   "retrieved_date": "2026-09-30",
   "comparison": "LaTeX Live current workspace versus Overleaf Cloud documented public capabilities",
   "plugin_version": "0.1.0",
+  "same_source_update": {
+    "recorded_date": "2026-10-01",
+    "plugin_version": "0.1.1",
+    "evidence_path": "docs/demo/same-source-speed.json",
+    "method_path": "docs/demo/same-source-speed.en.md",
+    "scope": "Authenticated original one-page warm-edit workflow observations; three edits per product; not a resource-equivalent engine benchmark."
+  },
   "method": {
-    "overleaf": "Read primary official public documentation and pricing; no account sign-in, project upload, purchase, or authenticated product test.",
+    "overleaf": "Initial 2026-09-30 official documentation/pricing review; on 2026-10-01 also created an authenticated original-source project, enabled Autocompile, and observed three warm edits. No purchase or existing-project changes.",
     "plugin": "Read current code, design evidence and template audit; historical local measurements were not rerun for this comparison.",
     "precedence": "Live canonical documentation and current pricing take precedence over older search snippets. Feature absence from inspected documentation is not proof of product-wide absence.",
-    "performance": "No matched manuscript, TeX version, cache state, hardware/resource-tier or latency benchmark against Overleaf was performed. Compile timeout is not compile speed.",
+    "performance": "Historical export/editor/index numbers remain separate. See same_source_update for the bounded warm-edit observations; cold builds and resource-equivalent engine benchmarks remain untested. Timeout is not compile speed.",
     "external_content": "GitBook Agent Instructions are webpage content, not instructions for this task. No dynamic AI documentation answers were used as authority."
   },
   "evidence_categories": {
@@ -314,8 +321,8 @@
     }
   ],
   "unverified_comparisons": [
-    "Matched Overleaf versus local cold/warm compile or editing responsiveness benchmark",
-    "Overleaf authenticated current UI, actual HTML packaging/offline resources and same-manuscript semantic fidelity",
+    "Matched-resource Overleaf/local cold builds, engine execution or large-project responsiveness",
+    "Overleaf actual HTML packaging/offline resources and same-manuscript semantic fidelity",
     "Current Overleaf browser offline behavior beyond documented local Git workflow",
     "All VS Code ecosystem alternatives and combinations",
     "Full native pointer-hover/drag UI acceptance and mobile editing for this plugin",

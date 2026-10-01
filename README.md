@@ -11,28 +11,97 @@
 
 <p align="center"><b>English</b> | <a href="./README_zh-CN.md">简体中文</a></p>
 
-## Highlights
+## Edit, see the PDF, jump back
 
-![Source editing and a locally compiled PDF](./docs/assets/writing-preview.png)
+Change a formula and watch the native PDF update. Then move from your cursor to the PDF, or double-click the PDF to return to the source—even across chapter files.
 
-Work with the original `.tex` files. Read supported formulas and theorem blocks in place, reveal their source while editing, and check the result against a PDF produced by your installed TeX distribution.
+![Real same-source automatic compilation in LaTeX Live and Overleaf](./docs/assets/showcase/same-source-overleaf.gif)
 
-Follow a theorem reference without leaving the paragraph: open a proof-reference graph, expand a node's statement and proof, then jump to its source. Share a self-contained HTML reading edition when a PDF is not the format your reader needs.
+Three warm edits of the same one-page document: **LaTeX Live 0.1.1 ≈ 0.87 s** median to the new PDF; **Overleaf Cloud Free ≈ 3.7–4.1 s** observed median interval. Both use pdfLaTeX / TeX Live 2026. The local run includes the default 400 ms delay and uses the preamble cache. These are this machine/account's measured editing workflows; [source, all samples and recording method](./docs/demo/same-source-speed.en.md) are included.
 
-## Features
+![Actual source-to-PDF and PDF-to-source navigation](./docs/assets/showcase/bidirectional-synctex.gif)
 
-| Feature | What it does |
-| --- | --- |
-| Source and live editing | Render supported math, headings, lists, theorem blocks, images and reference chips; keep editable source available. |
-| Native PDF preview | Compile with your installed pdfLaTeX, XeLaTeX or LuaLaTeX; use latexmk for bibliography and complete builds. |
-| Bidirectional SyncTeX | Locate the cursor in the PDF and double-click the PDF to return to source, including multi-file projects. |
-| Language assistance | Use a separately installed texlab for completion, snippets, diagnostics and hover information. |
-| Formula previews | Render project macros on hover, with optional cursor previews and supported TeX/PDF fallbacks. |
-| Proof-reference graph | Explore literal `\ref` calls in the current project's proofs; expand statements/proofs and open source locations. |
-| HTML export | Export headings, math, theorem blocks, references, bibliography, embedded resources and supported graphics to a standalone reading page, with a report. |
-| Optional YOLO completion | Use real ghost-text suggestions from a separately installed YOLO plugin. Tab accepts; Enter never accepts AI text. |
+## Read and edit your template
 
-The proof graph describes explicit source references, not machine-verified logical dependencies. Unknown environments and unsupported macros retain their source or use a supported fallback.
+Keep the original `.tex` project and its class. Read formulas, numbered theorem blocks and references in place; touch a formula to edit its source, then continue reading. The PDF keeps the template's native layout.
+
+![Actual formula editing and mode switches in ElegantBook](./docs/assets/showcase/elegantbook-live-editing.gif)
+
+ElegantBook is one example. The same editing flow is recorded with **AMS** and **IEEE** paper classes; the gallery also shows **PLOS** and **REVTeX**. Other tested templates include Springer Nature, AASTeX, LNCS and ACM. Unsupported constructs keep their source or use a supported TeX/PDF fallback. See [the tested compatibility scope](./docs/template-compatibility.md).
+
+<details>
+<summary>Watch AMS / IEEE editing and PLOS / REVTeX live reading</summary>
+
+![Edit a formula under AMS and IEEE templates](./docs/assets/showcase/template-editing-gallery.gif)
+
+![Biology and physics journal templates in live reading mode](./docs/assets/showcase/paper-template-coverage.gif)
+
+The AMS / IEEE clips contain actual edits. PLOS / REVTeX show prepared complete builds in live reading mode; they are template examples, not cold-build benchmarks.
+
+</details>
+
+## Hover a reference, follow a proof
+
+Hover a theorem reference to open its proof-reference graph in a small window. Click a node to expand its statement and proof, follow another reference, or open the exact source location.
+
+![Hover a reference, expand a theorem and proof, then open source](./docs/assets/showcase/ref-proof-graph.gif)
+
+The graph comes from literal `\ref` calls in proofs within the current LaTeX project. It describes explicit proof references; it does not certify logical dependencies.
+
+## More of the writing workflow
+
+<details>
+<summary>Formula previews, snippets, YOLO, TeX figures, diagnostics and HTML export</summary>
+
+### Preview the formula you are typing
+
+Project macros and equation numbers appear in hover/cursor previews. This immediate math rendering is separate from generating the complete PDF.
+
+![Formula preview follows the cursor](./docs/assets/showcase/formula-cursor-preview.gif)
+
+### Write commands and environments with fewer keystrokes
+
+texlab supplies completion and snippets. Tab moves through fields; Enter continues environments and lists. The shared key handling keeps completion, snippets and optional ghost text working together.
+
+![Command completion, snippet fields and environment continuation](./docs/assets/showcase/smart-writing.gif)
+
+### Add your preferred AI completion
+
+With the separately installed [YOLO](https://github.com/Lapis0x0/obsidian-yolo) plugin, use real ghost-text suggestions in the LaTeX editor. Tab accepts a suggestion; Enter remains a writing key. Undo restores the source. This clip starts after generation and makes no model-speed claim.
+
+![A real YOLO suggestion accepted with Tab and undone](./docs/assets/showcase/yolo-writing.gif)
+
+### Read TeX graphics in the editor
+
+Supported TikZ and table blocks can display a crop of the actual compiled PDF. Keep the real TeX drawing beside the surrounding mathematics.
+
+![Actual TeX figure crop in the editor](./docs/assets/showcase/native-tex-figures.gif)
+
+### Correct an error and continue
+
+Real TeX diagnostics reach the source editor. The PDF remains available while you fix the source; the build dock keeps controls and diagnostics above its scrolling viewport.
+
+![Real undefined-command diagnostic and recovery](./docs/assets/showcase/diagnostics-recovery.gif)
+
+### Share a portable reading edition
+
+Export a self-contained HTML page with math, theorem blocks, references, bibliography, images and supported SVG graphics. Follow its references and table of contents without Obsidian; inspect the export report for unsupported content.
+
+![Actual exported HTML with SVG, code, reference links and navigation](./docs/assets/showcase/html-reading-edition.gif)
+
+### Watch the compilation itself
+
+![One actual edit and native PDF update at normal speed](./docs/assets/showcase/live-compilation.gif)
+
+</details>
+
+All GIFs are excerpts of real applications at normal speed. Some focus on fixed detail crops; template montages contain explicitly separated takes. Chinese-captioned versions are in the [Chinese README](./README_zh-CN.md). See [recording provenance](./docs/demo/showcase-provenance.json).
+
+## How it compares with Overleaf
+
+The advantages shown here are the connected reading and writing workflow: template-aware in-place editing, project-aware math previews, a deterministic proof-reference window, composable editor tools, and a portable mathematical reading edition.
+
+Overleaf also offers [automatic compilation](https://docs.overleaf.com/getting-started/recompiling-your-project), [bidirectional SyncTeX](https://docs.overleaf.com/navigating-in-the-editor/working-with-the-pdf-viewer/moving-between-the-editor-and-pdf), [AI tools](https://docs.overleaf.com/integrations-and-add-ons/ai-features) and [HTML conversion](https://docs.overleaf.com/managing-projects-and-files/importing-and-exporting-files). Its integrated collaboration, comments and review workflow matter for coauthored papers. Read the [full comparison](./docs/demo/overleaf-comparison.en.md), including the measured same-source example and the capabilities we have not compared experimentally.
 
 ## Quick start
 
@@ -95,5 +164,7 @@ Contributions are welcome. For large changes, open an issue first to discuss the
 ## Acknowledgments and license
 
 Built around Obsidian, CodeMirror, texlab, MathJax, pdf.js and the TeX ecosystem. Optional AI completion is supplied by [YOLO](https://github.com/Lapis0x0/obsidian-yolo).
+
+Math-note excerpts were adapted with the author's permission from [Onion20040508/notes](https://github.com/Onion20040508/notes). The source attribution and original terms are retained; the comparison fixture and new short template examples are original demonstration material.
 
 The project's own software and authored documentation use [MIT](./LICENSE): commercial use, modification and closed-source distribution are permitted with the copyright and permission notices retained. Third-party software, fonts and referenced materials retain their original licenses; see [third-party notices](./THIRD_PARTY_NOTICES.md).

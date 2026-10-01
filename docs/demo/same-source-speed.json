@@ -1,0 +1,92 @@
+{
+  "schema": "latex-live-same-source-observations-v1",
+  "recorded": "2026-10-01",
+  "source": "fixtures/speed-article.tex",
+  "source_sha256": "bc53d908d2a0545bac505e85fc103b1912e9be80271f54fb9145b9e204766ce8",
+  "edited_source_sha256": "bfdc335b9265c7293998aa6877ba32df83fb4b826d3ecfb58fca6a3a630c6498",
+  "source_bytes": 1082,
+  "edit": "Change only the model exponent from 2 to 3",
+  "pages": 1,
+  "engine": "pdfLaTeX",
+  "tex_live_year": 2026,
+  "local": {
+    "plugin": "LaTeX Live 0.1.1",
+    "release_tag": "0.1.1",
+    "chip": "Apple M5",
+    "memory": "32 GB",
+    "preamble_cache": true,
+    "debounce_ms": 400,
+    "tex_version": "pdfTeX 3.141592653-2.6-1.40.29 (TeX Live 2026)",
+    "trials": [
+      {
+        "trial": 1,
+        "edit_to_pdf_observed_ms": 768,
+        "compile_ms": 274,
+        "pdf_written": true,
+        "errors": 0,
+        "source_before_sha256": "bc53d908d2a0545bac505e85fc103b1912e9be80271f54fb9145b9e204766ce8",
+        "source_after_sha256": "bfdc335b9265c7293998aa6877ba32df83fb4b826d3ecfb58fca6a3a630c6498"
+      },
+      {
+        "trial": 2,
+        "edit_to_pdf_observed_ms": 893,
+        "compile_ms": 394,
+        "pdf_written": true,
+        "errors": 0,
+        "source_before_sha256": "bc53d908d2a0545bac505e85fc103b1912e9be80271f54fb9145b9e204766ce8",
+        "source_after_sha256": "bfdc335b9265c7293998aa6877ba32df83fb4b826d3ecfb58fca6a3a630c6498"
+      },
+      {
+        "trial": 3,
+        "edit_to_pdf_observed_ms": 874,
+        "compile_ms": 370,
+        "pdf_written": true,
+        "errors": 0,
+        "source_before_sha256": "bc53d908d2a0545bac505e85fc103b1912e9be80271f54fb9145b9e204766ce8",
+        "source_after_sha256": "bfdc335b9265c7293998aa6877ba32df83fb4b826d3ecfb58fca6a3a630c6498"
+      }
+    ],
+    "median_edit_to_pdf_ms": 874,
+    "median_compile_ms": 370
+  },
+  "overleaf": {
+    "product": "Overleaf Cloud",
+    "plan": "Free",
+    "compiler_settings_observed": true,
+    "autocompile": true,
+    "compile_mode": "Normal",
+    "warm_auxiliary_files": true,
+    "trials": [
+      {
+        "trial": 1,
+        "edit_to_pdf_observed_interval_ms": [
+          3841,
+          4693
+        ]
+      },
+      {
+        "trial": 2,
+        "edit_to_pdf_observed_interval_ms": [
+          3419,
+          3776
+        ]
+      },
+      {
+        "trial": 3,
+        "edit_to_pdf_observed_interval_ms": [
+          3665,
+          4086
+        ]
+      }
+    ],
+    "median_observed_interval_ms": [
+      3665,
+      4086
+    ]
+  },
+  "measurement": {
+    "local": "Committed editor text and painted PDF canvas generation observed at nominal 10 ms intervals; new PDF text checked.",
+    "overleaf": "Native UI find/replace action interval and read-only visible PDF text checks; recording frames verify the new exponent. Trials 2/3 use nominal 60 ms concurrent polling; trial 1 is coarser.",
+    "scope": "End-to-end warm editing workflows on this machine and this cloud account. Local and cloud hardware, caches and precise observation endpoints differ. Not an engine benchmark or universal speed ranking."
+  }
+}

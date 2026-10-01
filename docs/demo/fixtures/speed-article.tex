@@ -1,0 +1,32 @@
+% Original synthetic showcase source, authored for this demonstration.
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage[hidelinks]{hyperref}
+\newtheorem{lemma}{Lemma}
+\newtheorem{theorem}{Theorem}
+\title{LaTeX Live: an editable proof workspace}
+\author{Public demonstration}
+\date{}
+\begin{document}
+\maketitle
+\section{A small change, a new PDF}
+The model below is deliberately simple: change the power and inspect the result.
+\begin{equation}\label{eq:model}
+ F(x) = \frac{1}{x^2}
+\end{equation}
+\begin{lemma}[A non-negative square]\label{lem:square}
+For every real $x$, $x^2\geq0$.
+\end{lemma}
+\begin{proof}
+A real number and itself have the same sign.
+\end{proof}
+\begin{theorem}[A sum of squares]\label{thm:sum}
+For every $x,y\in\mathbb{R}$, $x^2+y^2\geq0$.
+\end{theorem}
+\begin{proof}
+Apply Lemma~\ref{lem:square} to both terms, then add the two inequalities.
+\end{proof}
+\section{Read, edit and follow references}
+Theorem~\ref{thm:sum} uses Lemma~\ref{lem:square} in its proof.
+The model is displayed in Equation~\eqref{eq:model}.
+\end{document}

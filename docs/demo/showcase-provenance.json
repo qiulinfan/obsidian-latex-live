@@ -1,0 +1,880 @@
+{
+  "schema": "latex-live-showcase-provenance-v1",
+  "recording_date": "2026-10-01",
+  "assets": [
+    {
+      "id": "ref-proof-graph",
+      "path": "../assets/showcase/ref-proof-graph.gif",
+      "sha256": "a9e1542b65e97719d299fc0f4399924be104fc6ae0a1643cba098eb8bd164786",
+      "width": 1280,
+      "height": 1118,
+      "duration_s": 15,
+      "nativeRangeSum_s": 15,
+      "bytes": 1496003,
+      "montage": false,
+      "sources": [
+        {
+          "source": "01-core-continuous-native.mp4",
+          "sourceSha256": "1918225d378207ce044432a949b487ff7140f23340cf373ac6dce2a1164e0410",
+          "start_s": 34,
+          "end_s": 49,
+          "requested_s": 15,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1200,
+            "height": 920
+          }
+        }
+      ],
+      "feature": "Literal proof references and rich theorem cards",
+      "provenance": "Native verified core events proof_graph/graph_explore; authorized Onion20040508 notes adaptation.",
+      "language": "en"
+    },
+    {
+      "id": "bidirectional-synctex",
+      "path": "../assets/showcase/bidirectional-synctex.gif",
+      "sha256": "f473a8e4f02cbe6efec13829a73235f7f17998261ab3ec7a0997ed7b6e240f8b",
+      "width": 1280,
+      "height": 862,
+      "duration_s": 21.16,
+      "nativeRangeSum_s": 21.13,
+      "bytes": 817785,
+      "montage": false,
+      "sources": [
+        {
+          "source": "07-synctex-reverse-native.mp4",
+          "sourceSha256": "5380637356634642758837745d11bdaeb5bd7de3e7c3b1fbf178e21d83018663",
+          "start_s": 0,
+          "end_s": 21.13,
+          "requested_s": 21.13
+        }
+      ],
+      "feature": "Actual native forward and inverse navigation",
+      "provenance": "Native inverse line18/head959 matched the same PDF point, then forward highlight verified.",
+      "language": "en"
+    },
+    {
+      "id": "elegantbook-live-editing",
+      "path": "../assets/showcase/elegantbook-live-editing.gif",
+      "sha256": "f1dec529da32809a9a6bfa66c34925f1cc01977f678bfd7dbcf6cc85a3eb1d3b",
+      "width": 1280,
+      "height": 652,
+      "duration_s": 26.5,
+      "nativeRangeSum_s": 26.5,
+      "bytes": 1174644,
+      "montage": true,
+      "sources": [
+        {
+          "source": "elegantbook-interactive.mp4",
+          "sourceSha256": "5f174a847fb40c1b6a27e69e30752cc0e5093bfb5a868fef0eaa37ec37c038cd",
+          "start_s": 5,
+          "end_s": 22,
+          "requested_s": 17,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        },
+        {
+          "source": "elegantbook-interactive.mp4",
+          "sourceSha256": "5f174a847fb40c1b6a27e69e30752cc0e5093bfb5a868fef0eaa37ec37c038cd",
+          "start_s": 24,
+          "end_s": 33.5,
+          "requested_s": 9.5,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "ElegantBook live/source reveal",
+      "provenance": "Original synthetic ElegantBook source; actual native paste and PDF canvas swap verified; editing latency 1.88 s.",
+      "language": "en"
+    },
+    {
+      "id": "smart-writing",
+      "path": "../assets/showcase/smart-writing.gif",
+      "sha256": "450c56b90a6af893a63af591bcf1dca99d0bee9899cc09d514303a2e25af94e1",
+      "width": 1280,
+      "height": 1140,
+      "duration_s": 21.91,
+      "nativeRangeSum_s": 21.900000000000006,
+      "bytes": 745030,
+      "montage": false,
+      "sources": [
+        {
+          "source": "01-core-continuous-native.mp4",
+          "sourceSha256": "1918225d378207ce044432a949b487ff7140f23340cf373ac6dce2a1164e0410",
+          "start_s": 49.5,
+          "end_s": 71.4,
+          "requested_s": 21.900000000000006,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1120,
+            "height": 870
+          }
+        }
+      ],
+      "feature": "Completion/snippets/environment Enter and genuine compiler result",
+      "provenance": "Native snippets/latex_enter/edit_compile events, presenter-authored workbench.",
+      "language": "en"
+    },
+    {
+      "id": "formula-cursor-preview",
+      "path": "../assets/showcase/formula-cursor-preview.gif",
+      "sha256": "8c5e061413a0c098aa168d6975d4da48c35613fcc30d5dcf7137d6d0541444b0",
+      "width": 1280,
+      "height": 1140,
+      "duration_s": 10.83,
+      "nativeRangeSum_s": 10.799999999999997,
+      "bytes": 419669,
+      "montage": false,
+      "sources": [
+        {
+          "source": "01-core-continuous-native.mp4",
+          "sourceSha256": "1918225d378207ce044432a949b487ff7140f23340cf373ac6dce2a1164e0410",
+          "start_s": 71,
+          "end_s": 81.8,
+          "requested_s": 10.799999999999997,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1120,
+            "height": 870
+          }
+        }
+      ],
+      "feature": "Actual focused cursor preview",
+      "provenance": "Native cursor_preview event verified editor/document focus and rendered math.",
+      "language": "en"
+    },
+    {
+      "id": "native-tex-figures",
+      "path": "../assets/showcase/native-tex-figures.gif",
+      "sha256": "99be9ad5d9955b16817cfda7d1f89b3a06453488b9238f7fac552a20d28f7b7e",
+      "width": 1280,
+      "height": 862,
+      "duration_s": 12,
+      "nativeRangeSum_s": 12,
+      "bytes": 1011503,
+      "montage": false,
+      "sources": [
+        {
+          "source": "01b-centered-tikz-crop-native.mp4",
+          "sourceSha256": "ea9ea2053bc810de6f3484907ba04a3b059c93861040c5701ba841b6acd5cc2a",
+          "start_s": 0,
+          "end_s": 12,
+          "requested_s": 12
+        }
+      ],
+      "feature": "Native PDF crop fallback for actual TikZ figure",
+      "provenance": "Centered TikZ native capture, authorized Onion20040508 notes adaptation.",
+      "language": "en"
+    },
+    {
+      "id": "live-compilation",
+      "path": "../assets/showcase/live-compilation.gif",
+      "sha256": "8793a3f0ff62dd557c3172963b72acab02033a3f0ef1c9d60e2b06713bef6e09",
+      "width": 1280,
+      "height": 652,
+      "duration_s": 6.66,
+      "nativeRangeSum_s": 6.699999999999999,
+      "bytes": 277534,
+      "montage": false,
+      "sources": [
+        {
+          "source": "native-release-1.mp4",
+          "sourceSha256": "ff7ffcaf1223c9dff03863ff506d4a9e9c5c5662847d99951f2359ffffd9bfd9",
+          "start_s": 1.34,
+          "end_s": 8.04,
+          "requested_s": 6.699999999999999,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "Real edit-to-visible-PDF measurement",
+      "provenance": "LaTeX Live 0.1.1; original one-page source; warm pdfLaTeX with preamble cache; default 400 ms delay; actual native input.",
+      "language": "en"
+    },
+    {
+      "id": "same-source-overleaf",
+      "path": "../assets/showcase/same-source-overleaf.gif",
+      "sha256": "edd68657104c433ec5a37f7b13ef436c8a44413de71ba31d999c8e436be6d376",
+      "width": 1280,
+      "height": 796,
+      "duration_s": 6.66,
+      "nativeRangeSum_s": 6.7,
+      "bytes": 484027,
+      "montage": false,
+      "sources": [
+        {
+          "source": "same-source-comparison-en.mp4",
+          "sourceSha256": "dc9a9b0571277c2b6c30f9611f6799ee6c0693968509f9e057eef50dd9e485fd",
+          "start_s": 0,
+          "end_s": 6.7,
+          "requested_s": 6.7
+        }
+      ],
+      "feature": "Same-source observed compilation comparison",
+      "provenance": "Real native-release-1 and Overleaf-warm-2; same original source; PDF text/canvas paint checked; see same-source-speed.md.",
+      "language": "en"
+    },
+    {
+      "id": "template-editing-gallery",
+      "path": "../assets/showcase/template-editing-gallery.gif",
+      "sha256": "df70a1e592e4e204d0859616731bf3d2b9c436144e5d9a3f728f256197528e22",
+      "width": 1280,
+      "height": 652,
+      "duration_s": 23,
+      "nativeRangeSum_s": 23,
+      "bytes": 1403245,
+      "montage": true,
+      "sources": [
+        {
+          "source": "amsart-interactive.mp4",
+          "sourceSha256": "821a0bedb61a5cf0e7f91494aaf79a74076aed2c631a5230d193f0f526ad4e79",
+          "start_s": 3,
+          "end_s": 14,
+          "requested_s": 11,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        },
+        {
+          "source": "ieee-interactive.mp4",
+          "sourceSha256": "58a497c99c48c643aa190d2dd968e62b60c18c3765ac4b7cbef4e0ea8f28ad1f",
+          "start_s": 3,
+          "end_s": 15,
+          "requested_s": 12,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "Actual interactive editing under paper templates",
+      "provenance": "Original synthetic sources; native pasted edits and PDF swaps verified, zero errors in both.",
+      "language": "en"
+    },
+    {
+      "id": "diagnostics-recovery",
+      "path": "../assets/showcase/diagnostics-recovery.gif",
+      "sha256": "61bea4c70372282908f824502d13fafa8de648f505322fe588013d6d8e4375e5",
+      "width": 1280,
+      "height": 862,
+      "duration_s": 17.75,
+      "nativeRangeSum_s": 17.700000000000003,
+      "bytes": 1013683,
+      "montage": false,
+      "sources": [
+        {
+          "source": "01-core-continuous-native.mp4",
+          "sourceSha256": "1918225d378207ce044432a949b487ff7140f23340cf373ac6dce2a1164e0410",
+          "start_s": 81.8,
+          "end_s": 99.5,
+          "requested_s": 17.700000000000003
+        }
+      ],
+      "feature": "Real TeX error and recovery",
+      "provenance": "Verified core diagnostics event followed by native undo and successful compile; original writing workbench.",
+      "language": "en"
+    },
+    {
+      "id": "ref-proof-graph-zh",
+      "path": "../assets/showcase/ref-proof-graph-zh.gif",
+      "sha256": "18bdcf5b3968ac62403174138feccc277a53b29306485ee068ced890bbce4391",
+      "width": 1280,
+      "height": 1118,
+      "duration_s": 15,
+      "nativeRangeSum_s": 15,
+      "bytes": 1481625,
+      "montage": false,
+      "sources": [
+        {
+          "source": "01-core-continuous-native.mp4",
+          "sourceSha256": "1918225d378207ce044432a949b487ff7140f23340cf373ac6dce2a1164e0410",
+          "start_s": 34,
+          "end_s": 49,
+          "requested_s": 15,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1200,
+            "height": 920
+          }
+        }
+      ],
+      "feature": "Literal proof references and rich theorem cards",
+      "provenance": "Native verified core events proof_graph/graph_explore; authorized Onion20040508 notes adaptation.",
+      "language": "zh"
+    },
+    {
+      "id": "bidirectional-synctex-zh",
+      "path": "../assets/showcase/bidirectional-synctex-zh.gif",
+      "sha256": "556dc463dbb2e477758ce241590ab23106fcda7d4036d7885e1cc6b219892b6a",
+      "width": 1280,
+      "height": 862,
+      "duration_s": 21.16,
+      "nativeRangeSum_s": 21.13,
+      "bytes": 825793,
+      "montage": false,
+      "sources": [
+        {
+          "source": "07-synctex-reverse-native.mp4",
+          "sourceSha256": "5380637356634642758837745d11bdaeb5bd7de3e7c3b1fbf178e21d83018663",
+          "start_s": 0,
+          "end_s": 21.13,
+          "requested_s": 21.13
+        }
+      ],
+      "feature": "Actual native forward and inverse navigation",
+      "provenance": "Native inverse line18/head959 matched the same PDF point, then forward highlight verified.",
+      "language": "zh"
+    },
+    {
+      "id": "elegantbook-live-editing-zh",
+      "path": "../assets/showcase/elegantbook-live-editing-zh.gif",
+      "sha256": "a1ea7ef14a2f831b7283025a72f85d40115304df791fbf3f48c6fd7c36c09405",
+      "width": 1280,
+      "height": 652,
+      "duration_s": 26.5,
+      "nativeRangeSum_s": 26.5,
+      "bytes": 1131607,
+      "montage": true,
+      "sources": [
+        {
+          "source": "elegantbook-interactive.mp4",
+          "sourceSha256": "5f174a847fb40c1b6a27e69e30752cc0e5093bfb5a868fef0eaa37ec37c038cd",
+          "start_s": 5,
+          "end_s": 22,
+          "requested_s": 17,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        },
+        {
+          "source": "elegantbook-interactive.mp4",
+          "sourceSha256": "5f174a847fb40c1b6a27e69e30752cc0e5093bfb5a868fef0eaa37ec37c038cd",
+          "start_s": 24,
+          "end_s": 33.5,
+          "requested_s": 9.5,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "ElegantBook live/source reveal",
+      "provenance": "Original synthetic ElegantBook source; actual native paste and PDF canvas swap verified; editing latency 1.88 s.",
+      "language": "zh"
+    },
+    {
+      "id": "smart-writing-zh",
+      "path": "../assets/showcase/smart-writing-zh.gif",
+      "sha256": "f58b53cbb652b9ea3902ade4c510d8de9762ee53ff510b18903695f182a0ae6e",
+      "width": 1280,
+      "height": 1140,
+      "duration_s": 21.91,
+      "nativeRangeSum_s": 21.900000000000006,
+      "bytes": 736376,
+      "montage": false,
+      "sources": [
+        {
+          "source": "01-core-continuous-native.mp4",
+          "sourceSha256": "1918225d378207ce044432a949b487ff7140f23340cf373ac6dce2a1164e0410",
+          "start_s": 49.5,
+          "end_s": 71.4,
+          "requested_s": 21.900000000000006,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1120,
+            "height": 870
+          }
+        }
+      ],
+      "feature": "Completion/snippets/environment Enter and genuine compiler result",
+      "provenance": "Native snippets/latex_enter/edit_compile events, presenter-authored workbench.",
+      "language": "zh"
+    },
+    {
+      "id": "formula-cursor-preview-zh",
+      "path": "../assets/showcase/formula-cursor-preview-zh.gif",
+      "sha256": "9347411a3e70d0ebb3e2cd099e95614ffca3ac2ae006f64292f9ac878881e35a",
+      "width": 1280,
+      "height": 1140,
+      "duration_s": 10.83,
+      "nativeRangeSum_s": 10.799999999999997,
+      "bytes": 456108,
+      "montage": false,
+      "sources": [
+        {
+          "source": "01-core-continuous-native.mp4",
+          "sourceSha256": "1918225d378207ce044432a949b487ff7140f23340cf373ac6dce2a1164e0410",
+          "start_s": 71,
+          "end_s": 81.8,
+          "requested_s": 10.799999999999997,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1120,
+            "height": 870
+          }
+        }
+      ],
+      "feature": "Actual focused cursor preview",
+      "provenance": "Native cursor_preview event verified editor/document focus and rendered math.",
+      "language": "zh"
+    },
+    {
+      "id": "native-tex-figures-zh",
+      "path": "../assets/showcase/native-tex-figures-zh.gif",
+      "sha256": "9bcb80d915cfc49d785d6ec6313e208c46e1d60a00a5606db29b40210115492a",
+      "width": 1280,
+      "height": 862,
+      "duration_s": 12,
+      "nativeRangeSum_s": 12,
+      "bytes": 998483,
+      "montage": false,
+      "sources": [
+        {
+          "source": "01b-centered-tikz-crop-native.mp4",
+          "sourceSha256": "ea9ea2053bc810de6f3484907ba04a3b059c93861040c5701ba841b6acd5cc2a",
+          "start_s": 0,
+          "end_s": 12,
+          "requested_s": 12
+        }
+      ],
+      "feature": "Native PDF crop fallback for actual TikZ figure",
+      "provenance": "Centered TikZ native capture, authorized Onion20040508 notes adaptation.",
+      "language": "zh"
+    },
+    {
+      "id": "live-compilation-zh",
+      "path": "../assets/showcase/live-compilation-zh.gif",
+      "sha256": "f1bda90e1e1414f986cdd531c9eefc6e00cd3d79cb6f67fdae38271434acfa6b",
+      "width": 1280,
+      "height": 652,
+      "duration_s": 6.66,
+      "nativeRangeSum_s": 6.699999999999999,
+      "bytes": 268732,
+      "montage": false,
+      "sources": [
+        {
+          "source": "native-release-1.mp4",
+          "sourceSha256": "ff7ffcaf1223c9dff03863ff506d4a9e9c5c5662847d99951f2359ffffd9bfd9",
+          "start_s": 1.34,
+          "end_s": 8.04,
+          "requested_s": 6.699999999999999,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "Real edit-to-visible-PDF measurement",
+      "provenance": "LaTeX Live 0.1.1; original one-page source; warm pdfLaTeX with preamble cache; default 400 ms delay; actual native input.",
+      "language": "zh"
+    },
+    {
+      "id": "same-source-overleaf-zh",
+      "path": "../assets/showcase/same-source-overleaf-zh.gif",
+      "sha256": "bf63b6ef2e42c4aefea22fbeae302907c69b4be6e86997e2357dd004eb0a8261",
+      "width": 1280,
+      "height": 796,
+      "duration_s": 6.66,
+      "nativeRangeSum_s": 6.7,
+      "bytes": 476504,
+      "montage": false,
+      "sources": [
+        {
+          "source": "same-source-comparison-zh.mp4",
+          "sourceSha256": "079a9814d4362e9c2c59602c7b2d1f254e12c1685b58b45b928fd8560dcb0853",
+          "start_s": 0,
+          "end_s": 6.7,
+          "requested_s": 6.7
+        }
+      ],
+      "feature": "Same-source observed compilation comparison",
+      "provenance": "Real native-release-1 and Overleaf-warm-2; same original source; PDF text/canvas paint checked; see same-source-speed.md.",
+      "language": "zh"
+    },
+    {
+      "id": "template-editing-gallery-zh",
+      "path": "../assets/showcase/template-editing-gallery-zh.gif",
+      "sha256": "4e577b651392f355ad420ec7e2839565cbfb0081fd029f6a10432dd1468716a5",
+      "width": 1280,
+      "height": 652,
+      "duration_s": 23,
+      "nativeRangeSum_s": 23,
+      "bytes": 1396207,
+      "montage": true,
+      "sources": [
+        {
+          "source": "amsart-interactive.mp4",
+          "sourceSha256": "821a0bedb61a5cf0e7f91494aaf79a74076aed2c631a5230d193f0f526ad4e79",
+          "start_s": 3,
+          "end_s": 14,
+          "requested_s": 11,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        },
+        {
+          "source": "ieee-interactive.mp4",
+          "sourceSha256": "58a497c99c48c643aa190d2dd968e62b60c18c3765ac4b7cbef4e0ea8f28ad1f",
+          "start_s": 3,
+          "end_s": 15,
+          "requested_s": 12,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "Actual interactive editing under paper templates",
+      "provenance": "Original synthetic sources; native pasted edits and PDF swaps verified, zero errors in both.",
+      "language": "zh"
+    },
+    {
+      "id": "diagnostics-recovery-zh",
+      "path": "../assets/showcase/diagnostics-recovery-zh.gif",
+      "sha256": "ebe2b5aa43c9297c351fa87650547d942a5bd81a9c804dc9c38d6214dbc5fc30",
+      "width": 1280,
+      "height": 862,
+      "duration_s": 17.75,
+      "nativeRangeSum_s": 17.700000000000003,
+      "bytes": 1008005,
+      "montage": false,
+      "sources": [
+        {
+          "source": "01-core-continuous-native.mp4",
+          "sourceSha256": "1918225d378207ce044432a949b487ff7140f23340cf373ac6dce2a1164e0410",
+          "start_s": 81.8,
+          "end_s": 99.5,
+          "requested_s": 17.700000000000003
+        }
+      ],
+      "feature": "Real TeX error and recovery",
+      "provenance": "Verified core diagnostics event followed by native undo and successful compile; original writing workbench.",
+      "language": "zh"
+    },
+    {
+      "id": "yolo-writing",
+      "path": "../assets/showcase/yolo-writing.gif",
+      "sha256": "e80884d8c7a56eac935c3c2edfc784cd7481bce8d580ee2cfdc3221155c10716",
+      "width": 1280,
+      "height": 1118,
+      "duration_s": 26.5,
+      "nativeRangeSum_s": 26.5,
+      "bytes": 2458091,
+      "montage": false,
+      "sources": [
+        {
+          "source": "06f-yolo-ghost-native.mp4",
+          "sourceSha256": "898b18c198e06c3ba752fcc2415842b59b7419381860486ccb1180c659b35033",
+          "start_s": 129,
+          "end_s": 155.5,
+          "requested_s": 26.5,
+          "crop": {
+            "x": 0,
+            "y": 300,
+            "width": 1120,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "Actual external YOLO suggestion acceptance and undo",
+      "provenance": "Trusted native Tab at 134.131 s; exact source transaction and native undo at 153.158 s verified. Generation precedes this excerpt; not a model-speed claim.",
+      "language": "en"
+    },
+    {
+      "id": "html-reading-edition",
+      "path": "../assets/showcase/html-reading-edition.gif",
+      "sha256": "b2c8a0ccb69cba42b3b52c65581e2fc2e4492b859a04a8c2b881e3c01ad85a9e",
+      "width": 1280,
+      "height": 1532,
+      "duration_s": 27.58,
+      "nativeRangeSum_s": 27.36,
+      "bytes": 2458964,
+      "montage": false,
+      "sources": [
+        {
+          "source": "html-reading-clean.mp4",
+          "sourceSha256": "6d4b742aed54e3e7ed7a9c5ad476b6e007122c375106a28ea903961a05b9109c",
+          "start_s": 0,
+          "end_s": 27.36,
+          "requested_s": 27.36,
+          "crop": {
+            "x": 420,
+            "y": 0,
+            "width": 1080,
+            "height": 1164
+          }
+        }
+      ],
+      "feature": "Native generated HTML reading and reference navigation",
+      "provenance": "Real standalone HTML in the browser, without translation overlays; timestamped CDP frames, actual TOC and two theorem-reference navigations; CSS code-token markup checked.",
+      "language": "en"
+    },
+    {
+      "id": "paper-template-coverage",
+      "path": "../assets/showcase/paper-template-coverage.gif",
+      "sha256": "c1434d6403513a941f94734b3320293c05d0c703b7b83597e373c730810e3c67",
+      "width": 1280,
+      "height": 862,
+      "duration_s": 14,
+      "nativeRangeSum_s": 14,
+      "bytes": 772013,
+      "montage": true,
+      "sources": [
+        {
+          "source": "plos-complete-native.mp4",
+          "sourceSha256": "ac69dd20e1d141c7415554ae932e9c47aa9897267242c40d352a904b30a9198b",
+          "start_s": 2,
+          "end_s": 9,
+          "requested_s": 7
+        },
+        {
+          "source": "revtex-complete-native.mp4",
+          "sourceSha256": "9eab7110dec258166832361afb84b02e15f93801271f53b5e0be06f080b30fea",
+          "start_s": 2,
+          "end_s": 9,
+          "requested_s": 7
+        }
+      ],
+      "feature": "Biology and physics template examples",
+      "provenance": "LaTeX Live 0.1.1; actual complete latexmk builds, zero errors, full PDF text and resolved bibliography verified for PLOS-style and REVTeX fixtures.",
+      "language": "en"
+    },
+    {
+      "id": "yolo-writing-zh",
+      "path": "../assets/showcase/yolo-writing-zh.gif",
+      "sha256": "6ec89d065c4c2e7d597cdcd91361345876d708da0b59ba9d5da1836fec033a08",
+      "width": 1280,
+      "height": 1118,
+      "duration_s": 26.5,
+      "nativeRangeSum_s": 26.5,
+      "bytes": 2461171,
+      "montage": false,
+      "sources": [
+        {
+          "source": "06f-yolo-ghost-native.mp4",
+          "sourceSha256": "898b18c198e06c3ba752fcc2415842b59b7419381860486ccb1180c659b35033",
+          "start_s": 129,
+          "end_s": 155.5,
+          "requested_s": 26.5,
+          "crop": {
+            "x": 0,
+            "y": 300,
+            "width": 1120,
+            "height": 850
+          }
+        }
+      ],
+      "feature": "Actual external YOLO suggestion acceptance and undo",
+      "provenance": "Trusted native Tab at 134.131 s; exact source transaction and native undo at 153.158 s verified. Generation precedes this excerpt; not a model-speed claim.",
+      "language": "zh"
+    },
+    {
+      "id": "html-reading-edition-zh",
+      "path": "../assets/showcase/html-reading-edition-zh.gif",
+      "sha256": "755b9e4572f569d5a71cf6f59f13de46429aee82e0aee561ae4fb931ef4adda1",
+      "width": 1280,
+      "height": 1532,
+      "duration_s": 27.58,
+      "nativeRangeSum_s": 27.36,
+      "bytes": 2309147,
+      "montage": false,
+      "sources": [
+        {
+          "source": "html-reading-clean.mp4",
+          "sourceSha256": "6d4b742aed54e3e7ed7a9c5ad476b6e007122c375106a28ea903961a05b9109c",
+          "start_s": 0,
+          "end_s": 27.36,
+          "requested_s": 27.36,
+          "crop": {
+            "x": 420,
+            "y": 0,
+            "width": 1080,
+            "height": 1164
+          }
+        }
+      ],
+      "feature": "Native generated HTML reading and reference navigation",
+      "provenance": "Real standalone HTML in the browser, without translation overlays; timestamped CDP frames, actual TOC and two theorem-reference navigations; CSS code-token markup checked.",
+      "language": "zh"
+    },
+    {
+      "id": "paper-template-coverage-zh",
+      "path": "../assets/showcase/paper-template-coverage-zh.gif",
+      "sha256": "548a82589b410cb86d757979555ccf887b04012efa2f4c03b10edf8f79b3d089",
+      "width": 1280,
+      "height": 862,
+      "duration_s": 14,
+      "nativeRangeSum_s": 14,
+      "bytes": 771146,
+      "montage": true,
+      "sources": [
+        {
+          "source": "plos-complete-native.mp4",
+          "sourceSha256": "ac69dd20e1d141c7415554ae932e9c47aa9897267242c40d352a904b30a9198b",
+          "start_s": 2,
+          "end_s": 9,
+          "requested_s": 7
+        },
+        {
+          "source": "revtex-complete-native.mp4",
+          "sourceSha256": "9eab7110dec258166832361afb84b02e15f93801271f53b5e0be06f080b30fea",
+          "start_s": 2,
+          "end_s": 9,
+          "requested_s": 7
+        }
+      ],
+      "feature": "Biology and physics template examples",
+      "provenance": "LaTeX Live 0.1.1; actual complete latexmk builds, zero errors, full PDF text and resolved bibliography verified for PLOS-style and REVTeX fixtures.",
+      "language": "zh"
+    }
+  ],
+  "processing": "Verified temporal excerpts, optional fixed crops, caption rail and proportional resize. GIF frame sampling and palette conversion; no accelerated playback or reconstructed UI.",
+  "playbackSpeed": 1,
+  "gif_frame_sampling_fps": 12,
+  "comparison_method": "same-source-speed.en.md",
+  "comparison_composition": {
+    "source": "Real ScreenCaptureKit window video and timestamped CDP screencast",
+    "playbackSpeed": 1,
+    "duration_s": 6.7,
+    "native": {
+      "file": "native-release-1.mp4",
+      "start_s": 2.342655029296875,
+      "editToPdfMs": 768
+    },
+    "overleaf": {
+      "file": "overleaf-warm-2.mp4",
+      "start_s": 0.28745388984680176,
+      "editToPdfBoundsMs": [
+        3419,
+        3776
+      ]
+    },
+    "alignment": "Committed native edit observation and midpoint of the Overleaf UI action interval; timing precision is bounded by the observations, not simultaneous recording.",
+    "presentation": "Same-frame toolbar, source and PDF detail crops, stacked within each column. Added caption rails outside the application picture.",
+    "crops": {
+      "native": {
+        "header": [
+          985,
+          50,
+          935,
+          60
+        ],
+        "source": [
+          55,
+          278,
+          900,
+          220
+        ],
+        "pdf": [
+          1120,
+          455,
+          660,
+          286
+        ]
+      },
+      "overleaf": {
+        "header": [
+          940,
+          30,
+          645,
+          50
+        ],
+        "source": [
+          285,
+          135,
+          645,
+          235
+        ],
+        "pdf": [
+          1060,
+          315,
+          480,
+          255
+        ]
+      }
+    }
+  },
+  "software_versions": {
+    "speed_comparison": "Published LaTeX Live 0.1.1; installed release digests checked",
+    "earlier_feature_recordings": "Real demonstration builds and native captures from 2026-09-30 / 2026-10-01; existing event/QC receipts retained outside Git",
+    "completed_paper_gallery": "Published LaTeX Live 0.1.1; complete latexmk PDF with resolved citations and bibliography; zero errors in both examples"
+  },
+  "source_credits": [
+    {
+      "source": "https://github.com/Onion20040508/notes",
+      "snapshot": "248dc5590feeb41b52e2ef0977f9947d00712baf",
+      "permission": "Author permitted demonstration use through the repository owner",
+      "adaptations": "Selected notes, split chapters, ElegantBook wrapper, reference labels and reading guide; synthetic writing exercises separately authored",
+      "license": "Referenced material retains original attribution/terms; permission for this demonstration does not relicense the note collection as MIT-0"
+    },
+    {
+      "source": "fixtures/speed-article.tex",
+      "authorship": "Original public synthetic demonstration source",
+      "license": "MIT-0"
+    },
+    {
+      "source": "template examples",
+      "authorship": "Original short synthetic manuscripts; installed upstream classes and packages unchanged",
+      "license": "Original class/package licenses retained"
+    }
+  ],
+  "raw_artifacts": "Selected-window MP4s, timestamped browser JPEG frames, screenshots and detailed receipts are retained locally outside Git. No credentials, private settings or project identifiers are included here.",
+  "standalone_html_capture": {
+    "recording": "html-reading-clean.mp4",
+    "method": "Real CDP frames, browser link navigation and preserved frame timestamps; a single pixel of padding makes the encoded width even; no reconstructed UI.",
+    "export_sha256": "6b34e366a6ade965bca579002e8e7b541bd1e6bdbf7a589a1d193e1d416b405a",
+    "event_times_ms": [
+      {
+        "atMs": 5126,
+        "event": "code via TOC"
+      },
+      {
+        "atMs": 11117,
+        "event": "proof guide via TOC"
+      },
+      {
+        "atMs": 16137,
+        "event": "theorem reference navigation"
+      },
+      {
+        "atMs": 22159,
+        "event": "proof reference navigation"
+      }
+    ]
+  }
+}
