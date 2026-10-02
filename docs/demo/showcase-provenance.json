@@ -3,6 +3,338 @@
   "recording_date": "2026-10-01",
   "assets": [
     {
+      "id": "elegantbook-clear",
+      "path": "../assets/showcase/elegantbook-clear.gif",
+      "sha256": "d661fe4f8c21d3018830fd6245096d184d6e46b3fa74cb6c1c9e2f50e83d85e0",
+      "width": 1440,
+      "height": 941,
+      "fps": 20,
+      "captionHeight": 96,
+      "intermediateCodec": "FFV1 lossless RGB",
+      "duration_s": 18.5,
+      "nativeRangeSum_s": 18.5,
+      "bytes": 5913148,
+      "montage": true,
+      "sources": [
+        {
+          "source": "hero-current-layout-3.mp4",
+          "sourceSha256": "f1fea64092c858d38781223bdabf16e5207b9e918b07cf428aefb3626d1ce902",
+          "start_s": 0,
+          "end_s": 3,
+          "requested_s": 3
+        },
+        {
+          "source": "hero-current-layout-3.mp4",
+          "sourceSha256": "f1fea64092c858d38781223bdabf16e5207b9e918b07cf428aefb3626d1ce902",
+          "start_s": 24.2,
+          "end_s": 30.2,
+          "requested_s": 6
+        },
+        {
+          "source": "hero-current-layout-3.mp4",
+          "sourceSha256": "f1fea64092c858d38781223bdabf16e5207b9e918b07cf428aefb3626d1ce902",
+          "start_s": 75,
+          "end_s": 78,
+          "requested_s": 3
+        },
+        {
+          "source": "mode-switch-clear-1.mp4",
+          "sourceSha256": "700e47e63fbfbe3ae2e1b51889813e5b843ff1d3cc229f5d5d80942c8d85af92",
+          "start_s": 0,
+          "end_s": 6.5,
+          "requested_s": 6.5
+        }
+      ],
+      "feature": "ElegantBook live editing, formula source reveal and full mode switch",
+      "provenance": "Selected-window Retina recording in the user-approved layout: editor 45%, preview 55%, existing zoom and font preserved. Native exponent edit; actual TexView mode switches through the public application API. Independent takes, no accelerated playback. User-supplied Miku wallpaper retains its original rights.",
+      "language": "en",
+      "recording_date": "2026-10-01",
+      "retinaVideo": {
+        "path": "../assets/showcase/elegantbook-clear.mp4",
+        "sha256": "3a134c8e7282f7b6ccea9f60d4a6904e9d5329bb893a77c75fee5025a20bbcb3",
+        "width": 2880,
+        "height": 1882,
+        "fps": 30,
+        "duration_s": 18.566667,
+        "bytes": 2463294,
+        "nativeRangeSum_s": 18.5,
+        "encoding": "H.264 CRF16, yuv420p; native Retina UI pixels without resizing; caption rail at matching density"
+      },
+      "actionEvidence": "clear-showcase-evidence.json"
+    },
+    {
+      "id": "elegantbook-clear-zh",
+      "path": "../assets/showcase/elegantbook-clear-zh.gif",
+      "sha256": "bdefc8e23b452da0dfc850da2b0c07779ad4609a05e21f1673636add51ca90ab",
+      "width": 1440,
+      "height": 941,
+      "fps": 20,
+      "captionHeight": 96,
+      "intermediateCodec": "FFV1 lossless RGB",
+      "duration_s": 18.5,
+      "nativeRangeSum_s": 18.5,
+      "bytes": 5883031,
+      "montage": true,
+      "sources": [
+        {
+          "source": "hero-current-layout-3.mp4",
+          "sourceSha256": "f1fea64092c858d38781223bdabf16e5207b9e918b07cf428aefb3626d1ce902",
+          "start_s": 0,
+          "end_s": 3,
+          "requested_s": 3
+        },
+        {
+          "source": "hero-current-layout-3.mp4",
+          "sourceSha256": "f1fea64092c858d38781223bdabf16e5207b9e918b07cf428aefb3626d1ce902",
+          "start_s": 24.2,
+          "end_s": 30.2,
+          "requested_s": 6
+        },
+        {
+          "source": "hero-current-layout-3.mp4",
+          "sourceSha256": "f1fea64092c858d38781223bdabf16e5207b9e918b07cf428aefb3626d1ce902",
+          "start_s": 75,
+          "end_s": 78,
+          "requested_s": 3
+        },
+        {
+          "source": "mode-switch-clear-1.mp4",
+          "sourceSha256": "700e47e63fbfbe3ae2e1b51889813e5b843ff1d3cc229f5d5d80942c8d85af92",
+          "start_s": 0,
+          "end_s": 6.5,
+          "requested_s": 6.5
+        }
+      ],
+      "feature": "ElegantBook live editing, formula source reveal and full mode switch",
+      "provenance": "Selected-window Retina recording in the user-approved layout: editor 45%, preview 55%, existing zoom and font preserved. Native exponent edit; actual TexView mode switches through the public application API. Independent takes, no accelerated playback. User-supplied Miku wallpaper retains its original rights.",
+      "language": "zh",
+      "recording_date": "2026-10-01",
+      "retinaVideo": {
+        "path": "../assets/showcase/elegantbook-clear-zh.mp4",
+        "sha256": "e424db23f8b28279509b6a0733569ecdf5bd7e360cbbad6f857f56b430955bb0",
+        "width": 2880,
+        "height": 1882,
+        "fps": 30,
+        "duration_s": 18.566667,
+        "bytes": 2451904,
+        "nativeRangeSum_s": 18.5,
+        "encoding": "H.264 CRF16, yuv420p; native Retina UI pixels without resizing; caption rail at matching density"
+      },
+      "actionEvidence": "clear-showcase-evidence.json"
+    },
+    {
+      "id": "speed-navigation-clear",
+      "path": "../assets/showcase/speed-navigation-clear.gif",
+      "sha256": "0902d5c51a0366d56a3f72d676aae39f2a77fac1514af031591d6104f3bda8d6",
+      "width": 1440,
+      "height": 941,
+      "fps": 20,
+      "captionHeight": 96,
+      "intermediateCodec": "FFV1 lossless RGB",
+      "duration_s": 18.1,
+      "nativeRangeSum_s": 18,
+      "bytes": 3642833,
+      "montage": true,
+      "sources": [
+        {
+          "source": "speed-and-navigation-1.mp4",
+          "sourceSha256": "6a5fa814a45a9f11020d4a58b9654aa77e607a30441a54813a6d45a097716f1a",
+          "start_s": 44.5,
+          "end_s": 50.5,
+          "requested_s": 6
+        },
+        {
+          "source": "navigation-clear-2.mp4",
+          "sourceSha256": "4b69e14ba157948d85149a93326f2dc6d63da56c0767f4a82414442be5aeaaaa",
+          "start_s": 29,
+          "end_s": 34.5,
+          "requested_s": 5.5
+        },
+        {
+          "source": "navigation-clear-2.mp4",
+          "sourceSha256": "4b69e14ba157948d85149a93326f2dc6d63da56c0767f4a82414442be5aeaaaa",
+          "start_s": 12,
+          "end_s": 18.5,
+          "requested_s": 6.5
+        }
+      ],
+      "feature": "Actual automatic compile, source-to-PDF and native PDF-to-source SyncTeX",
+      "provenance": "Real native exponent 4→5 edit: source transaction to replacement PDF canvas 1022 ms, engine 522 ms, no errors; two-page ElegantBook, pdfLaTeX, warm preamble, default 400 ms delay. Source-to-PDF highlight verified through the actual preview API. Native trusted PDF double click returned to independently resolved line 22. Separate scene excerpts preserve all of the measured compile interval.",
+      "language": "en",
+      "recording_date": "2026-10-01",
+      "retinaVideo": {
+        "path": "../assets/showcase/speed-navigation-clear.mp4",
+        "sha256": "bfb9014b6adf89d84076d6bf9667c086a65b31680304e04464feea5943fbb906",
+        "width": 2880,
+        "height": 1882,
+        "fps": 30,
+        "duration_s": 18.1,
+        "bytes": 1455340,
+        "nativeRangeSum_s": 18,
+        "encoding": "H.264 CRF16, yuv420p; native Retina UI pixels without resizing; caption rail at matching density"
+      },
+      "actionEvidence": "clear-showcase-evidence.json"
+    },
+    {
+      "id": "speed-navigation-clear-zh",
+      "path": "../assets/showcase/speed-navigation-clear-zh.gif",
+      "sha256": "6572de8f40510ec72828ae9f35418504a3ceab0e8ba11fdf4324484f6a274b4e",
+      "width": 1440,
+      "height": 941,
+      "fps": 20,
+      "captionHeight": 96,
+      "intermediateCodec": "FFV1 lossless RGB",
+      "duration_s": 18.1,
+      "nativeRangeSum_s": 18,
+      "bytes": 3586421,
+      "montage": true,
+      "sources": [
+        {
+          "source": "speed-and-navigation-1.mp4",
+          "sourceSha256": "6a5fa814a45a9f11020d4a58b9654aa77e607a30441a54813a6d45a097716f1a",
+          "start_s": 44.5,
+          "end_s": 50.5,
+          "requested_s": 6
+        },
+        {
+          "source": "navigation-clear-2.mp4",
+          "sourceSha256": "4b69e14ba157948d85149a93326f2dc6d63da56c0767f4a82414442be5aeaaaa",
+          "start_s": 29,
+          "end_s": 34.5,
+          "requested_s": 5.5
+        },
+        {
+          "source": "navigation-clear-2.mp4",
+          "sourceSha256": "4b69e14ba157948d85149a93326f2dc6d63da56c0767f4a82414442be5aeaaaa",
+          "start_s": 12,
+          "end_s": 18.5,
+          "requested_s": 6.5
+        }
+      ],
+      "feature": "Actual automatic compile, source-to-PDF and native PDF-to-source SyncTeX",
+      "provenance": "Real native exponent 4→5 edit: source transaction to replacement PDF canvas 1022 ms, engine 522 ms, no errors; two-page ElegantBook, pdfLaTeX, warm preamble, default 400 ms delay. Source-to-PDF highlight verified through the actual preview API. Native trusted PDF double click returned to independently resolved line 22. Separate scene excerpts preserve all of the measured compile interval.",
+      "language": "zh",
+      "recording_date": "2026-10-01",
+      "retinaVideo": {
+        "path": "../assets/showcase/speed-navigation-clear-zh.mp4",
+        "sha256": "166ed81f1988d11ed04c6bf4859a44c032f3c6b8c5da145599259441437a798a",
+        "width": 2880,
+        "height": 1882,
+        "fps": 30,
+        "duration_s": 18.1,
+        "bytes": 1435304,
+        "nativeRangeSum_s": 18,
+        "encoding": "H.264 CRF16, yuv420p; native Retina UI pixels without resizing; caption rail at matching density"
+      },
+      "actionEvidence": "clear-showcase-evidence.json"
+    },
+    {
+      "id": "mercury-edit2-writing",
+      "path": "../assets/showcase/mercury-edit2-writing.gif",
+      "sha256": "b3e38da8f4ecbfdb9172831563fc99ec7fe7c0585eba8fb61c77a55208036d14",
+      "width": 1440,
+      "height": 941,
+      "fps": 20,
+      "captionHeight": 96,
+      "intermediateCodec": "FFV1 lossless RGB",
+      "duration_s": 18.05,
+      "nativeRangeSum_s": 18,
+      "bytes": 2640139,
+      "montage": true,
+      "sources": [
+        {
+          "source": "mercury-live-writing-4.mp4",
+          "sourceSha256": "f40e1690f54ce26de2356129b702482fa4648781fb255014da62f250dad7f271",
+          "start_s": 9.5,
+          "end_s": 15.5,
+          "requested_s": 6
+        },
+        {
+          "source": "mercury-live-writing-4.mp4",
+          "sourceSha256": "f40e1690f54ce26de2356129b702482fa4648781fb255014da62f250dad7f271",
+          "start_s": 31.5,
+          "end_s": 37.5,
+          "requested_s": 6
+        },
+        {
+          "source": "mercury-live-writing-4.mp4",
+          "sourceSha256": "f40e1690f54ce26de2356129b702482fa4648781fb255014da62f250dad7f271",
+          "start_s": 71.5,
+          "end_s": 77.5,
+          "requested_s": 6
+        }
+      ],
+      "feature": "YOLO Mercury Edit 2 real ghost-text suggestion, native Tab acceptance and native Undo",
+      "provenance": "Real Mercury Edit 2 suggestion from the separate YOLO plugin: first visible at 497 ms after the manual completion command; actual accepted text converges to $s+t$. Native Tab and native Undo are both visible within the same selected-window recording. The sentence is valid TeX before and after, with zero compile errors. Configured 32-token budget unchanged. Recorded excerpts omit review pauses; no accelerated playback or reconstructed UI.",
+      "language": "en",
+      "recording_date": "2026-10-01",
+      "retinaVideo": {
+        "path": "../assets/showcase/mercury-edit2-writing.mp4",
+        "sha256": "71f8e3f56eee9649bd457d82255a019c7f3c11bca7358e483423b3433774b83d",
+        "width": 2880,
+        "height": 1882,
+        "fps": 30,
+        "duration_s": 18.1,
+        "bytes": 1183767,
+        "nativeRangeSum_s": 18,
+        "encoding": "H.264 CRF16, yuv420p; native Retina UI pixels without resizing; caption rail at matching density"
+      },
+      "actionEvidence": "clear-showcase-evidence.json"
+    },
+    {
+      "id": "mercury-edit2-writing-zh",
+      "path": "../assets/showcase/mercury-edit2-writing-zh.gif",
+      "sha256": "9bf0d608506783cf707fcfb186d9197a98e234874fda6c2dba28552c5dfbafbe",
+      "width": 1440,
+      "height": 941,
+      "fps": 20,
+      "captionHeight": 96,
+      "intermediateCodec": "FFV1 lossless RGB",
+      "duration_s": 18.05,
+      "nativeRangeSum_s": 18,
+      "bytes": 2623767,
+      "montage": true,
+      "sources": [
+        {
+          "source": "mercury-live-writing-4.mp4",
+          "sourceSha256": "f40e1690f54ce26de2356129b702482fa4648781fb255014da62f250dad7f271",
+          "start_s": 9.5,
+          "end_s": 15.5,
+          "requested_s": 6
+        },
+        {
+          "source": "mercury-live-writing-4.mp4",
+          "sourceSha256": "f40e1690f54ce26de2356129b702482fa4648781fb255014da62f250dad7f271",
+          "start_s": 31.5,
+          "end_s": 37.5,
+          "requested_s": 6
+        },
+        {
+          "source": "mercury-live-writing-4.mp4",
+          "sourceSha256": "f40e1690f54ce26de2356129b702482fa4648781fb255014da62f250dad7f271",
+          "start_s": 71.5,
+          "end_s": 77.5,
+          "requested_s": 6
+        }
+      ],
+      "feature": "YOLO Mercury Edit 2 real ghost-text suggestion, native Tab acceptance and native Undo",
+      "provenance": "Real Mercury Edit 2 suggestion from the separate YOLO plugin: first visible at 497 ms after the manual completion command; actual accepted text converges to $s+t$. Native Tab and native Undo are both visible within the same selected-window recording. The sentence is valid TeX before and after, with zero compile errors. Configured 32-token budget unchanged. Recorded excerpts omit review pauses; no accelerated playback or reconstructed UI.",
+      "language": "zh",
+      "recording_date": "2026-10-01",
+      "retinaVideo": {
+        "path": "../assets/showcase/mercury-edit2-writing-zh.mp4",
+        "sha256": "efca454be7f6f5b055623a82b82bedccbdc2bddeaff4f68a47490fb1710555d1",
+        "width": 2880,
+        "height": 1882,
+        "fps": 30,
+        "duration_s": 18.1,
+        "bytes": 1176594,
+        "nativeRangeSum_s": 18,
+        "encoding": "H.264 CRF16, yuv420p; native Retina UI pixels without resizing; caption rail at matching density"
+      },
+      "actionEvidence": "clear-showcase-evidence.json"
+    },
+    {
       "id": "ref-proof-graph",
       "path": "../assets/showcase/ref-proof-graph.gif",
       "sha256": "a9e1542b65e97719d299fc0f4399924be104fc6ae0a1643cba098eb8bd164786",

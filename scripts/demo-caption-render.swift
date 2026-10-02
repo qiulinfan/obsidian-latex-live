@@ -4,7 +4,7 @@ import Foundation
 
 // Text graphics only. This program never captures a display or reads a user's UI.
 let help = """
-Usage: demo-caption-render --width PIXELS --height PIXELS --title TEXT --text TEXT --out FILE.png
+Usage: demo-caption-render --width PIXELS --height PIXELS [--scale DENSITY] --title TEXT --text TEXT --out FILE.png
 Renders a black caption rail with one title line and at most two caption lines.
 System fonts handle Chinese and English; PNG dimensions exactly match the arguments.
 """
@@ -21,6 +21,9 @@ guard let width = Int(values["--width"] ?? ""), width >= 240,
       let height = Int(values["--height"] ?? ""), height >= 96,
       let output = values["--out"], !output.isEmpty else { fail(help) }
 let title = values["--title"] ?? ""
+guard let scale = Double(values["--scale"] ?? "1"), scale >= 1, scale <= 3 else { fail("Caption density must be between 1 and 3.") }
+let density = CGFloat(scale)
+guard CGFloat(height) >= 96 * density else { fail("Caption height must be at least 96 pixels per density unit.") }
 let text = (values["--text"] ?? "").replacingOccurrences(of: "\r", with: "")
 let lines = text.isEmpty ? [] : text.components(separatedBy: "\n")
 guard lines.count <= 2 else { fail("Caption text must have at most two lines.") }
@@ -34,19 +37,19 @@ NSGraphicsContext.current = context
 context.shouldAntialias = true
 NSColor.black.setFill()
 NSRect(x: 0, y: 0, width: width, height: height).fill()
-let margin: CGFloat = 20
+let margin: CGFloat = 20 * density
 let available = CGFloat(width) - margin * 2
 func fontFitting(_ strings: [String], maximum: CGFloat, minimum: CGFloat, weight: NSFont.Weight) -> NSFont {
     var size = maximum
     while size > minimum {
         let font = NSFont.systemFont(ofSize: size, weight: weight)
         if strings.allSatisfy({ ($0 as NSString).size(withAttributes: [.font: font]).width <= available }) { return font }
-        size -= 1
+        size -= density
     }
     return NSFont.systemFont(ofSize: minimum, weight: weight)
 }
-let titleFont = fontFitting([title], maximum: 17, minimum: 11, weight: .semibold)
-let captionFont = fontFitting(lines, maximum: min(26, CGFloat(height) * 0.205), minimum: 12, weight: .regular)
+let titleFont = fontFitting([title], maximum: 17 * density, minimum: 11 * density, weight: .semibold)
+let captionFont = fontFitting(lines, maximum: min(26 * density, CGFloat(height) * 0.205), minimum: 12 * density, weight: .regular)
 for line in lines {
     guard (line as NSString).size(withAttributes: [.font: captionFont]).width <= available + 1 else {
         fail("Caption line does not fit this video width. Use shorter text or a wider source recording.")
@@ -54,10 +57,10 @@ for line in lines {
 }
 let titleParagraph = NSMutableParagraphStyle()
 titleParagraph.lineBreakMode = .byTruncatingTail
-(title as NSString).draw(in: NSRect(x: margin, y: CGFloat(height) - 35, width: available, height: 25),
+(title as NSString).draw(in: NSRect(x: margin, y: CGFloat(height) - 35 * density, width: available, height: 25 * density),
     withAttributes: [.font: titleFont, .foregroundColor: NSColor(white: 0.78, alpha: 1), .paragraphStyle: titleParagraph])
-let lineHeight = max(29, captionFont.pointSize + 7)
-let firstY = CGFloat(height) - 36 - lineHeight
+let lineHeight = max(29 * density, captionFont.pointSize + 7 * density)
+let firstY = CGFloat(height) - 36 * density - lineHeight
 for (number, line) in lines.enumerated() {
     (line as NSString).draw(in: NSRect(x: margin, y: firstY - CGFloat(number) * lineHeight, width: available, height: lineHeight),
         withAttributes: [.font: captionFont, .foregroundColor: NSColor.white])

@@ -1,8 +1,8 @@
-# LaTeX Live 与 Overleaf：适合不同的写作重心
+# LaTeX Live 为什么适合个人数学写作
 
-LaTeX Live 的主要价值，是把原生 `.tex` 项目放进 Obsidian 的日常阅读与写作空间：在源文件中读公式和定理，沿证明里的引用查看陈述与证明，再用自己的 TeX 工具链生成 PDF 或自包含阅读 HTML。Overleaf 的主要价值，是让合作者通过浏览器进入同一个论文项目，直接编辑、批注、审阅和回看历史，减少环境配置。
+**少等 PDF，编辑时直接读数学，就地追溯证明引用。** 这是 LaTeX Live 对个人写作的实际提升。同一份一页源码的三次热编辑中，LaTeX Live 0.1.1 从修改到 PDF 的中位数为 **0.874 秒**，Overleaf 云端免费账户的观测区间为 **3.665–4.086 秒**：本次写作流程少等约 **76%–79%**。[源码、条件与样本](same-source-speed.md)。
 
-**Overleaf 已有 Visual Editor、自动编译、双向 SyncTeX、AI 工具和 HTML 导出。** 因此，LaTeX Live 的差异应通过具体阅读流程与导出保真证据展示，不能宣传为这些能力的唯一提供者。[编辑器](https://docs.overleaf.com/getting-started/how-do-i-use-overleaf)、[SyncTeX](https://docs.overleaf.com/navigating-in-the-editor/working-with-the-pdf-viewer/moving-between-the-editor-and-pdf)、[AI](https://docs.overleaf.com/integrations-and-add-ons/ai-features)、[格式转换](https://docs.overleaf.com/managing-projects-and-files/importing-and-exporting-files)。
+ElegantBook 的公式和定理框在编辑器中保持可读，进入某个构造时就地修改源码。定理引用小窗可以沿图展开陈述与证明；texlab 和可选的 [YOLO](https://github.com/Lapis0x0/obsidian-yolo) 补全配合这条阅读流程，自包含 HTML 则把工程变成可分享的数学阅读版。[新的清晰录屏](clear-showcase.md)展示了实际的 ElegantBook 编辑、双向跳转，以及 Mercury Edit 2 补全、接受和撤销。下面按完整工作流比较当前能力与支持范围。
 
 官方能力核对日期：**2026-09-30**。原能力验收记录来自 LaTeX Live 0.1.0；**2026-10-01** 新增已发布 0.1.1 与已登录 Overleaf 的一页同稿热编辑实测，详见[原稿、样本与方法](same-source-speed.md)。文中的「已验证」来自本仓库代码、回归和运行记录；「官方能力」来自所链接的现行文档；「推断」是由工作方式得出的适用性判断。来源与未核实项记录在 [overleaf-sources.json](overleaf-sources.json)。
 

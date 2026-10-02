@@ -1,5 +1,5 @@
 <h1 align="center">LaTeX Live</h1>
-<p align="center">在 Obsidian 中就地读写数学，按需切入源码，配合 AI 补全并查看原生 PDF。</p>
+<p align="center">在 Obsidian 中实时读写数学：模板编辑、快速编译、双向跳转与 AI 补全。</p>
 
 <p align="center">
   <a href="https://github.com/qiulinfan/obsidian-latex-live/commits/main"><img src="https://img.shields.io/github/last-commit/qiulinfan/obsidian-latex-live/main?style=flat-square&color=6c5ce7" alt="最近提交"></a>
@@ -11,21 +11,49 @@
 
 <p align="center"><a href="./README.md">English</a> | <b>简体中文</b></p>
 
-## 实时编辑模式 ⇄ 源码模式
+## 把 ElegantBook 变成实时数学编辑器
 
-先在编辑器中阅读就地显示的公式、带编号的定理框和引用。需要直接操作 TeX 时，点击标题栏切到源码；再切回实时编辑模式，继续读写同一份 `.tex` 文件。
+**公式、编号定理框、证明和引用，直接读写。** 在实时编辑模式中编辑数学，右侧保留 ElegantBook 原生排版的 PDF。进入公式时显示它的 TeX，离开后恢复渲染；需要时，也可以让整个编辑器在实时编辑与源码模式间切换。
 
-![ElegantBook 中实际切换：实时编辑、源码、实时编辑](./docs/assets/showcase/editing-mode-switch-zh.gif)
+![ElegantBook 实时编辑、实际修改公式，以及编辑与源码模式切换](./docs/assets/showcase/elegantbook-clear-zh.gif)
 
-实时编辑模式也支持局部进入源码：光标触及公式时显示它的 TeX，离开后恢复渲染。下面的完整 ElegantBook 演示还展示了修改指数、恢复公式显示和更新 PDF。
+[查看 Retina 分辨率高清录屏](./docs/assets/showcase/elegantbook-clear-zh.mp4)。
 
-## 配合 YOLO，继续写证明
+工程始终是普通 `.tex` 文件。公式使用项目宏，定理标题遵循模板，引用芯片显示实际编译得到的编号。
 
-单独安装 [YOLO](https://github.com/Lapis0x0/obsidian-yolo)，即可在 LaTeX 编辑器中获得实际模型生成的 ghost text 建议。Tab 将选中的证明片段补入正文，撤销还原原稿；Enter 继续正常写作。
+## 快速编译，源码与 PDF 双向跳转
 
-![实际 YOLO 请求、建议出现、Tab 接受与撤销](./docs/assets/showcase/yolo-assisted-writing-zh.gif)
+修改公式，查看原生 PDF 更新。从光标直接定位排版结果，再双击 PDF 回到对应源码行；多文件项目也能沿章节跳转。
 
-各片段保留正常播放速度，包含这次模型请求的实际等待、接受和撤销。剪辑省略了审阅建议与按键操作之间的停顿；它展示辅助写作流程，不用于比较模型速度。
+![实际修改后更新 PDF，并展示源码与 PDF 双向跳转](./docs/assets/showcase/speed-navigation-clear-zh.gif)
+
+[查看 Retina 分辨率高清录屏](./docs/assets/showcase/speed-navigation-clear-zh.mp4)。
+
+这次两页 ElegantBook 的修改到新 PDF 为 **1.02 秒**，包含默认 400 ms 延迟；导言区缓存后的 TeX 编译为 **0.52 秒**。下方另有真实 Overleaf 同稿对比：本次测量中，LaTeX Live 的 PDF 等待时间缩短约 **76%–79%**。详见[录制说明](./docs/demo/clear-showcase.md)。
+
+## YOLO + Mercury Edit 2，边写边补全
+
+在实时编辑的证明里继续写作。单独安装的 [YOLO](https://github.com/Lapis0x0/obsidian-yolo) 提供所配置模型的 ghost text 补全，这次展示的是 **Mercury Edit 2**。按 Tab 接受到正文，撤销还原原稿；Enter 继续正常写作。
+
+![真实 Mercury Edit 2 补全、Tab 接受和原生撤销](./docs/assets/showcase/mercury-edit2-writing-zh.gif)
+
+[查看 Retina 分辨率高清录屏](./docs/assets/showcase/mercury-edit2-writing-zh.mp4)。
+
+本次简短数学结论的真实补全约 **0.50 秒**出现。片段保留模型请求的实际等待与正常播放速度，剪辑省略审阅建议时的停顿。详见[源码与计时证据](./docs/demo/clear-showcase.md)。
+
+## 个人数学写作，省下等待和来回查找
+
+相对于只在 Overleaf 中写作，LaTeX Live 把日常最常用的环节连在一起：
+
+- **更快获得 PDF 反馈。** 同一份一页源码，三次热编辑：LaTeX Live 0.1.1 中位数约 **0.87 秒**，Overleaf 云端免费账户的中位数观测区间约 **3.7–4.1 秒**，本次响应速度约为 **4.2–4.7 倍**。
+- **编辑时直接读数学。** 模板定理框、项目宏和局部源码展开，让修改时仍能看清论证。
+- **就地追溯证明引用。** 小窗打开引用图，展开陈述与证明，沿论证继续阅读。
+- **自己选择增强工具。** texlab 补全与诊断、YOLO、喜欢的模型、普通文件和 Git 可以配合使用。
+- **分享完整的数学阅读版。** 自包含 HTML 保留资源、定理结构、编号和引用链接。
+
+![LaTeX Live 与 Overleaf 的真实同稿自动编译](./docs/assets/showcase/same-source-overleaf-zh.gif)
+
+两边均使用 pdfLaTeX / TeX Live 2026，本地时间包含默认 400 ms 延迟和导言区缓存。数字对应本次机器、账户与文档；[源码、全部样本与方法](./docs/demo/same-source-speed.md)均已保留。LaTeX Live 目前侧重个人写作，尚不提供多人实时协作；详见[完整对比](./docs/demo/overleaf-comparison.md)。
 
 ## 悬浮引用，沿证明继续阅读
 
@@ -35,21 +63,9 @@
 
 图中的关系来自当前 LaTeX 项目证明里的字面 `\ref`，表示明确写出的证明引用关系，不是经过逻辑验证的定理依赖。
 
-## 边改边编译，源码与 PDF 双向跳转
-
-修改公式，查看原生 PDF 更新。再从光标定位到 PDF，或双击 PDF 回到对应源码行；多文件项目也能沿章节跳转。
-
-![LaTeX Live 与 Overleaf 的真实同稿自动编译](./docs/assets/showcase/same-source-overleaf-zh.gif)
-
-同一份一页文档，分别做三次热编辑：**LaTeX Live 0.1.1 中位数约 0.87 秒**看到新 PDF，**Overleaf 云端免费账户的中位数观测区间约 3.7–4.1 秒**。两边均使用 pdfLaTeX / TeX Live 2026；本地时间包含默认 400 ms 延迟，并使用导言区缓存。这是本次机器与账户的写作流程实测；[源码、全部样本与录制方法](./docs/demo/same-source-speed.md)均已保留。
-
-![源码到 PDF，再从 PDF 回到源码](./docs/assets/showcase/bidirectional-synctex-zh.gif)
-
 ## 不同模板，同一条编辑流程
 
 保留原来的 `.tex` 工程和文档类。公式、带编号的定理框和引用就地显示；光标进入公式时恢复源码，改完继续阅读。PDF 仍由原模板排版。
-
-![ElegantBook 中实际修改公式、查看更新并切换模式](./docs/assets/showcase/elegantbook-live-editing-zh.gif)
 
 ElegantBook 只是其中一种。**AMS、IEEE** 论文类也录下了相同的编辑流程；模板画廊还展示了生物领域的 **PLOS** 和物理领域的 **REVTeX**。已测试的模板还包括 Springer Nature、AASTeX、LNCS 和 ACM。未支持的构造保留源码，或使用支持范围内的 TeX/PDF 回退。详见[模板兼容范围](./docs/template-compatibility.md)。
 
@@ -105,13 +121,7 @@ texlab 提供命令补全与 snippet。Tab 在占位符间移动，Enter 续写�
 
 </details>
 
-所有 GIF 都截取自真实应用，并按正常速度播放；部分使用固定细节裁剪，模板合集由明确区分的录制片段组成。英文字幕版本位于[英文 README](./README.md)。[录制来源与收据](./docs/demo/showcase-provenance.json)可供核对。
-
-## 与 Overleaf 的区别
-
-这里展示的优势是一条连贯的阅读与写作流程：支持模板语义的就地编辑、理解项目宏的数学预览、确定性的证明引用小窗、可组合的编辑工具，以及方便分享的数学阅读版。
-
-Overleaf 也提供[自动编译](https://docs.overleaf.com/getting-started/recompiling-your-project)、[双向 SyncTeX](https://docs.overleaf.com/navigating-in-the-editor/working-with-the-pdf-viewer/moving-between-the-editor-and-pdf)、[AI 工具](https://docs.overleaf.com/integrations-and-add-ons/ai-features)和 [HTML 转换](https://docs.overleaf.com/managing-projects-and-files/importing-and-exporting-files)。多人合著时，它的一体化协作、评论和审阅流程仍有优势。[完整对比](./docs/demo/overleaf-comparison.md)包含同稿实测、能力差异和尚未实测的部分。
+所有 GIF 都截取自真实应用，并按正常速度播放；前三项另有上方链接的 Retina 分辨率视频。部分其他片段使用固定细节裁剪，剪辑省略场景间的停顿。英文字幕版本位于[英文 README](./README.md)。[录制来源与收据](./docs/demo/showcase-provenance.json)可供核对。
 
 ## 快速开始
 

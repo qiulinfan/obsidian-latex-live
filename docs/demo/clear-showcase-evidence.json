@@ -1,0 +1,106 @@
+{
+  "schema": "latex-live-clear-showcase-evidence-v1",
+  "recording_date_local": "2026-10-01",
+  "recording_timezone": "America/Detroit",
+  "runtime": {
+    "obsidian": "1.13.7",
+    "latex_live": "0.1.1",
+    "background": "0.2.1",
+    "yolo": "1.6.9.7",
+    "model": "mercury-edit-2",
+    "yolo_completion_transport": "Existing user-configured Mercury FIM adapter in the separately installed YOLO plugin"
+  },
+  "capture": {
+    "method": "ScreenCaptureKit selected public demo window, no audio",
+    "width": 2880,
+    "height": 1690,
+    "fps": 30,
+    "logical_window_width": 1440,
+    "logical_window_height": 845,
+    "editor_percent": 45,
+    "pdf_percent": 55,
+    "zoom_preserved": 0.7607257743127308,
+    "editor_css_font_size_preserved_px": 27,
+    "desktop_or_private_windows_included": false
+  },
+  "encoding": {
+    "playback_speed": 1,
+    "gif": {
+      "width": 1440,
+      "height": 941,
+      "fps": 20,
+      "caption_height": 96,
+      "resize": "one Lanczos proportional downsample",
+      "intermediates": "FFV1 RGB lossless",
+      "palette": "256 colors, bayer scale 2"
+    },
+    "mp4": {
+      "width": 2880,
+      "height": 1882,
+      "fps": 30,
+      "caption_height": 192,
+      "resize": "none of the native UI",
+      "codec": "H.264 CRF16 yuv420p"
+    },
+    "montage": "Cuts omit pauses between independent scenes. Measured waits are continuous within their excerpt."
+  },
+  "automatic_compile": {
+    "source": "speed-and-navigation-1.mp4",
+    "edit": "x^{4} -> x^{5}",
+    "committed_edit_at_s": 46.121218,
+    "pdf_canvas_replaced_at_s": 47.143218,
+    "edit_to_pdf_ms": 1022,
+    "tex_run_ms": 522,
+    "debounce_ms": 400,
+    "errors": 0,
+    "engine": "pdflatex",
+    "pages": 2,
+    "preamble": "warm cached",
+    "comparison_boundary": "Different from the one-page Overleaf comparison; not a new matched Overleaf trial.",
+    "before_source_sha256": "48cf7648dc086e1119d91fef508d006eb082d9e713213569ca045839c77e33b9",
+    "after_source_sha256": "b28126c2307f96618f325a1663191b78a074ca990deef68b56cc5fdf4ae9d7c1"
+  },
+  "synctex": {
+    "source": "navigation-clear-2.mp4",
+    "native_pdf_double_click_at_s": 14.592548,
+    "native_event_trusted": true,
+    "pdf_point": {
+      "page": 1,
+      "x": 404.32790959997067,
+      "y": 400.6244975561473
+    },
+    "independently_resolved_source_line": 22,
+    "actual_source_line": 22,
+    "matched": true,
+    "forward": "Actual preview API source-to-PDF highlight observed in the later scene; no reconstructed animation."
+  },
+  "yolo": {
+    "source": "mercury-live-writing-4.mp4",
+    "model": "mercury-edit-2",
+    "configured_max_tokens": 32,
+    "trigger": "Manual Trigger AI completion command via the actual LaTeX Live API",
+    "request_at_s": 10.535729,
+    "first_observed_suggestion_at_s": 11.032729,
+    "first_observed_suggestion_ms": 497,
+    "timing_method": "First nonempty suggestion observed by a nominal 10 ms read-only poll; the real ghost is visible in the native video. Rounded demo caption is about 0.50 s. Later automatic controller calls are excluded from this request timing.",
+    "actual_response": "converges to $s+t$",
+    "native_tab_source_change_at_s": 33.236729,
+    "accepted_matches_actual_response": true,
+    "native_undo_restored_original": true,
+    "undo_observed_in_same_take": true,
+    "undo_transition_video_bounds_s": [
+      72,
+      74
+    ],
+    "before_compile_errors": 0,
+    "final_compile_errors": 0,
+    "selection": "Selected short completion, with the configured 32-token budget unchanged. Earlier attempts and the prior successful short-math take are retained outside Git. This final take starts from valid TeX, avoiding an incomplete math delimiter during the recording. Not a model benchmark.",
+    "before_source": "% !TEX root = main.tex\n\\chapter{Write with Mercury Edit 2}\n\\section{A short continuation, right where you write}\n\\begin{theorem}{Sums of convergent sequences}{sum}\nIf $s_n\\to s$ and $t_n\\to t$, then $s_n+t_n\\to s+t$.\n\\end{theorem}\n\\begin{proof}\nFix $\\varepsilon>0$. Choose $N_s,N_t$ with\n$\\abs{s_n-s}<\\varepsilon/2$ and $\\abs{t_n-t}<\\varepsilon/2$.\nFor $n\\geq\\max\\{N_s,N_t\\}$, the triangle inequality gives\n$\\abs{(s_n+t_n)-(s+t)}<\\varepsilon$.\nTherefore $s_n+t_n$ \n\\end{proof}\n\\section{Keep your mathematical context}\n\\begin{equation}\\label{eq:sum}\n \\abs{(s_n+t_n)-(s+t)}\\leq\\abs{s_n-s}+\\abs{t_n-t}.\n\\end{equation}\nThe proof uses Lemma~\\ref{lem:triangle} from the previous chapter.\n",
+    "after_native_tab_source": "% !TEX root = main.tex\n\\chapter{Write with Mercury Edit 2}\n\\section{A short continuation, right where you write}\n\\begin{theorem}{Sums of convergent sequences}{sum}\nIf $s_n\\to s$ and $t_n\\to t$, then $s_n+t_n\\to s+t$.\n\\end{theorem}\n\\begin{proof}\nFix $\\varepsilon>0$. Choose $N_s,N_t$ with\n$\\abs{s_n-s}<\\varepsilon/2$ and $\\abs{t_n-t}<\\varepsilon/2$.\nFor $n\\geq\\max\\{N_s,N_t\\}$, the triangle inequality gives\n$\\abs{(s_n+t_n)-(s+t)}<\\varepsilon$.\nTherefore $s_n+t_n$ converges to $s+t$\n\\end{proof}\n\\section{Keep your mathematical context}\n\\begin{equation}\\label{eq:sum}\n \\abs{(s_n+t_n)-(s+t)}\\leq\\abs{s_n-s}+\\abs{t_n-t}.\n\\end{equation}\nThe proof uses Lemma~\\ref{lem:triangle} from the previous chapter.\n"
+  },
+  "materials": {
+    "manuscript": "Original short public mathematics demonstration; the fixtures contain the final saved state.",
+    "wallpaper": "User-supplied Miku artwork shown with permission; only its appearance within the recordings is included. Original artwork and its rights remain separate from the project MIT license.",
+    "private_data": "Provider credentials, user chat history, private vault files and raw captures are outside Git."
+  }
+}

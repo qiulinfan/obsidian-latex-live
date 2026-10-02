@@ -14,4 +14,6 @@ The production Obsidian bundle uses this repository's source and does not bundle
 
 `docs/demo/source-provenance.md` records attribution and demo authorization for third-party notes. This project's MIT license does not grant a general license to those notes.
 
+The clear showcase recordings dated 2026-10-01 display user-supplied Miku wallpaper with permission. The artwork appears only within the application recordings; its original file is not distributed here. The artwork's rights remain separate from the project's MIT license. The short ElegantBook manuscripts and caption text are original demonstration material.
+
 Development-only packages retain the license identifiers and notices shipped by their packages. No development dependency is relicensed by this repository's LICENSE file.

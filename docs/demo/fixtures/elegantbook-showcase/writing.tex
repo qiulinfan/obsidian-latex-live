@@ -1,0 +1,18 @@
+% !TEX root = main.tex
+\chapter{Write with Mercury Edit 2}
+\section{A short continuation, right where you write}
+\begin{theorem}{Sums of convergent sequences}{sum}
+If $s_n\to s$ and $t_n\to t$, then $s_n+t_n\to s+t$.
+\end{theorem}
+\begin{proof}
+Fix $\varepsilon>0$. Choose $N_s,N_t$ with
+$\abs{s_n-s}<\varepsilon/2$ and $\abs{t_n-t}<\varepsilon/2$.
+For $n\geq\max\{N_s,N_t\}$, the triangle inequality gives
+$\abs{(s_n+t_n)-(s+t)}<\varepsilon$.
+Therefore $s_n+t_n$ converges to $s+t$
+\end{proof}
+\section{Keep your mathematical context}
+\begin{equation}\label{eq:sum}
+ \abs{(s_n+t_n)-(s+t)}\leq\abs{s_n-s}+\abs{t_n-t}.
+\end{equation}
+The proof uses Lemma~\ref{lem:triangle} from the previous chapter.

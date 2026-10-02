@@ -1,5 +1,5 @@
 <h1 align="center">LaTeX Live</h1>
-<p align="center">Write with rendered mathematics in Obsidian, switch to source when needed, and keep the native PDF in view.</p>
+<p align="center">A live mathematics editor for your LaTeX projects: rendered proofs, fast PDF feedback and AI completion in Obsidian.</p>
 
 <p align="center">
   <a href="https://github.com/qiulinfan/obsidian-latex-live/commits/main"><img src="https://img.shields.io/github/last-commit/qiulinfan/obsidian-latex-live/main?style=flat-square&color=6c5ce7" alt="Last commit"></a>
@@ -11,21 +11,49 @@
 
 <p align="center"><b>English</b> | <a href="./README_zh-CN.md">简体中文</a></p>
 
-## Live editing ⇄ source mode
+## Your template, a live mathematics editor
 
-Start with formulas, numbered theorem blocks and references rendered in the editor. Switch to source from the header when you want to work directly with TeX, then return to live editing in the same `.tex` file.
+**ElegantBook, directly in the editor.** Read and write rendered formulas, numbered theorem blocks, proofs and references while the original template produces the PDF beside them. Enter a formula to edit its TeX; leave it to see the result. Switch the whole pane between live editing and source whenever you need to.
 
-![Actual live editing to source and back in ElegantBook](./docs/assets/showcase/editing-mode-switch.gif)
+![ElegantBook live editing, an actual formula edit and live/source mode switching](./docs/assets/showcase/elegantbook-clear.gif)
 
-Touching an individual formula also reveals its source while you stay in live editing. The full ElegantBook example below shows changing the exponent, restoring its rendering and updating the native PDF.
+[Watch the Retina-resolution video](./docs/assets/showcase/elegantbook-clear.mp4).
 
-## Continue writing with YOLO
+The project stays ordinary `.tex`. Formulas use project macros, theorem headings follow the template, and reference chips use compiled numbering.
 
-With the separately installed [YOLO](https://github.com/Lapis0x0/obsidian-yolo) plugin, a real model suggestion appears as ghost text in your LaTeX editor. Tab inserts the selected proof passage; Undo restores the original source. Enter remains a writing key.
+## Fast PDF feedback, both directions
 
-![Real YOLO request, suggestion, Tab acceptance and undo](./docs/assets/showcase/yolo-assisted-writing.gif)
+Edit a formula and see the native PDF update. Jump from your cursor to the typeset passage, then double-click the PDF to return to its source—even across chapter files.
 
-These normal-speed excerpts show the actual request and its wait, acceptance and undo. The cuts remove pauses between reviewing and accepting the suggestion; this is a writing demonstration, not a model-speed benchmark.
+![A real edit updates the PDF, followed by forward and inverse SyncTeX](./docs/assets/showcase/speed-navigation-clear.gif)
+
+[Watch the Retina-resolution video](./docs/assets/showcase/speed-navigation-clear.mp4).
+
+This two-page ElegantBook take reaches the new PDF in **1.02 s**, including the default 400 ms delay; the TeX run takes **0.52 s** with a warm preamble. In the separate same-source Overleaf comparison below, the observed median PDF wait is **76–79% shorter** with LaTeX Live. [Recording details](./docs/demo/clear-showcase.md).
+
+## Write with YOLO + Mercury Edit 2
+
+Keep writing inside the rendered proof. The separately installed [YOLO](https://github.com/Lapis0x0/obsidian-yolo) plugin supplies ghost-text completion from your configured model; **Mercury Edit 2** is shown here. Press Tab to accept, or Undo to restore the original source. Enter continues normal writing.
+
+![A real Mercury Edit 2 suggestion, native Tab acceptance and native Undo](./docs/assets/showcase/mercury-edit2-writing.gif)
+
+[Watch the Retina-resolution video](./docs/assets/showcase/mercury-edit2-writing.mp4).
+
+The actual short continuation in this take appears in **0.50 s**. The clips retain the real request wait and normal playback speed; cuts omit time spent reviewing the suggestion. [Source and timing evidence](./docs/demo/clear-showcase.md).
+
+## Advantages over Overleaf for individual writing
+
+For individual mathematical writing, LaTeX Live connects the parts you use all day:
+
+- **Faster PDF feedback in the measured workflow.** Three warm edits of the same one-page source: **0.87 s** median in LaTeX Live 0.1.1 versus **3.7–4.1 s** observed median interval in Overleaf Cloud Free—about **4.2–4.7× as fast**.
+- **Read mathematics while editing it.** Template-aware theorem blocks, project macros and local source reveal keep the argument readable while you make changes.
+- **Inspect proof references in place.** Open a reference graph, expand statements and proofs, and continue along the argument in a small window.
+- **Choose your writing tools.** Combine texlab snippets and diagnostics with YOLO completion, your preferred model, ordinary files and Git.
+- **Share a mathematical reading edition.** Export self-contained HTML with embedded resources, theorem structure, numbering and linked references.
+
+![Real same-source automatic compilation in LaTeX Live and Overleaf](./docs/assets/showcase/same-source-overleaf.gif)
+
+Both sides use pdfLaTeX / TeX Live 2026. The local measurement includes the default 400 ms delay and preamble cache. These numbers describe this machine, account and document; [source, all samples and method](./docs/demo/same-source-speed.en.md) are available. LaTeX Live currently focuses on individual writing; shared live editing is outside its scope. See the [full comparison](./docs/demo/overleaf-comparison.en.md).
 
 ## Hover a reference, follow a proof
 
@@ -35,21 +63,9 @@ Hover a theorem reference to open its proof-reference graph in a small window. C
 
 The graph comes from literal `\ref` calls in proofs within the current LaTeX project. It describes explicit proof references; it does not certify logical dependencies.
 
-## Edit, see the PDF, jump back
-
-Change a formula and watch the native PDF update. Then move from your cursor to the PDF, or double-click the PDF to return to the source—even across chapter files.
-
-![Real same-source automatic compilation in LaTeX Live and Overleaf](./docs/assets/showcase/same-source-overleaf.gif)
-
-Three warm edits of the same one-page document: **LaTeX Live 0.1.1 ≈ 0.87 s** median to the new PDF; **Overleaf Cloud Free ≈ 3.7–4.1 s** observed median interval. Both use pdfLaTeX / TeX Live 2026. The local run includes the default 400 ms delay and uses the preamble cache. These are this machine/account's measured editing workflows; [source, all samples and recording method](./docs/demo/same-source-speed.en.md) are included.
-
-![Actual source-to-PDF and PDF-to-source navigation](./docs/assets/showcase/bidirectional-synctex.gif)
-
 ## More templates, the same editing flow
 
 Keep the original `.tex` project and its class. Read formulas, numbered theorem blocks and references in place; touch a formula to edit its source, then continue reading. The PDF keeps the template's native layout.
-
-![Actual formula editing and mode switches in ElegantBook](./docs/assets/showcase/elegantbook-live-editing.gif)
 
 ElegantBook is one example. The same editing flow is recorded with **AMS** and **IEEE** paper classes; the gallery also shows **PLOS** and **REVTeX**. Other tested templates include Springer Nature, AASTeX, LNCS and ACM. Unsupported constructs keep their source or use a supported TeX/PDF fallback. See [the tested compatibility scope](./docs/template-compatibility.md).
 
@@ -105,13 +121,7 @@ Real TeX diagnostics reach the source editor. The PDF remains available while yo
 
 </details>
 
-All GIFs are excerpts of real applications at normal speed. Some focus on fixed detail crops; template montages contain explicitly separated takes. Chinese-captioned versions are in the [Chinese README](./README_zh-CN.md). See [recording provenance](./docs/demo/showcase-provenance.json).
-
-## How it compares with Overleaf
-
-The advantages shown here are the connected reading and writing workflow: template-aware in-place editing, project-aware math previews, a deterministic proof-reference window, composable editor tools, and a portable mathematical reading edition.
-
-Overleaf also offers [automatic compilation](https://docs.overleaf.com/getting-started/recompiling-your-project), [bidirectional SyncTeX](https://docs.overleaf.com/navigating-in-the-editor/working-with-the-pdf-viewer/moving-between-the-editor-and-pdf), [AI tools](https://docs.overleaf.com/integrations-and-add-ons/ai-features) and [HTML conversion](https://docs.overleaf.com/managing-projects-and-files/importing-and-exporting-files). Its integrated collaboration, comments and review workflow matter for coauthored papers. Read the [full comparison](./docs/demo/overleaf-comparison.en.md), including the measured same-source example and the capabilities we have not compared experimentally.
+All GIFs are excerpts of real applications at normal speed. The first three also have full Retina-resolution videos linked above. Some other clips use fixed detail crops; montages omit pauses between scenes. Chinese captions are in the [Chinese README](./README_zh-CN.md). See [recording provenance](./docs/demo/showcase-provenance.json).
 
 ## Quick start
 

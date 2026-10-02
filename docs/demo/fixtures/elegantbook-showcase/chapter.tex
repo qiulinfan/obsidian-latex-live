@@ -1,0 +1,22 @@
+\chapter{Convergence and bounds}
+\section{A proof you can follow}
+\begin{lemma}{Triangle inequality}{triangle}
+For $a,b\in\mathbb{R}$, $\abs{a+b}\leq\abs{a}+\abs{b}$.
+\end{lemma}
+\begin{theorem}{Convergent sequences are bounded}{bounded}
+If $s_n\to s$, there is $M>0$ with $\abs{s_n}\leq M$ for every $n$.
+\end{theorem}
+\begin{proof}
+Choose $N$ so that $\abs{s_n-s}<1$ for $n\geq N$.
+By Lemma~\ref{lem:triangle},
+\begin{equation}\label{eq:estimate}
+ \abs{s_n}\leq\abs{s_n-s}+\abs{s}<1+\abs{s}.
+\end{equation}
+Set $M=\max\{\abs{s_1},\ldots,\abs{s_N},1+\abs{s}\}$.
+This also controls the finitely many initial terms.
+\end{proof}
+\section{Read, edit, keep writing}
+\begin{equation}\label{eq:model}
+ F(x)=\frac{1}{x^{5}}.
+\end{equation}
+Theorem~\ref{thm:bounded} uses Lemma~\ref{lem:triangle}.
