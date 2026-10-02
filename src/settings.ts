@@ -35,6 +35,12 @@ export interface LatexLiveSettings {
   cursorPreview: boolean;
   /** The mode of newly opened LaTeX editors; each view keeps its own in its view state. */
   editingMode: EditingMode;
+  /** Editor typography: zero/empty follows the Obsidian theme. */
+  editorFontSize: number;
+  editorLineHeight: number;
+  editorFontFamily: string;
+  /** MathJax previews relative to their editor/popup text size (1 = 100%). */
+  mathPreviewScale: number;
   /** Vault folder "Export to HTML" proposes; empty: next to the root .tex file. */
   exportFolder: string;
 }
@@ -53,6 +59,10 @@ export const DEFAULT_SETTINGS: LatexLiveSettings = {
   texFragmentFallback: true,
   cursorPreview: false,
   editingMode: "source",
+  editorFontSize: 0,
+  editorLineHeight: 0,
+  editorFontFamily: "",
+  mathPreviewScale: 1,
   exportFolder: "",
 };
 
@@ -69,6 +79,37 @@ export class LatexLiveSettingTab extends PluginSettingTab {
     containerEl.empty();
     const s = this.plugin.settings;
     const save = () => void this.plugin.saveSettings();
+
+    new Setting(containerEl).setName("Editor appearance").setHeading();
+    new Setting(containerEl)
+      .setName("Editor font size (px)")
+      .setDesc("10–40 px. Leave empty to follow Obsidian. Applies immediately to open LaTeX editors.")
+      .addText(t => t.setPlaceholder("Follow Obsidian").setValue(s.editorFontSize ? String(s.editorFontSize) : "").onChange(v => {
+        const text = v.trim(), n = text ? Number(text) : 0;
+        if (!text || (Number.isFinite(n) && n >= 10 && n <= 40)) { s.editorFontSize = n; save(); }
+      }));
+    new Setting(containerEl)
+      .setName("Editor line height")
+      .setDesc("1.1–2.4 times the font size. Leave empty to follow the theme.")
+      .addText(t => t.setPlaceholder("Follow theme").setValue(s.editorLineHeight ? String(s.editorLineHeight) : "").onChange(v => {
+        const text = v.trim(), n = text ? Number(text) : 0;
+        if (!text || (Number.isFinite(n) && n >= 1.1 && n <= 2.4)) { s.editorLineHeight = n; save(); }
+      }));
+    new Setting(containerEl)
+      .setName("Source font family")
+      .setDesc("An installed font name or CSS font list, for example JetBrains Mono, monospace. Leave empty to follow Obsidian.")
+      .addText(t => t.setPlaceholder("Follow Obsidian").setValue(s.editorFontFamily).onChange(v => {
+        s.editorFontFamily = v.trim(); save();
+      }));
+    new Setting(containerEl)
+      .setName("Formula preview size (%)")
+      .setDesc("50–200%. Controls formulas in live preview and popups; PDF typography stays in the TeX document.")
+      .addText(t => t.setValue(String(Math.round(s.mathPreviewScale * 100))).onChange(v => {
+        const n = Number(v.trim());
+        if (Number.isFinite(n) && n >= 50 && n <= 200) { s.mathPreviewScale = n / 100; save(); }
+      }));
+
+    new Setting(containerEl).setName("Compilation").setHeading();
 
     const detected = this.plugin.texBinDir();
     new Setting(containerEl)

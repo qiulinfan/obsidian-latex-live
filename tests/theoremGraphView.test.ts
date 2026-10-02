@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { JSDOM } from "jsdom";
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView, activateHover } from "@codemirror/view";
-import { latexTooltipPortal, theoremGraphHover, theoremReferenceAt, theoremReferences, type TheoremGraphHoverOptions } from "../src/editor/theoremGraphView";
+import { latexTooltipPortal, refreshLatexTooltipAppearance, theoremGraphHover, theoremReferenceAt, theoremReferences, type TheoremGraphHoverOptions } from "../src/editor/theoremGraphView";
 import type { TheoremGraph, TheoremNode, TheoremSource } from "../src/tex/theoremGraph";
 import { latexLiveLanguage } from "../src/editor/latexLive";
 import { DEFAULT_REF_NAMES, type LatexRefs } from "../src/editor/latexRefs";
@@ -12,6 +12,26 @@ import { livePreview } from "../src/editor/shared/livePreview";
 import { texEditorExtensions } from "../src/editor/texExtensions";
 
 const sleep = (ms = 30) => new Promise(resolve => setTimeout(resolve, ms));
+
+test("LaTeX tooltip portals keep per-editor typography and clear removed overrides", async () => {
+  const first = new EditorView({ parent: document.body, state: EditorState.create({ doc: "a", extensions: [latexTooltipPortal()] }) });
+  const second = new EditorView({ parent: document.body, state: EditorState.create({ doc: "b", extensions: [latexTooltipPortal()] }) });
+  try {
+    await sleep();
+    const portals = document.querySelectorAll<HTMLElement>(".ll-tooltip-portal");
+    const bodyStyle = document.body.style.cssText;
+    first.dom.style.setProperty("--font-text-size", "22px");
+    first.dom.style.setProperty("--ll-math-preview-scale", "1.4");
+    refreshLatexTooltipAppearance(first);
+    assert.equal(portals[0].style.getPropertyValue("--font-text-size"), "22px");
+    assert.equal(portals[0].style.getPropertyValue("--ll-math-preview-scale"), "1.4");
+    assert.equal(portals[1].style.getPropertyValue("--ll-math-preview-scale"), "");
+    first.dom.style.removeProperty("--ll-math-preview-scale");
+    refreshLatexTooltipAppearance(first);
+    assert.equal(portals[0].style.getPropertyValue("--ll-math-preview-scale"), "");
+    assert.equal(document.body.style.cssText, bodyStyle);
+  } finally { first.destroy(); second.destroy(); }
+});
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 const source = (i: number): TheoremSource => ({ file: "/tmp/main.tex", key: "main.tex", visit: 0, from: i * 20, to: i * 20 + 19, bodyFrom: i * 20 + 1, bodyTo: i * 20 + 18, line: i + 1, nodes: [] });
 function graph(size = 3): TheoremGraph {

@@ -256,6 +256,7 @@ export default class LatexLivePlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     this.binDir = undefined;
+    for (const view of this.texViews()) view.applyAppearance();
     await this.saveData(this.settings);
     const key = this.texlabSettingsKey();
     if (key !== this.texlabKey) {

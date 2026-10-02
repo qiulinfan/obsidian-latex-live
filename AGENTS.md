@@ -7,6 +7,14 @@
   flow above the independently scrolling PDF viewport. Diagnostics start collapsed, never
   auto-open on errors, retain an explicit choice across builds, and reset on root changes or
   cleared diagnostics. Long lists scroll within the dock without covering the PDF.
+  Editor font size, line height and source font overrides default to the host theme;
+  MathJax preview scale defaults to 100%. `editorAppearance.ts` changes local CSS variables
+  only. `TexView.applyAppearance` defers during IME and toggles a bounded pair of empty CM
+  themes in its compartment to invalidate font metrics (requestMeasure alone misses short
+  documents with a fixed min-height). Preserve document, selection, history and the original
+  CHTML inline scale. Portaled tooltips copy the view's local typography; images, PDF crops,
+  spinner/error text and PDF typography are independent. Run `editor-appearance-smoke.mjs`
+  after changing this wiring, including short source documents and gutter alignment.
 
 - This plugin is a thin Obsidian frontend over the TeX distribution already
   installed on the machine (pdfLaTeX, XeLaTeX, LuaLaTeX, latexmk, SyncTeX).

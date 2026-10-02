@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { undoDepth } from "@codemirror/commands";
+import { undo, undoDepth } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { HistoryCache } from "../src/editor/shared/editorKit";
 import { TextWidget, isLive } from "../src/editor/shared/livePreview";
@@ -49,6 +49,12 @@ async function texView(editingMode: EditingMode = "source") {
     settings: { editingMode, hoverRender: true, debounceMs: 100000, followCursor: false },
     texRender,
     yolo,
+    theoremGraphs: {
+      invalidate: () => {},
+      subscribe: () => () => {},
+      load: async () => null,
+      content: async () => document.createElement("div"),
+    },
     histories: new HistoryCache(),
     texlab: {
       status: "stopped",
@@ -81,6 +87,46 @@ async function texView(editingMode: EditingMode = "source") {
 
 const open = (v: TexView, file: string, mode?: EditingMode) => v.setState(mode ? { file, mode } : { file }, {} as never);
 const live = (cm: EditorView) => isLive(cm.state);
+
+test("editor appearance updates open views without changing text, selection, mode or undo history", async () => {
+  const t = await texView("live");
+  try {
+    await open(t.view, "chapters/ch1.tex");
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const editor = t.cm();
+    editor.dispatch({ changes: { from: 0, insert: "% appearance check\n" }, selection: { anchor: 2 } });
+    const doc = editor.state.doc, selection = editor.state.selection, before = t.view.getViewData();
+    Object.assign(t.plugin.settings, { editorFontSize: 23, editorLineHeight: 1.8, editorFontFamily: "Menlo", mathPreviewScale: 1.25 });
+    t.view.applyAppearance();
+    assert.equal(t.view.contentEl.style.getPropertyValue("--font-text-size"), "23px");
+    assert.equal(t.view.contentEl.style.getPropertyValue("--line-height-normal"), "1.8");
+    assert.equal(editor.state.doc, doc);
+    assert.ok(editor.state.selection.eq(selection));
+    assert.equal(t.view.getViewData(), before);
+    assert.equal(live(editor), true);
+    assert.ok(undo(editor));
+    assert.equal(editor.state.doc.toString().startsWith("% appearance check"), false);
+    Object.assign(t.plugin.settings, { editorFontSize: 0, editorLineHeight: 0, editorFontFamily: "", mathPreviewScale: 1 });
+    t.view.applyAppearance();
+    assert.equal(t.view.contentEl.style.getPropertyValue("--font-text-size"), "");
+  } finally { await t.done(); }
+});
+
+test("editor appearance waits for an IME composition to commit", async () => {
+  const t = await texView("source");
+  try {
+    await open(t.view, "chapters/ch1.tex");
+    const editor = t.cm(), doc = editor.state.doc;
+    editor.contentDOM.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    Object.assign(t.plugin.settings, { editorFontSize: 24, editorLineHeight: 1.9, editorFontFamily: "Menlo", mathPreviewScale: 1.5 });
+    t.view.applyAppearance();
+    assert.equal(t.view.contentEl.style.getPropertyValue("--font-text-size"), "");
+    editor.contentDOM.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(t.view.contentEl.style.getPropertyValue("--font-text-size"), "24px");
+    assert.equal(editor.state.doc, doc);
+  } finally { await t.done(); }
+});
 
 test("a new view opens in the editingMode setting; the header action toggles, keeping text, selection and history", async () => {
   const t = await texView("source");

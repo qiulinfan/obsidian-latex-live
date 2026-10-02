@@ -16,6 +16,10 @@ export interface TheoremGraphHoverOptions {
 }
 
 /** Obsidian panes clip fixed children, so use CM's supported external tooltip parent. */
+const portals = new WeakMap<EditorView, TooltipPortal>();
+const APPEARANCE_VARS = ["--font-text-size", "--line-height-normal", "--ll-editor-font-family", "--ll-math-preview-scale", "--ll-editor-math-font-size"];
+export function refreshLatexTooltipAppearance(view: EditorView): void { portals.get(view)?.syncAppearance(); }
+
 export function latexTooltipPortal(): Extension {
   const config = new Compartment();
   const lifecycle = ViewPlugin.define(view => new TooltipPortal(view, config), {
@@ -32,9 +36,10 @@ class TooltipPortal {
   private parent: HTMLElement | null = null;
   private pending = false;
   private stopped = false;
-  constructor(private view: EditorView, private config: Compartment) { this.sync(); }
+  constructor(private view: EditorView, private config: Compartment) { portals.set(view, this); this.sync(); }
   update(): void { this.sync(); }
   sync(): void {
+    this.syncAppearance();
     if (this.stopped || this.pending || (this.parent?.ownerDocument === this.view.dom.ownerDocument && this.parent.isConnected)) return;
     this.pending = true;
     // ViewPlugin constructors and updates must not dispatch synchronously.
@@ -48,11 +53,22 @@ class TooltipPortal {
       const scope = parent.appendChild(doc.createElement("div")); scope.className = "cm-editor";
       Object.assign(scope.style, { height: "0", background: "transparent" });
       doc.body.appendChild(parent); this.parent = parent;
+      this.syncAppearance();
       this.view.dispatch({ effects: this.config.reconfigure(tooltips({ parent: scope })) });
       previous?.remove();
     });
   }
-  destroy(): void { this.stopped = true; this.parent?.remove(); this.parent = null; }
+  syncAppearance(): void {
+    if (!this.parent) return;
+    const styles = this.view.dom.ownerDocument.defaultView?.getComputedStyle(this.view.dom);
+    if (!styles) return;
+    for (const name of APPEARANCE_VARS) {
+      const value = styles.getPropertyValue(name).trim();
+      if (value) { if (this.parent.style.getPropertyValue(name) !== value) this.parent.style.setProperty(name, value); }
+      else this.parent.style.removeProperty(name);
+    }
+  }
+  destroy(): void { this.stopped = true; portals.delete(this.view); this.parent?.remove(); this.parent = null; }
 }
 
 const refs = new WeakMap<Text, readonly TheoremReferenceTarget[]>();

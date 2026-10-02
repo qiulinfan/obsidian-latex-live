@@ -158,6 +158,13 @@ export class TheoremGraphs {
       missing.textContent = "未找到明确关联的证明。";
       card.appendChild(missing);
     }
+    for (const math of card.querySelectorAll<HTMLElement>('mjx-container[jax="CHTML"]')) {
+      if (math.parentElement?.closest('mjx-container[jax="CHTML"]')) continue;
+      const wrapper = doc.createElement(math.getAttribute("display") === "true" ? "div" : "span");
+      wrapper.className = "ll-theorem-math";
+      math.replaceWith(wrapper);
+      wrapper.appendChild(math);
+    }
     // References inside a card navigate within the graph. Other fragment links must not
     // scroll Obsidian's document or collide with labels from another open popup.
     for (const link of card.querySelectorAll<HTMLAnchorElement>("a[href^='#']")) {

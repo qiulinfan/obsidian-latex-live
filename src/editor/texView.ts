@@ -1,4 +1,4 @@
-import { EditorState, Extension } from "@codemirror/state";
+import { Compartment, EditorState, Extension } from "@codemirror/state";
 import { EditorView, Tooltip } from "@codemirror/view";
 import { statSync } from "fs";
 import { dirname, resolve } from "path";
@@ -19,8 +19,9 @@ import type { EditingMode } from "../settings";
 import { Definitions, emptyDefinitions, projectDefinitions } from "../tex/macros";
 import { includeName, preambleFiles } from "../tex/project";
 import { latexCompletionSource } from "./latexCompletion";
+import { applyEditorAppearance } from "./editorAppearance";
 import { latexLiveLanguage } from "./latexLive";
-import { latexTooltipPortal, theoremGraphHover } from "./theoremGraphView";
+import { latexTooltipPortal, refreshLatexTooltipAppearance, theoremGraphHover } from "./theoremGraphView";
 import {
   EditorEphemeralState,
   applyEphemeralState,
@@ -50,6 +51,9 @@ const MODE_ACTION: Record<EditingMode, [icon: string, title: string]> = {
  */
 const NO_CONSTRUCTS: LiveLanguage = { scan: () => [], decorate: () => {} };
 const DATA_EXTENSIONS = new Set([...PACKAGE_EXTENSIONS, "bib"]);
+// A theme change tells CM to discard cached font metrics even when a short document's
+// min-height hides the resize. Reuse two empty themes instead of accumulating new styles.
+const APPEARANCE_THEMES = [EditorView.theme({}), EditorView.theme({})];
 
 export class TexView extends TextFileView {
   private editor: EditorView | null = null;
@@ -76,6 +80,9 @@ export class TexView extends TextFileView {
   private readonly modeAction: HTMLElement;
   /** Waiting for MathJax before live preview mounts (texRender.preload). */
   private preloading = false;
+  private appearanceAfterComposition = false;
+  private readonly appearanceCompartment = new Compartment();
+  private appearanceTheme = 0;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -151,7 +158,24 @@ export class TexView extends TextFileView {
     return this.committedData;
   }
 
+  /** Typography changes are local styles, preserving selection, history and unsaved text. */
+  applyAppearance(): void {
+    if (this.editor?.compositionStarted) { this.appearanceAfterComposition = true; return; }
+    this.appearanceAfterComposition = false;
+    const before = this.contentEl.style.cssText;
+    applyEditorAppearance(this.contentEl, this.plugin.settings);
+    if (this.editor) {
+      if (before !== this.contentEl.style.cssText) {
+        this.appearanceTheme = 1 - this.appearanceTheme;
+        this.editor.dispatch({ effects: this.appearanceCompartment.reconfigure(APPEARANCE_THEMES[this.appearanceTheme]) });
+      }
+      refreshLatexTooltipAppearance(this.editor);
+      this.editor.requestMeasure();
+    }
+  }
+
   setViewData(data: string, clear: boolean): void {
+    this.applyAppearance();
     this.data = data;
     if (!this.editor || clear) this.committedData = data.replace(/\r\n?/g, "\n");
     this.plugin.theoremGraphs?.invalidate();
@@ -416,6 +440,7 @@ export class TexView extends TextFileView {
         },
       },
       extensions: [
+        this.appearanceCompartment.of(APPEARANCE_THEMES[this.appearanceTheme]),
         latexTooltipPortal(),
         theoremGraphHover({
           load: (view, key, signal) => {
@@ -431,6 +456,7 @@ export class TexView extends TextFileView {
         EditorView.domEventHandlers({
           compositionend: () => {
             if (this.saveAfterComposition) this.scheduleSave();
+            if (this.appearanceAfterComposition) queueMicrotask(() => this.applyAppearance());
             return false;
           },
         }),

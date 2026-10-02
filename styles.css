@@ -29,10 +29,13 @@ SOFTWARE.
 }
 .ll-editor-content .cm-editor {
   height: 100%;
-  font-family: var(--font-monospace);
+  font-family: var(--ll-editor-font-family, var(--font-monospace));
   font-size: var(--font-text-size, 16px);
   background: transparent;
   color: var(--text-normal);
+}
+.ll-editor-content .cm-editor .cm-scroller {
+  font-family: var(--ll-editor-font-family, var(--font-monospace));
 }
 .ll-editor-content .cm-editor .cm-gutters {
   background: transparent;
@@ -538,6 +541,17 @@ SOFTWARE.
   opacity: 0.85;
 }
 /* shared:editor.css end */
+
+/* Scale only LaTeX's wrappers around MathJax. CHTML's own inline percentage keeps
+   its font-height compensation; font-size updates the actual layout height.
+   Failed math, images, PDF crops, fragment cards and pending spinners do not match. */
+.ll-editor-content .lsp-lp-math:has(> mjx-container[jax="CHTML"]) {
+  font-size: calc(1em * var(--ll-math-preview-scale, 1));
+}
+.ll-editor-content .lsp-render-hover:has(> mjx-container[jax="CHTML"]),
+.ll-editor-content .ll-theorem-math:not(.ll-theorem-math .ll-theorem-math):has(> mjx-container[jax="CHTML"]) {
+  font-size: calc(var(--ll-editor-math-font-size, 1em) * var(--ll-math-preview-scale, 1));
+}
 
 /* Live preview, LaTeX's own (latexLive.ts): a proof's \end line shows its mark at the right. */
 .ll-editor-content .cm-line.ll-qed-line {
