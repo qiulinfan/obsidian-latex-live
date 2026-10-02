@@ -53,6 +53,9 @@
     Keep the real and fake regressions in `tests/fullBuildNoop.test.ts`.
   - TeX reports physical paths (`/private/var/...` on macOS); map them back
     with `logicalMapper` before comparing with vault paths.
+    At the vault boundary, use Obsidian's `normalizePath` and NFC-normalized relative
+    paths for its file index (including the vault root). Keep native filesystem/SyncTeX
+    paths unchanged; do not URL-decode filenames. Reject outside paths after normalization too.
   - Spawn TeX with `max_print_line=10000` and `-file-line-error`; the log
     parser depends on both.
   - Every TeX run goes through `runTex` (`src/tex/run.ts`: its own process

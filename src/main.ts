@@ -11,6 +11,7 @@ import {
   WorkspaceLeaf,
   finishRenderMath,
   loadMathJax,
+  normalizePath,
 } from "obsidian";
 import { HistoryCache, syncDarkTheme } from "./editor/shared/editorKit";
 import { isLive, renderStats } from "./editor/shared/livePreview";
@@ -321,11 +322,17 @@ export default class LatexLivePlugin extends Plugin {
   vaultPath(abs: string): string | null {
     const base = this.vaultBase();
     if (!base) return null;
-    const rel = relative(base, abs);
+    // SyncTeX preserves the filesystem spelling; Obsidian indexes NFC paths. Normalize
+    // only at this vault boundary, including a decomposed spelling of the vault itself.
+    const rel = relative(base.normalize("NFC"), abs.normalize("NFC"));
     if (!rel || rel.startsWith(`..${sep}`) || rel === ".." || isAbsolute(rel)) {
       return null;
     }
-    return rel.split(sep).join("/");
+    const normalized = normalizePath(rel.split(sep).join("/"));
+    // Host normalization also treats backslashes as separators. Keep that from turning
+    // a POSIX filename into a path that escapes the vault.
+    return !normalized || normalized === ".." || normalized.startsWith("../") || isAbsolute(normalized)
+      ? null : normalized;
   }
 
   rootFor(abs: string): string {

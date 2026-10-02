@@ -17,6 +17,32 @@ export class Component {
   register(_cb: Callback): void {}
 }
 
+/** Obsidian's documented canonical vault paths: separators and NFC Unicode. */
+export function normalizePath(path: string): string {
+  const parts: string[] = [];
+  for (const part of path.replace(/\\/g, "/").split("/")) {
+    if (!part || part === ".") continue;
+    if (part === ".." && parts.length && parts.at(-1) !== "..") parts.pop();
+    else parts.push(part);
+  }
+  return parts.join("/").normalize("NFC");
+}
+
+/** Settings tabs inherit Component; navigation tests import the plugin without loading it. */
+export class PluginSettingTab extends Component {}
+
+export class FileSystemAdapter {
+  constructor(private basePath: string) {}
+  getBasePath(): string { return this.basePath; }
+}
+
+/** Entry-point imports only; navigation tests must not initialize settings or global math. */
+export class Setting {
+  constructor() { throw new Error("Settings UI is not available in this test host."); }
+}
+export async function loadMathJax(): Promise<void> { throw new Error("Global MathJax is not available in this test host."); }
+export function finishRenderMath(): void { throw new Error("Global MathJax is not available in this test host."); }
+
 export class Scope {
   keys: { modifiers: string[]; key: string | null; func: Callback }[] = [];
   constructor(public parent?: Scope) {}
