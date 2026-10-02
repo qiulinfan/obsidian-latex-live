@@ -27,6 +27,11 @@ export interface BibEntry {
   readonly year: string;
   /** The title as text ("" without one). */
   readonly title: string;
+  /** Complete resolved BibTeX fields, preserving TeX markup and full author names. */
+  readonly fields?: Readonly<Record<string, string>>;
+  /** The original entry, for inspecting fields without losing their authored form. */
+  readonly source?: string;
+  readonly offset?: number;
 }
 
 const MONTHS: Record<string, string> = {
@@ -82,7 +87,7 @@ export function parseBib(text: string): Map<string, BibEntry> {
     i = Math.max(r.end, at + 1);
     // A key has no spaces or `=` (a keyless entry is skipped).
     if (!key || /[\s=]/.test(key) || out.has(key)) continue;
-    out.set(key, entry(key, type, r.fields));
+    out.set(key, { ...entry(key, type, r.fields), source: text.slice(at, i), offset: at });
   }
   return out;
 }
@@ -168,7 +173,7 @@ function entry(key: string, type: string, f: ReadonlyMap<string, string>): BibEn
   const others = raw.length > 0 && raw[raw.length - 1].trim().toLowerCase() === "others";
   const names = (others ? raw.slice(0, -1) : raw).map(lastName).filter(Boolean);
   const year = texText(f.get("year") ?? "") || (/\d{4}/.exec(f.get("date") ?? "")?.[0] ?? "");
-  return { key, type, names, others, year, title: texText(f.get("title") ?? "") };
+  return { key, type, names, others, year, title: texText(f.get("title") ?? ""), fields: Object.fromEntries(f) };
 }
 
 /** A name's last name as text: `Last, First` or `First von Last` (see the file comment). */

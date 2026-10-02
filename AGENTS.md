@@ -739,3 +739,21 @@
   versions metadata; `--assets` verifies the production three-file release and no sourcemap.
   GitHub release assets are built from the pushed tag. Never overwrite published tags or
   release assets to correct a mistake; increment the patch version and publish a fresh release.
+
+- Project writing tools are documented in `docs/project-writing-tools.md`. `projectIndex`
+  snapshots committed buffers and literal inputs (including vault-local parent-folder inputs)
+  only on demand. Incomplete input traversal is visible and prevents global label rename.
+  `projectEdits`/`projectOperations` check disk plus every open pane through Vault.process CAS,
+  serialize mutations per host, keep a recovery backup, and conditionally roll back/Undo.
+  After a saved CAS update, `TexView.acceptProjectData` cancels its autosave and applies the
+  external minimal diff; never add an unguarded second `flush`/write after that boundary.
+  `latexFolding` maps its structural RangeSet during edits and rebuilds after 400 ms idle;
+  no whole-document scan in a fold gutter callback or typing transaction. The outline works
+  only while open and coalesces committed edits at 800 ms. Keep keyArbiter ownership unchanged.
+- The full bibliography index parses active AST declarations, not regex matches from code
+  examples. Cache invalidation tracks balanced declaration ranges, including multiline paths;
+  ordinary typing maps these small ranges without scanning a project. Citation completion
+  bypasses texlab's limited page, retains complete full-author/year/title/key metadata and
+  uses plain text for original entry details. Prose/spelling/table tools run explicitly;
+  spelling uses project signatures, skips identifiers/code/math and reports a missing host
+  dictionary. Generated table previews escape TeX specials and reject unsupported merged cells.

@@ -887,3 +887,24 @@ SOFTWARE.
 .ll-theorem-graph-content td, .ll-theorem-graph-content th { padding: 3px 6px; }
 .ll-theorem-graph-content .llx-missing, .ll-theorem-graph-content .llx-math-error { color: var(--text-error, #be3030); }
 .ll-theorem-render-note, .ll-theorem-footnote { font-size: .85em; color: var(--text-muted); }
+
+/* Project tools: bounded result panes; project indexing never lives in the editor layout. */
+.ll-project-tools input[type="search"], .ll-project-tools textarea { width: 100%; }
+.ll-project-tools textarea { font-family: var(--font-monospace); resize: vertical; }
+.ll-project-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.ll-project-results, .ll-bib-results { max-height: 45vh; overflow: auto; min-height: 0; }
+.ll-project-group { margin: 8px 0; }
+.ll-project-match, .ll-bib-result { display: block; width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; margin: 4px 0; }
+.ll-project-edit { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; background: var(--background-secondary); }
+.ll-project-status { color: var(--text-muted); margin: 8px 0; }
+.ll-bib-detail { max-height: 35vh; overflow: auto; padding: 8px 0; }
+.ll-bib-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ll-bib-detail dt { font-weight: bold; }
+.ll-bib-detail dd { margin: 0 0 6px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ll-spelling-error { text-decoration: underline wavy var(--text-error); text-underline-offset: 3px; }
+.ll-project-tools { min-width: 0; overflow-wrap: anywhere; }
+.ll-project-tools input[type="text"] { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.ll-project-toolbar > label { display: flex; gap: 6px; align-items: center; min-width: 0; flex: 1 1 180px; }
+.ll-project-toolbar input[type="text"] { flex: 1 1 auto; }
+.ll-bib-detail button { max-width: 100%; white-space: normal; }
+.ll-project-outline { overflow: auto; min-height: 0; }

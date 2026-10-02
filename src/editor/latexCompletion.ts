@@ -43,6 +43,7 @@ import {
   snippetText,
 } from "./latexCommands";
 import { TokState, tokenizeLine } from "./latexHighlight";
+import type { IndexedCitation } from "./bibliographies";
 import {
   InfoRenderer,
   LspCompletionBackend,
@@ -198,6 +199,8 @@ function closedAfter(doc: Text, pos: number): Set<string> {
 // ---- options ------------------------------------------------------------------------------
 
 export interface LatexCompletionEnv {
+  /** Complete local libraries, independent of texlab's 50-item response. */
+  citations?: () => Promise<readonly IndexedCitation[]>;
   /** Definitions from the project's files (macros with arguments, colors, environments). */
   definitions?: () => Definitions;
   renderInfo?: InfoRenderer;
@@ -467,6 +470,18 @@ export function latexBackend(
     },
     resolve: inner?.resolve ? (item) => inner.resolve!(item) : undefined,
     async request(pos, context, state) {
+      const a = analysis(state, lspPosToOffset(state.doc, pos));
+      const c = a.context;
+      if (!env.bib && env.citations && !a.quiet && c?.kind === "argument" && c.arg === "cite") {
+        const entries = await env.citations();
+        const seen = new Set<string>();
+        const range = { start: offsetToLspPos(state.doc, c.from), end: offsetToLspPos(state.doc, c.to) };
+        return { isIncomplete: false, items: entries.filter(e => !seen.has(e.entry.key) && !!seen.add(e.entry.key)).map(({ entry, search }) => ({
+          label: entry.key, kind: 18, detail: `${entry.year} ${entry.title}`.trim(),
+          filterText: search, textEdit: { range, newText: entry.key },
+          documentation: { kind: "plaintext", value: entry.source ?? Object.entries(entry.fields ?? {}).map(([k, v]) => `${k}: ${v}`).join("\n") },
+        })) };
+      }
       const ask = async (p: LspPosition, ctx: LspCompletionContext, s: EditorState) => {
         try {
           return asList(inner ? await inner.request(p, ctx, s) : null);
@@ -476,8 +491,6 @@ export function latexBackend(
       };
       let list = await ask(pos, context, state);
       if (env.bib) return list.items.length ? list : null;
-      const a = analysis(state, lspPosToOffset(state.doc, pos));
-      const c = a.context;
       if (!list.items.length && c?.kind === "argument" && c.arg === "cite" && c.query) {
         // texlab matches citations by key only: `\cite{Masked Au` typed before the list
         // opened gets nothing. Ask with the query removed and replace it on accept; the

@@ -18,6 +18,11 @@ import { YoloBridge } from "./editor/shared/yoloBridge";
 import type { MathJaxLike } from "./editor/mathjaxProject";
 import { TexRender } from "./editor/texRender";
 import { TheoremGraphs } from "./editor/theoremGraphs";
+import { Bibliographies } from "./editor/bibliographies";
+import { registerBibliography } from "./editor/bibliographyView";
+import { registerProseTools } from "./editor/proseTools";
+import { registerProjectOutline } from "./editor/projectOutline";
+import { registerProjectOperations } from "./editor/projectOperations";
 import { TexView, VIEW_TYPE_TEX } from "./editor/texView";
 import { registerExport } from "./export/command";
 import { TexlabServer, resolveTexlab, texlabSettings } from "./lsp/texlab";
@@ -48,6 +53,7 @@ export default class LatexLivePlugin extends Plugin {
   texRender!: TexRender;
   /** Source-backed proof references and lazy statement/proof cards for each open project. */
   theoremGraphs!: TheoremGraphs;
+  bibliographies!: Bibliographies;
   /** PDF crops of blocks from the previewed sessions' last compiles (hover and live preview). */
   crops!: CropService;
   /** Fragment compiles for the hover: what MathJax and the crops cannot show (design 4.7). */
@@ -125,6 +131,7 @@ export default class LatexLivePlugin extends Plugin {
       math: (root, src, display, doc, defs, refs) => this.texRender.sourceMath(root, src, display, doc, defs, refs).outerHTML,
       pdfImages: async (abs, want, signal) => pdfPagePngs(new Uint8Array(await readFile(abs, { signal })), want, 2, signal),
     });
+    this.bibliographies = new Bibliographies(() => this.editorBuffers(true));
 
     this.registerView(VIEW_TYPE_TEX, (leaf) => new TexView(leaf, this));
     this.registerView(VIEW_TYPE_PREVIEW, (leaf) => new LatexPreviewView(leaf, this));
@@ -192,6 +199,10 @@ export default class LatexLivePlugin extends Plugin {
     });
 
     registerExport(this);
+    registerBibliography(this);
+    registerProseTools(this);
+    registerProjectOutline(this);
+    registerProjectOperations(this);
 
     this.addCommand({
       id: "trigger-completion",
@@ -222,13 +233,14 @@ export default class LatexLivePlugin extends Plugin {
         this.histories.rename(old, f.path);
         this.texRender.filesChanged();
         this.theoremGraphs.invalidate();
+        this.bibliographies.invalidate();
       }),
     );
     // Live preview's images resolve again (a figure saved, deleted or moved). After the layout
     // is ready: the vault's initial scan creates every file.
     this.app.workspace.onLayoutReady(() => {
-      this.registerEvent(this.app.vault.on("create", () => { this.texRender.filesChanged(); this.theoremGraphs.invalidate(); }));
-      this.registerEvent(this.app.vault.on("delete", () => { this.texRender.filesChanged(); this.theoremGraphs.invalidate(); }));
+      this.registerEvent(this.app.vault.on("create", () => { this.texRender.filesChanged(); this.theoremGraphs.invalidate(); this.bibliographies.invalidate(); }));
+      this.registerEvent(this.app.vault.on("delete", () => { this.texRender.filesChanged(); this.theoremGraphs.invalidate(); this.bibliographies.invalidate(); }));
     });
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => this.onActiveLeaf(leaf)),
@@ -250,6 +262,7 @@ export default class LatexLivePlugin extends Plugin {
     this.fragments.dispose();
     this.texRender.dispose();
     this.theoremGraphs.dispose();
+    this.bibliographies.invalidate();
     window.clearTimeout(this.restartTimer);
     void this.texlab.dispose();
   }
@@ -345,7 +358,7 @@ export default class LatexLivePlugin extends Plugin {
   }
 
   /** The text of the open LaTeX editors by absolute path (unsaved edits included). */
-  private editorBuffers(committed = false): Map<string, string> {
+  editorBuffers(committed = false): Map<string, string> {
     const out = new Map<string, string>();
     for (const v of this.texViews()) {
       const abs = v.absolutePath();
@@ -460,7 +473,7 @@ export default class LatexLivePlugin extends Plugin {
   }
 
   /** Open a vault file in the LaTeX editor at a 1-based line. */
-  async openLocation(abs: string, line: number): Promise<void> {
+  async openLocation(abs: string, line: number, column = 0): Promise<void> {
     const rel = this.vaultPath(abs);
     const file = rel ? this.app.vault.getAbstractFileByPath(rel) : null;
     if (!(file instanceof TFile)) return;
@@ -475,7 +488,7 @@ export default class LatexLivePlugin extends Plugin {
       leaf = this.editorLeaf();
       await leaf.openFile(file);
     }
-    if (leaf.view instanceof TexView) leaf.view.revealLine(line);
+    if (leaf.view instanceof TexView) leaf.view.revealLine(line, column);
   }
 
   private editorLeaf(): WorkspaceLeaf {
@@ -487,7 +500,7 @@ export default class LatexLivePlugin extends Plugin {
       : this.app.workspace.getLeaf("tab");
   }
 
-  private texViews(): TexView[] {
+  texViews(): TexView[] {
     return this.app.workspace
       .getLeavesOfType(VIEW_TYPE_TEX)
       .map((l) => l.view)
@@ -529,6 +542,7 @@ export default class LatexLivePlugin extends Plugin {
     const abs = this.absolutePath(f.path);
     this.texRender.fileModified(abs);
     this.theoremGraphs.invalidate();
+    void this.bibliographies.fileModified(abs);
     for (const s of this.sessions.values()) {
       const deps = s.compiler.deps;
       const fresh = deps.size === 0 && abs.startsWith(s.compiler.rootDir + sep);

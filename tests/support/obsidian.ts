@@ -207,6 +207,49 @@ export class WorkspaceLeaf {
   constructor(public app: TestApp) {}
 }
 
+/** Side-panel views share the ordinary Component lifecycle, without file-saving behaviour. */
+export abstract class ItemView extends Component {
+  app: TestApp;
+  containerEl: TestEl;
+  contentEl: TestEl;
+  actionsEl: HTMLElement;
+
+  constructor(public leaf: WorkspaceLeaf) {
+    super();
+    installDomHelpers();
+    this.app = leaf.app;
+    this.containerEl = testEl("div");
+    this.actionsEl = this.containerEl.appendChild(document.createElement("div"));
+    this.contentEl = this.containerEl.appendChild(testEl("div"));
+    document.body.appendChild(this.containerEl);
+  }
+
+  abstract getViewType(): string;
+  abstract getDisplayText(): string;
+  getIcon(): string { return "document"; }
+  getState(): Record<string, unknown> { return {}; }
+  async setState(_state: unknown, _result?: unknown): Promise<void> {}
+  async onOpen(): Promise<void> {}
+  async onClose(): Promise<void> {}
+  addAction(icon: string, title: string, cb: Callback): HTMLElement {
+    const el = document.createElement("button");
+    setIcon(el, icon);
+    setTooltip(el, title);
+    el.addEventListener("click", (event) => cb(event));
+    this.actionsEl.prepend(el);
+    return el;
+  }
+}
+
+/** Registrations can be inspected by integration tests; no application is started. */
+export class Plugin extends Component {
+  commands: Record<string, unknown>[] = [];
+  views = new Map<string, (leaf: WorkspaceLeaf) => unknown>();
+  constructor(public app: TestApp) { super(); }
+  addCommand(command: Record<string, unknown>): void { this.commands.push(command); }
+  registerView(type: string, creator: (leaf: WorkspaceLeaf) => unknown): void { this.views.set(type, creator); }
+}
+
 type TestEl = HTMLElement & {
   addClass(...classes: string[]): void;
   toggleClass(classes: string | string[], value: boolean): void;

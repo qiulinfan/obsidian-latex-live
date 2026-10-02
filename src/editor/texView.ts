@@ -20,6 +20,9 @@ import { Definitions, emptyDefinitions, projectDefinitions } from "../tex/macros
 import { includeName, preambleFiles } from "../tex/project";
 import { latexCompletionSource } from "./latexCompletion";
 import { applyEditorAppearance } from "./editorAppearance";
+import { latexFolding } from "./latexFolding";
+import { proseSpelling } from "./proseTools";
+import { invalidateProjectOutline } from "./projectOutline";
 import { latexLiveLanguage } from "./latexLive";
 import { latexTooltipPortal, refreshLatexTooltipAppearance, theoremGraphHover } from "./theoremGraphView";
 import {
@@ -158,6 +161,15 @@ export class TexView extends TextFileView {
     return this.committedData;
   }
 
+  /** A project transaction already saved this text through Vault.process's CAS boundary. */
+  acceptProjectData(data: string): void {
+    if (this.editor?.compositionStarted) throw new Error("Finish composing before applying a project edit.");
+    if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    this.saveAfterComposition = false;
+    this.setViewData(data, false);
+  }
+
   /** Typography changes are local styles, preserving selection, history and unsaved text. */
   applyAppearance(): void {
     if (this.editor?.compositionStarted) { this.appearanceAfterComposition = true; return; }
@@ -269,10 +281,11 @@ export class TexView extends TextFileView {
   }
 
   /** Move the cursor to a 1-based line, scroll it into view, and focus. */
-  revealLine(line: number): void {
+  revealLine(line: number, column = 0): void {
     if (!this.editor) return;
     const doc = this.editor.state.doc;
-    const pos = doc.line(Math.min(Math.max(line, 1), doc.lines)).from;
+    const target = doc.line(Math.min(Math.max(line, 1), doc.lines));
+    const pos = target.from + Math.min(Math.max(column, 0), target.length);
     this.editor.dispatch({
       selection: { anchor: pos },
       effects: EditorView.scrollIntoView(pos, { y: "center" }),
@@ -403,6 +416,10 @@ export class TexView extends TextFileView {
         renderInfo: (doc) => this.renderMarkdown(doc.value, doc.kind === "plaintext"),
         bib: this.file?.extension === "bib",
         isFolder: (path) => this.isFolder(path),
+        citations: () => {
+          const root = this.projectInfo()?.root;
+          return root && plugin.bibliographies ? plugin.bibliographies.load(root) : Promise.resolve([]);
+        },
       }),
       onEdit: (view, changes, startDoc) => {
         this.committedData = view.state.doc.toString();
@@ -411,7 +428,9 @@ export class TexView extends TextFileView {
         if (abs) {
           plugin.texlab.change(abs, view.state.doc, changes, startDoc);
           plugin.texRender.edited(abs, changes, startDoc, view.state.doc);
+          plugin.bibliographies?.edited(abs, changes, startDoc, view.state.doc);
         }
+        invalidateProjectOutline(plugin);
         if (!this.applyingExternal) this.onEdited();
       },
       onCursor: () => this.onCursorMoved(),
@@ -440,6 +459,8 @@ export class TexView extends TextFileView {
         },
       },
       extensions: [
+        DATA_EXTENSIONS.has(this.file?.extension ?? "") ? [] : latexFolding,
+        proseSpelling,
         this.appearanceCompartment.of(APPEARANCE_THEMES[this.appearanceTheme]),
         latexTooltipPortal(),
         theoremGraphHover({
