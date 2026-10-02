@@ -202,15 +202,46 @@ test("XeLaTeX wrapper preserves Chinese spaced paths and distinct raw names shar
   } finally { await rm(folder, { recursive: true, force: true }); }
 });
 
-test("LuaLaTeX document export and unsafe mappings fail explicitly", async () => {
+test("LuaLaTeX document bridge retains native drawings and exact markers without touching source", { skip: !tex, timeout: 90_000 }, async () => {
+  const folder = await mkdtemp(join(tmpdir(), "latex-live-bridge-lua-test-"));
+  try {
+    const source = join(folder, "main.tex");
+    const text = String.raw`\documentclass{article}
+\usepackage{luamplib,tikz}
+\providecommand{\kn}[1]{\textbf{#1}}\providecommand{\knref}[1]{#1}
+\begin{document}
+\kn{Lua}: native drawings. See \knref{Lua}.
+\begin{mplibcode}
+beginfig(0); fill (0,0)--(13,0)--(3,7)--cycle withcolor (1,0,0); endfig;
+\end{mplibcode}
+\tikz\draw (0,0) circle (0.8ex);
+\end{document}`;
+    await writeFile(source, text);
+    const result = await kgdistillerHtml({ schema, operation: "document", source, engine: "lualatex", markers: [{ name: "Lua", id: "lua", url: "#kn-lua" }] });
+    assert.equal(result.operation, "document");
+    if (result.operation !== "document") throw new Error("Expected document");
+    assert.equal(result.report.engine, "lualatex");
+    const dom = new JSDOM(result.html);
+    assert.equal(dom.window.document.querySelectorAll('[id="kn-lua"][data-ql-kn="lua"]').length, 1);
+    assert.equal(dom.window.document.querySelectorAll('a[data-ql-ref="lua"][href="#kn-lua"]').length, 1);
+    assert.equal(dom.window.document.querySelectorAll("svg.llx-frag").length, 2);
+    assert.deepEqual(result.report.items.filter((item) => item.severity !== "info"), []);
+    assert.equal(await readFile(source, "utf8"), text);
+    assert.deepEqual(await readdir(folder), ["main.tex"]);
+    dom.window.close();
+  } finally { await rm(folder, { recursive: true, force: true }); }
+});
+
+test("unsafe mappings and cancelled Lua document exports fail explicitly", async () => {
   const folder = await mkdtemp(join(tmpdir(), "latex-live-bridge-engine-test-"));
   try {
     const source = join(folder, "main.tex");
     await writeFile(source, "\\documentclass{article}\n\\begin{document}Test.\\end{document}\n");
-    await assert.rejects(kgdistillerHtml({ schema, operation: "document", source, engine: "lualatex", markers: [] }), /LuaLaTeX is not supported/);
     await assert.rejects(kgdistillerHtml({ schema, operation: "document", source, markers: [{ name: "A", id: "a", url: "javascript:alert(1)" }] }), /safe http/);
     const controller = new AbortController();
     controller.abort();
     await assert.rejects(kgdistillerHtml({ schema, operation: "labels", labels: [] }, controller.signal), /cancelled/);
+    await assert.rejects(kgdistillerHtml({ schema, operation: "document", source, engine: "lualatex", markers: [] }, controller.signal), /cancelled/);
+    assert.deepEqual(await readdir(folder), ["main.tex"]);
   } finally { await rm(folder, { recursive: true, force: true }); }
 });

@@ -23,7 +23,9 @@ exit nonzero. The two operations are:
   `project_root`, `markers: [{name, id, url}]`, optional `engine`.
   Returns complete self-contained `html` and the existing export `report`.
   Whole-document export needs a TeX installation (`TEXBIN` can select its bin
-  directory), and supports pdfLaTeX/XeLaTeX; LuaLaTeX is explicitly rejected.
+  directory), and supports pdfLaTeX, XeLaTeX and LuaLaTeX. LuaLaTeX drawing
+  fragments use native PDF and require a supported dvisvgm PDF backend, such as
+  mutool (MuPDF tools).
 
 kgdistiller owns identity decisions. Each marker mapping preserves an exact raw
 TeX name and supplies its established stable ID and URL. Several raw names may

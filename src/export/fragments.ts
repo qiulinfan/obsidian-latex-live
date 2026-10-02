@@ -6,8 +6,11 @@
 // Every snippet starts with a marker the probe writes (`\special{dvisvgm:raw <g class="llx-ref"
 // data-id=".." data-visit=".." data-y="{?y}"/>}`), so a page names its drawing (a package shipping out a page of
 // its own shifts nothing), and an inline one gives its baseline in SVG coordinates (the viewBox's
-// origin differs per engine: pdfLaTeX y=0, XeLaTeX y=-64.03 on the same box). Post-processing
-// (string transforms, `prepareFragment`):
+// origin differs per engine: pdfLaTeX y=0, XeLaTeX y=-64.03 on the same box).
+// LuaLaTeX uses native PDF pages so Lua-only drawing packages keep their PDF output. Its
+// shipout records identify physical pages and record savepos's baseline and page dimensions;
+// markPdfPage verifies the PDF SVG box and restores the equivalent marker before preparation.
+// Post-processing (string transforms, `prepareFragment`):
 //   - the XML declaration, comments and the markers go; black becomes `currentColor` (dvisvgm's
 //     `--currentcolor` covers glyphs, pgf writes its own `fill='#000'`), so dark pages keep it legible;
 //   - ids, `href`/`url(#..)` targets, dvisvgm's `f<n>` font classes and `@font-face` families get the
@@ -35,6 +38,18 @@ const SVG_TAGS = new Set([
 
 /** TeX points per big point (SVG user units are bp). */
 const PT_PER_BP = 72.27 / 72;
+
+/** Lua's PDF-mode marker, captured by savepos and a deferred write during real shipout. */
+export interface PdfPageMarker {
+  id: number;
+  visit: number;
+  page: number;
+  /** PDF coordinates (scaled TeX points), measured from the bottom left. */
+  y: number;
+  width: number;
+  height: number;
+  inline: boolean;
+}
 
 const round = (x: number) => Number(x.toFixed(4));
 
@@ -87,6 +102,32 @@ export function pageDrawing(svg: string): { id: number; visit: number } | null {
     if (id !== null && visit !== null && /^\d+$/.test(id) && /^\d+$/.test(visit)) return { id: Number(id), visit: Number(visit) };
   }
   return null;
+}
+
+/**
+ * Restore a Lua PDF page's marker only through its explicit physical-page record. PDF SVGs
+ * inherit the PDF page box; verify its geometry before translating the saved bottom-origin
+ * baseline to SVG's top origin. An absent/ambiguous record or a changed coordinate system
+ * leaves the page unclaimed, rather than assigning it to the next source construct.
+ */
+export function markPdfPage(svg: string, page: number, markers: readonly PdfPageMarker[]): string | null {
+  const matches = markers.filter((m) => m.page === page);
+  if (matches.length !== 1) return null;
+  const marker = matches[0];
+  const root = /<svg\b[^>]*>/.exec(svg);
+  const box = root && /\bviewBox=(['"])([^'"]*)\1/.exec(root[0])?.[2].trim().split(/[\s,]+/).map(Number);
+  if (!root || !box || box.length !== 4 || box.some((x) => !Number.isFinite(x))) return null;
+  const bp = (sp: number) => sp / 65536 / PT_PER_BP;
+  if (Math.abs(box[0]) > 0.02 || Math.abs(box[1]) > 0.02 ||
+      Math.abs(box[2] - bp(marker.width)) > 0.02 || Math.abs(box[3] - bp(marker.height)) > 0.02) return null;
+  const baseline = marker.inline ? ` data-y="${bp(marker.height - marker.y)}"` : "";
+  const restored = `<g class="llx-ref" data-id="${marker.id}" data-visit="${marker.visit}"${baseline}/>`;
+  const at = root.index + root[0].length;
+  const end = svg.lastIndexOf("</svg>");
+  if (end < at) return null;
+  // PDF's unpainted glyphs inherit SVG's default black. Keep that inherited paint tied to
+  // the HTML text color, as the explicit black attributes are in prepareFragment.
+  return svg.slice(0, at) + restored + '<g fill="currentColor">' + svg.slice(at, end) + "</g>" + svg.slice(end);
 }
 
 /** An attribute value with its character references decoded (for the `javascript:` check). */

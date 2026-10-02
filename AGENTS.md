@@ -575,8 +575,16 @@
     limited to that fragment's owning visit, including its nested input steps. Never
     select a repeated drawing by page order or reuse its first occurrence.
   - Probe `today` and `title-date` values come from TeX before `maketitle` clears its
-    fields. LuaLaTeX HTML export is explicitly outside the first-release scope;
-    its DVI probe can return success while losing luamplib drawings. Reject it early.
+    fields. LuaLaTeX exports through a native PDF-mode probe: never force its Lua drawings
+    through DVI. Deferred shipout records carry static id, visit, physical page, savepos and
+    page dimensions; restore SVG markers from that exact metadata, never page order. The
+    native converter needs a supported dvisvgm PDF backend (for example installed mutool).
+    Preserve distribution/user PATH priority; add a standard helper directory only to the
+    converter child environment when necessary. A missing backend or zero drawings is an
+    explicit report error. Tests compare inline baselines with independent TeX box depth
+    and preview border, and cover native MetaPost, CJK fonts, repeated visits, extra pages,
+    minimal GUI PATH, numbered output and cancellation. Lua's main compiler still uses
+    the normal queue and has no pdfLaTeX preamble format.
   - `node scripts/regen-export-fixtures.mjs` regenerates the synthetic `.llx` and SVG
     evidence after probe/plan changes. `scripts/prepare-editor-fixture.mjs` prepares
     the GUI source fixture and its generated image assets in a fresh scratch folder.

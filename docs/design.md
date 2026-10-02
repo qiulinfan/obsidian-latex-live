@@ -1694,6 +1694,27 @@ LaTeX 编辑器现在通过 CodeMirror 官方 `tooltips({ parent })` 将提示�
 同一场景的独立 Chrome 检查 44/44 通过；新增门户容器、主题、历史恢复、弹出窗口和清理回归后，
 小窗单元测试 12/12 通过。修复后的原生 Obsidian 点击与录制验收另行记录，不以浏览器合成场景代替。
 
+### 可配置编辑外观与 LuaLaTeX（2026-10-02）
+
+- [x] 设置面板新增编辑字号（10–40 px）、行距（1.1–2.4）、源码字体列表和公式预览比例（50–200%）。
+  空字号/行距/字体跟随 Obsidian，默认数学比例 100%；作用域只在本视图及其浮窗。
+  保存即更新已打开的编辑器，IME 中延后；文字、选区、编辑模式和撤销历史保持。
+  两个复用的空 theme 通过 CM compartment 触发字体度量刷新，避免短文档的 min-height 掩盖变化而令行号漂移。
+  MathJax 原 CHTML 内联补偿百分比保留；图片、裁剪、错误、加载提示、正文及 PDF 排版不受数学比例影响。
+- [x] LuaLaTeX 的真实实时编译验收：fontspec/Fandol 中文、连续编辑请求合并与最新 PDF、Unicode/空格路径
+  SyncTeX 双向跳转、latexmk 完整构建/no-op，以及错误保留上一次 PDF、修复后替换来源快照。不开 pdfLaTeX format。
+- [x] LuaLaTeX HTML 使用原生 PDF 探针，保留 Lua/MetaPost、TikZ、中文字体和图像；pdfLaTeX/XeLaTeX 原 DVI/XDV
+  路径保持。shipout 的 `.llx` 元数据记录 source id、visit、实际物理页、savepos 与页尺寸，恢复 SVG 绘图身份和基线。
+  重复输入与额外未标记页不靠页顺序猜测；基线同时按原生 box depth 与 preview border 独立核对。
+  导出及既有 CLI adapter 支持三种引擎；取消仍杀本次进程组。缺失 PDF→SVG 后端或零输出会明确报告，保留源内容。
+  本机 dvisvgm 3.6 使用 Homebrew mupdf-tools 1.28.5；转换子进程在既有 PATH 找不到 mutool 时才补标准目录，
+  不改变全局 PATH。其他机器需安装 dvisvgm 支持的 PDF 后端。
+
+完整测试 763/763、零跳过，生产构建通过。新 Lua 原生/会话/导出及 bridge 定向验收均通过；原 pdf/Xe 与原生类探针
+回归保留。隔离 Chrome：外观 11/11、Lua 导出 27/27、共享实时编辑 31/31、定理小窗 44/44；
+Lua 行内 SVG 基线与文字相差约 -0.01 px，32 个片段字体全部加载，明暗主题和 375 px 窄屏零溢出、零控制台错误。
+本次用户明确允许录屏期间并行验证；录屏进程和录制窗口没有被停止或重载。
+
 静态 `.llx`/SVG 再生成：`node scripts/regen-export-fixtures.mjs`。GUI 源和 PNG/PDF：
 `node scripts/prepare-editor-fixture.mjs <scratch-folder>`。PDF、截图和运行日志留在临时目录，不进入 Git。
 

@@ -8,9 +8,9 @@ import type { ExportPlan, ProbeConfig } from "./plan";
 // The probe pass (design 3.2): one extra TeX run over the plan's instrumented copies, in the
 // export's work folder (`<build folder>-export`, a sibling: readAuxLabels scans the build folder
 // three levels deep), with llxprobe.sty loaded before \documentclass. It writes <job>.llx (see
-// probeLog.ts) and a DVI whose pages are the fragments (the preview package), which dvisvgm turns
+// probeLog.ts) and fragment pages (DVI/XDV, or native PDF with LuaLaTeX), which dvisvgm turns
 // into SVG (`runDvisvgm`, fragments.ts).
-//   <engine> <DVI flag> -interaction=nonstopmode -file-line-error -jobname=<job>
+//   <engine> <output flag> -interaction=nonstopmode -file-line-error -jobname=<job>
 //            "\RequirePackage{llxprobe}\input{<root file>}"          cwd: the work folder
 //   TEXINPUTS=.:<work>/src:<root folder>: (+ the user's): the instrumented copies first, then the
 //   project's own files (local packages, images, files the plan did not parse).
@@ -40,11 +40,12 @@ export interface ProbeResult {
   timedOut: boolean;
   /** The DVI (pdfLaTeX) or XDV (XeLaTeX) of the fragments, when written. */
   dvi: string | null;
+  /** Native PDF fragment pages with LuaLaTeX; DVI would discard PDF-only Lua drawings. */
+  pdf: string | null;
   durationMs: number;
 }
 
-/** LuaLaTeX needs a PDF-mode probe; the first release refuses it before using this table. */
-const DVI_FLAGS = { pdflatex: "-output-format=dvi", xelatex: "-no-pdf" };
+const OUTPUT_FLAGS = { pdflatex: "-output-format=dvi", xelatex: "-no-pdf", lualatex: "-output-format=pdf" };
 
 const csList = (names: readonly string[]) => names.filter((n) => /^[A-Za-z@*]+$/.test(n)).join(",");
 
@@ -116,7 +117,7 @@ export function probeSty(cfg: ProbeConfig, inputs: readonly ProbeInput[] = []): 
   const names = cfg.names.filter((n) => !["author", "institute", "date", "version"].includes(n) || titleNames.includes(n));
   return String.raw`% llxprobe.sty: LaTeX Live's HTML export probe, generated for one export (not user code).
 \ProvidesPackage{llxprobe}[2026/09/29 LaTeX Live export probe]
-\def\pgfsysdriver{pgfsys-dvisvgm.def}
+\ifdefined\directlua\else\def\pgfsysdriver{pgfsys-dvisvgm.def}\fi
 \ifdefined\XeTeXrevision\else\ifdefined\directlua\else
   \PassOptionsToPackage{dvisvgm}{graphicx}\PassOptionsToPackage{dvisvgm}{graphics}\PassOptionsToPackage{dvisvgm}{xcolor}
 \fi\fi
@@ -240,15 +241,33 @@ ${inputAliases(inputs)}
 \def\llx@citekey{\llx@write{llxcite{\thefield{entrykey}}{\thefield{labelnumber}}{\thefield{labelprefix}}}}
 \AddToHook{begindocument/before}{\ifdefined\AtEveryCitekey\AtEveryCitekey{\llx@citekey}%
   \AtEveryBibitem{\llx@citekey\llx@write{llxstep{llx@bib}{\thefield{entrykey}}\llx@where}}\fi}
-% Fragments: one preview page each, marked for dvisvgm (fragments.ts): the id, and an inline
-% one's baseline in SVG coordinates; llxopen/llxclose bracket the steps TeX takes inside one.
+% Fragments: one preview page each. DVI keeps raw SVG markers; Lua PDF records savepos and
+% physical page metadata in .llx. llxopen/llxclose bracket the steps TeX takes inside one.
 \AddToHook{class/after}{\ifdefined\endllxfrag\else
   \RequirePackage[active,tightpage]{preview}%
+  \ifdefined\directlua
+    % A PDF converter cannot recover DVI raw specials. Freeze the source identity now,
+    % then record the actual physical page and savepos when its box is shipped. Preview
+    % ships with the primitive (bypassing LaTeX's logical/absolute page counters).
+    \newcount\llx@pdfpage
+    \def\llx@pdfmarker#1{\edef\llx@marker{%
+      \noexpand\latelua{tex.count["llx@pdfpage"]=status.total_pages+1}%
+      \noexpand\pdfsavepos
+      \noexpand\write\llx@out{llxpdf{\llx@id}{\llx@fragmentvisit}%
+        {\noexpand\the\noexpand\llx@pdfpage}{\noexpand\number\noexpand\pdflastypos}%
+        {\noexpand\number\noexpand\pdfpagewidth}{\noexpand\number\noexpand\pdfpageheight}{#1}}}%
+      \llx@marker}
+    \def\llx@inlinemarker{\llx@pdfmarker{inline}}%
+    \def\llx@blockmarker{\llx@pdfmarker{block}}%
+  \else
+    \def\llx@inlinemarker{\special{dvisvgm:raw <g class="llx-ref" data-id="\llx@id" data-visit="\llx@fragmentvisit" data-y="{?y}"/>}}%
+    \def\llx@blockmarker{\special{dvisvgm:raw <g class="llx-ref" data-id="\llx@id" data-visit="\llx@fragmentvisit"/>}}%
+  \fi
   \newenvironment{llxfrag}[1]{\def\llx@id{#1}\edef\llx@fragmentvisit{\llx@visit}\llx@write{llxopen{#1}}\begin{lrbox}{\llx@box}}{\end{lrbox}%
     \llx@write{llxclose{\llx@id}}\llx@write{llxfrag{\llx@id}{\the\ht\llx@box}{\the\dp\llx@box}{\the\wd\llx@box}{\llx@fragmentvisit}}%
-    \leavevmode\special{dvisvgm:raw <g class="llx-ref" data-id="\llx@id" data-visit="\llx@fragmentvisit" data-y="{?y}"/>}\usebox\llx@box}%
+    \leavevmode\llx@inlinemarker\usebox\llx@box}%
   \newenvironment{llxblock}[1]{\def\llx@id{#1}\edef\llx@fragmentvisit{\llx@visit}\llx@write{llxopen{#1}}\llx@write{llxblock{#1}{\llx@fragmentvisit}}%
-    \special{dvisvgm:raw <g class="llx-ref" data-id="#1" data-visit="\llx@fragmentvisit"/>}}{\llx@write{llxclose{\llx@id}}}%
+    \llx@blockmarker}{\llx@write{llxclose{\llx@id}}}%
   \PreviewEnvironment{llxfrag}\PreviewEnvironment{llxblock}\fi}
 \endinput
 `;
@@ -257,6 +276,8 @@ ${inputAliases(inputs)}
 export interface FragmentPages {
   /** The SVG of each page dvisvgm wrote, in page order. */
   svgs: string[];
+  /** Physical page numbers from dvisvgm's output names, including gaps in failed conversion. */
+  pages: { page: number; svg: string }[];
   /** What dvisvgm printed (its warnings and errors). */
   output: string;
   code: number | null;
@@ -266,27 +287,40 @@ export interface FragmentPages {
 }
 
 /**
- * dvisvgm over every page of the probe's DVI into `<work>/frag/f<page>.svg` (runTex: its own
- * process group, the stall watchdog, `signal` kills it): exact ink boxes, black glyphs as
- * `currentColor`, fonts as WOFF2. Pages it could not convert are missing from `svgs`.
+ * dvisvgm over the probe's DVI/XDV or native Lua PDF into `<work>/frag/f<page>.svg` (runTex:
+ * its own process group, the stall watchdog, `signal` kills it). DVI uses exact ink boxes;
+ * PDF inherits preview's measured page box and needs a supported dvisvgm PDF backend.
+ * Pages it could not convert are missing from `pages` and `svgs`.
  */
-export async function runDvisvgm(dvi: string, host: ProbeHost, signal?: AbortSignal): Promise<FragmentPages> {
+export async function runDvisvgm(input: string, host: ProbeHost, signal?: AbortSignal): Promise<FragmentPages> {
   const started = Date.now();
   const dir = join(host.workDir, "frag");
   await fsp.rm(dir, { recursive: true, force: true });
   await fsp.mkdir(dir, { recursive: true });
+  const env = texEnv(host.binDir);
+  if (input.endsWith(".pdf")) {
+    // dvisvgm 3.6 invokes "mutool" through PATH (PDFHandler.cpp); there is no MUTOOL
+    // executable override. Obsidian started from Finder omits Homebrew's bin directory.
+    // Preserve distribution/user PATH priority and extend only this converter's child env.
+    const pathDirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
+    if (!pathDirs.some((d) => existsSync(texTool(d, "mutool")))) {
+      const helperDir = (process.platform === "win32" ? [] : ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"])
+        .find((d) => existsSync(texTool(d, "mutool")));
+      if (helperDir) env.PATH = [env.PATH, helperDir].filter(Boolean).join(delimiter);
+    }
+  }
   const run = await runTex(
     texTool(host.binDir, "dvisvgm"),
-    ["--page=1-", "--exact-bbox", "--currentcolor", "--font-format=woff2", `--output=${join(dir, "f%p.svg")}`, dvi],
-    { cwd: host.workDir, env: texEnv(host.binDir), log: null, stallMs: host.stallMs, timeoutMs: 120_000, signal },
+    [...(input.endsWith(".pdf") ? ["--pdf"] : []), "--page=1-", "--exact-bbox", "--currentcolor", "--font-format=woff2", `--output=${join(dir, "f%p.svg")}`, input],
+    { cwd: host.workDir, env, log: null, stallMs: host.stallMs, timeoutMs: 120_000, signal },
   );
   const files = (await fsp.readdir(dir).catch(() => [] as string[]))
     .map((f) => /^f(\d+)\.svg$/.exec(f))
     .filter((m): m is RegExpExecArray => m !== null)
     .sort((a, b) => Number(a[1]) - Number(b[1]));
-  const svgs: string[] = [];
-  for (const m of files) svgs.push(await fsp.readFile(join(dir, m[0]), "utf8"));
-  return { svgs, output: run.output, code: run.code, stalled: run.stalled, timedOut: run.timedOut, durationMs: Date.now() - started };
+  const pages: FragmentPages["pages"] = [];
+  for (const m of files) pages.push({ page: Number(m[1]), svg: await fsp.readFile(join(dir, m[0]), "utf8") });
+  return { svgs: pages.map((p) => p.svg), pages, output: run.output, code: run.code, stalled: run.stalled, timedOut: run.timedOut, durationMs: Date.now() - started };
 }
 
 /** The .aux files under `dir` (\include's in subfolders), up to three levels, as relative paths. */
@@ -352,17 +386,15 @@ export async function prepareWorkDir(plan: ExportPlan, host: ProbeHost, signal?:
 
 /**
  * Run the probe pass in the prepared work folder (runTex: its own process group, the stall
- * watchdog; `signal` kills it). Rejects when the engine is unsupported, TeX cannot start, or
- * the run is aborted.
+ * watchdog; `signal` kills it). Rejects when TeX cannot start or the run is aborted.
  */
 export async function runProbe(plan: ExportPlan, host: ProbeHost, signal?: AbortSignal): Promise<ProbeResult> {
   const started = Date.now();
   const work = host.workDir;
   if (signal?.aborted) throw abortError();
-  if (host.engine === "lualatex") throw new Error("HTML export currently supports pdfLaTeX and XeLaTeX. LuaLaTeX requires a PDF-mode probe, which is not supported yet.");
   // A direct retry must not mistake the previous run's records or pages for this run's output,
   // even when the engine exits before opening its log (runProbe is also used independently).
-  for (const ext of ["llx", "log", "dvi", "xdv"]) await fsp.rm(join(work, `${plan.job}.${ext}`), { force: true });
+  for (const ext of ["llx", "log", "dvi", "xdv", "pdf"]) await fsp.rm(join(work, `${plan.job}.${ext}`), { force: true });
   const env = texEnv(host.binDir);
   const own = process.env.TEXINPUTS ?? "";
   env.TEXINPUTS = [".", join(work, "src"), plan.rootDir, own].join(delimiter) + (own.endsWith(delimiter) ? "" : delimiter);
@@ -370,7 +402,7 @@ export async function runProbe(plan: ExportPlan, host: ProbeHost, signal?: Abort
   const run = await runTex(
     texTool(host.binDir, host.engine),
     [
-      DVI_FLAGS[host.engine],
+      OUTPUT_FLAGS[host.engine],
       "-interaction=nonstopmode",
       "-file-line-error",
       ...(host.shellEscape ? ["-shell-escape"] : []),
@@ -388,6 +420,7 @@ export async function runProbe(plan: ExportPlan, host: ProbeHost, signal?: Abort
     stalled: run.stalled,
     timedOut: run.timedOut,
     dvi,
+    pdf: host.engine === "lualatex" && existsSync(join(work, `${plan.job}.pdf`)) ? join(work, `${plan.job}.pdf`) : null,
     durationMs: Date.now() - started,
   };
 }

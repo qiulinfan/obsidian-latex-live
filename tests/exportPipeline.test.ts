@@ -120,9 +120,9 @@ test("a probe retry that exits before opening files cannot reuse old records or 
   host.engine = "pdflatex";
   const plan = planOf(root);
   await prepareWorkDir(plan, host);
-  for (const ext of ["llx", "log", "dvi", "xdv"]) writeFileSync(join(host.workDir, `main.${ext}`), "old successful output");
+  for (const ext of ["llx", "log", "dvi", "xdv", "pdf"]) writeFileSync(join(host.workDir, `main.${ext}`), "old successful output");
   const result = await runProbe(plan, host);
-  assert.deepEqual([result.llx, result.log, result.dvi], [null, "", null]);
+  assert.deepEqual([result.llx, result.log, result.dvi, result.pdf], [null, "", null, null]);
 });
 
 test("a cancelled export does not ask for a full build", async () => {
@@ -136,15 +136,16 @@ test("a cancelled export does not ask for a full build", async () => {
   assert.equal(host.builds, 0);
 });
 
-test("the first release refuses a LuaLaTeX export before building or probing", async () => {
+test("a cancelled LuaLaTeX export and probe start no work", async () => {
   const folder = dir();
   const root = join(folder, "main.tex");
   writeFileSync(root, "\\documentclass{article}\\begin{document}text\\end{document}");
   const host = nodeExportHost(root, { engine: "lualatex" });
-  const message = /LuaLaTeX requires a PDF-mode probe/;
-  await assert.rejects(exportHtml(root, host, () => undefined, new AbortController().signal), message);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(exportHtml(root, host, () => undefined, controller.signal), isAbortError);
   assert.equal(host.builds, 0);
-  await assert.rejects(runProbe(planOf(root), host), message);
+  await assert.rejects(runProbe(planOf(root), host, controller.signal), isAbortError);
   assert.ok(!existsSync(host.workDir));
 });
 

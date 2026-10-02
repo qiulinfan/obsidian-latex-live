@@ -1,5 +1,5 @@
 import { texText } from "../tex/texText";
-import { drawingKey } from "./fragments";
+import { drawingKey, type PdfPageMarker } from "./fragments";
 import type { ListingSettings } from "./listings";
 
 // The probe pass's `.llx` file (design 3.2) and the queues that hand its numbers to the emitter.
@@ -20,6 +20,8 @@ import type { ListingSettings } from "./listings";
 //   llxlisting{language}{dialect}{keywordstyle}{commentstyle}{stringstyle}{dir}{file}{line}
 //                                                      effective settings, styles unexpanded
 //   llxfrag{id}{ht}{dp}{wd}{visit} / llxblock{id}{visit}  explicit runtime drawing identity
+//   llxpdf{id}{visit}{physical page}{y sp}{width sp}{height sp}{inline|block}
+//                                                      Lua PDF shipout identity and baseline
 //   llxopen{id} / llxclose{id}                           around a fragment: the steps between
 //                                                        are in its drawing
 // Records are positioned by visit, not by their file fields: right after a visit ends TeX still
@@ -77,6 +79,8 @@ export interface ProbeLog {
   steps: ProbeStep[];
   /** Fragment pages in page order. */
   fragments: ProbeFragment[];
+  /** Native Lua PDF pages, identified at shipout rather than by fragment/page order. */
+  pdfPages: PdfPageMarker[];
   /** Every listings Init, in execution order, before it reads verbatim text or an external file. */
   listings: ProbeListing[];
   /** Lines that are no record (a truncated file). */
@@ -147,6 +151,7 @@ export function readProbeLog(text: string): ProbeLog {
     visits: [{ key: "", parent: -1, parentLine: 0 }],
     steps: [],
     fragments: [],
+    pdfPages: [],
     listings: [],
     unreadable: 0,
   };
@@ -221,6 +226,17 @@ export function readProbeLog(text: string): ProbeLog {
       case "block":
         log.fragments.push({ id: Number(g[0]), visit: g[1] === undefined ? top : Number(g[1]), box: null });
         break;
+      case "pdf": {
+        const values = g.slice(0, 6).map(Number);
+        if (g.length !== 7 || values.some((n) => !Number.isSafeInteger(n)) || values[0] < 0 || values[1] < 0 ||
+            values[2] < 1 || values[4] <= 0 || values[5] <= 0 || !["inline", "block"].includes(g[6])) {
+          log.unreadable++;
+          break;
+        }
+        const [id, visit, page, y, width, height] = values;
+        log.pdfPages.push({ id, visit, page, y, width, height, inline: g[6] === "inline" });
+        break;
+      }
       default:
         log.unreadable++;
     }

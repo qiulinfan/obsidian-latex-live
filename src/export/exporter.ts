@@ -14,7 +14,7 @@ import { graphicsPaths } from "../tex/graphics";
 import { stallMessage } from "../tex/watchdog";
 import { readBbl, readBibcites } from "./bibliography";
 import { emitHtml, type EmitBib } from "./emit";
-import { drawingKey, pageDrawing, prepareFragment } from "./fragments";
+import { drawingKey, markPdfPage, pageDrawing, prepareFragment } from "./fragments";
 import { renderPage } from "./html";
 import { bitmapDataUri, ExportImages, type PdfImages } from "./images";
 import type { CodeTokenizer } from "./listings";
@@ -28,7 +28,7 @@ import { walkTex } from "./texTree";
 
 // Export orchestration (design 2): freshness of the last build (a full build through the root's
 // session when stale), the plan (with the formulas MathJax rejects, through the export's own
-// MathJax output), the probe pass, the fragments (dvisvgm over the probe's DVI) and the images
+// MathJax output), the probe pass, the fragments (dvisvgm over native DVI/XDV/PDF) and the images
 // (PDF pages through the host's pdf.js), the emitter (the build's labels, .bbl and `\bibcite`s,
 // the .bib entries) and the page in the class's profile with the math's stylesheet. Two stages:
 // `prepareExport` (files and processes) and `emitExport` (the DOM: MathJax measures there), so
@@ -197,7 +197,6 @@ export async function prepareExport(
   };
   const rootDir = dirname(root);
   check();
-  if (host.engine === "lualatex") throw new Error("HTML export currently supports pdfLaTeX and XeLaTeX. LuaLaTeX requires a PDF-mode probe, which is not supported yet.");
 
   // Build.
   let started = Date.now();
@@ -297,17 +296,22 @@ export async function prepareExport(
     math = exportMath(mathEnv, { mathInput, refs, tagSide: side });
   }
 
-  // Fragments: every page of the probe's DVI through dvisvgm, each named by its marker; then the images.
+  // Native fragment pages through dvisvgm; Lua's PDF markers come from real shipout records.
   started = Date.now();
   const fontPt = Number(log?.info.get("fontsize")) || 10;
   const fragments = new Map<string, string>();
-  if (plan.fragments.length && probe.dvi && log) {
+  const fragmentFile = probe.pdf ?? probe.dvi;
+  if (plan.fragments.length && fragmentFile && log) {
     onProgress({ stage: "fragments", message: `TeX fragments (${plan.fragments.length})` });
     try {
-      const pages = await runDvisvgm(probe.dvi, host, signal);
+      const pages = await runDvisvgm(fragmentFile, host, signal);
       // A picture's image is named as TeX found it, from the root's folder.
       const embed = (file: string) => bitmapDataUri(resolve(rootDir, file));
-      for (const svg of pages.svgs) {
+      const probeFragments = log.fragments;
+      const pdfMarkers = log.pdfPages.filter((m) => probeFragments.some((f) => f.id === m.id && f.visit === m.visit && (f.box !== null) === m.inline));
+      for (const page of pages.pages) {
+        const svg = probe.pdf ? markPdfPage(page.svg, page.page, pdfMarkers) : page.svg;
+        if (!svg) continue;
         const drawing = pageDrawing(svg);
         const key = drawing && drawingKey(drawing.visit, drawing.id);
         const html = !drawing || !key || fragments.has(key) ? null : prepareFragment(svg, `${drawing.visit}-${drawing.id}`, fontPt, embed);
@@ -316,8 +320,10 @@ export async function prepareExport(
       if (host.engine === "xelatex" && plan.fragments.some((f) => /\\includegraphics\b/.test(plan.files.get(f.key)?.src.slice(f.from, f.to) ?? ""))) {
         report.add({ severity: "warning", kind: "fragment", message: "images inside TeX fragments are left out with XeLaTeX (dvisvgm cannot read its picture specials)" });
       }
-      if (pages.code !== 0 || pages.stalled || pages.timedOut) {
-        const why = pages.stalled ? "it stalled" : pages.timedOut ? "it took longer than 2 minutes" : pages.output.trim().split(/\r?\n/).slice(-1)[0] || `exit ${pages.code}`;
+      const why = pages.stalled ? "it stalled" : pages.timedOut ? "it took longer than 2 minutes" : pages.output.trim().split(/\r?\n/).slice(-1)[0] || `exit ${pages.code}`;
+      if (probe.pdf && !pages.pages.length) {
+        report.add({ severity: "error", kind: "fragment", message: `dvisvgm produced no LuaLaTeX PDF fragment pages (${why}). Native PDF conversion requires a supported dvisvgm PDF backend, such as mutool (MuPDF tools) available on PATH; TeX fragments show their source.` });
+      } else if (pages.code !== 0 || pages.stalled || pages.timedOut) {
         report.add({ severity: "warning", kind: "fragment", message: `dvisvgm did not convert every fragment (${why})` });
       }
     } catch (e) {

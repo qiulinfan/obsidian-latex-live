@@ -165,7 +165,6 @@ async function exportDocument(request: Extract<KgdistillerRequest, { operation: 
   const rootText = await readFile(source, "utf8");
   if (!hasDocumentclass(rootText) || !/\\begin\s*\{document\}/.test(stripComments(rootText))) throw new Error("document source must be a complete root LaTeX document.");
   const engine = request.engine ?? detectEngine(rootText, dirname(source), "auto");
-  if (engine === "lualatex") throw new Error("HTML export currently supports pdfLaTeX and XeLaTeX; LuaLaTeX is not supported.");
   const originalDir = dirname(source);
   const boundary = await realpath(request.project_root ?? originalDir);
   if (!inDirectory(boundary, source)) throw new Error("source is outside project_root.");
