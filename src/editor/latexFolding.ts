@@ -11,6 +11,8 @@ import { semanticFolds, type SemanticFold } from "../tex/outline";
 // the structural index. Never parse the whole source from the gutter's per-line callback.
 const SIG = projectSignatures(emptyDefinitions(), [], new Map());
 const IDLE_MS = 400;
+/** Match highlighting: an idle callback must not parse an unbounded source file. */
+export const LATEX_FOLD_MAX_CHARS = 1_000_000;
 class FoldRange extends RangeValue {
   constructor(readonly fromDelta: number, readonly kind: SemanticFold["kind"], readonly name: string) { super(); }
   startSide = -1;
@@ -22,21 +24,22 @@ interface FoldIndex {
   doc: Text | null;
   scans: number;
 }
-const setIndex = StateEffect.define<{ ranges: RangeSet<FoldRange>; doc: Text }>();
+const setIndex = StateEffect.define<{ ranges: RangeSet<FoldRange>; doc: Text; scanned: boolean }>();
 
-function scan(doc: Text): RangeSet<FoldRange> {
+function scan(doc: Text): { ranges: RangeSet<FoldRange>; scanned: boolean } {
+  if (doc.length > LATEX_FOLD_MAX_CHARS) return { ranges: RangeSet.empty, scanned: false };
   const text = doc.toString();
-  return RangeSet.of(semanticFolds(text, parseTex(text, SIG)).map((f) =>
-    new FoldRange(f.from - f.anchor, f.kind, f.name).range(f.anchor, f.to)), true);
+  return { scanned: true, ranges: RangeSet.of(semanticFolds(text, parseTex(text, SIG)).map((f) =>
+    new FoldRange(f.from - f.anchor, f.kind, f.name).range(f.anchor, f.to)), true) };
 }
 
 const foldIndex = StateField.define<FoldIndex>({
   create: () => ({ ranges: RangeSet.empty, doc: null, scans: 0 }),
   update(value, tr) {
     for (const effect of tr.effects) if (effect.is(setIndex) && effect.value.doc === tr.newDoc) {
-      return { ...effect.value, scans: value.scans + 1 };
+      return { ranges: effect.value.ranges, doc: effect.value.doc, scans: value.scans + (effect.value.scanned ? 1 : 0) };
     }
-    return tr.docChanged ? { ...value, ranges: value.ranges.map(tr.changes) } : value;
+    return tr.docChanged ? { ...value, ranges: tr.newDoc.length > LATEX_FOLD_MAX_CHARS ? RangeSet.empty : value.ranges.map(tr.changes) } : value;
   },
 });
 
@@ -44,11 +47,11 @@ const foldIndex = StateField.define<FoldIndex>({
 export function ensureLatexFoldIndex(view: EditorView): boolean {
   const index = view.state.field(foldIndex, false);
   if (!index || view.compositionStarted) return false;
-  if (index.doc !== view.state.doc) view.dispatch({ effects: setIndex.of({ ranges: scan(view.state.doc), doc: view.state.doc }) });
+  if (index.doc !== view.state.doc) view.dispatch({ effects: setIndex.of({ ...scan(view.state.doc), doc: view.state.doc }) });
   return true;
 }
 
-/** Diagnostic counters for the performance smoke; counts index rebuilds, not CM updates. */
+/** Counts actual source scans, excluding the constant-time size guard. */
 export function latexFoldStats(state: EditorState): { scans: number; ranges: number; fresh: boolean } {
   const index = state.field(foldIndex, false);
   return { scans: index?.scans ?? 0, ranges: index?.ranges.size ?? 0, fresh: index?.doc === state.doc };
@@ -56,7 +59,7 @@ export function latexFoldStats(state: EditorState): { scans: number; ranges: num
 
 const source = foldService.of((state, lineFrom, lineTo) => {
   const index = state.field(foldIndex, false);
-  if (!index) return null;
+  if (!index || state.doc.length > LATEX_FOLD_MAX_CHARS) return null;
   let range: { from: number; to: number } | null = null;
   index.ranges.between(lineFrom, lineTo, (anchor, to, value) => {
     const from = anchor + value.fromDelta;

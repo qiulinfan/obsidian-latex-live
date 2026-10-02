@@ -1742,3 +1742,4 @@ YOLO 实际模型请求、附件内容校验、原生 Tab 接受/Undo、Enter �
 - [x] label 全引用与安全跨文件重命名；配对 begin/end 重命名；CAS/IME/多 pane/CRLF/备份与撤销。
 - [x] 按需正文词数和中文字符统计、用项目签名排除公式与命令的系统拼写检查。
 - [x] 显式剪贴板表格转换为 tabular/booktabs，预览后插入，一次撤销；支持单行/单列。
+- [x] PDF 原生文字选择/复制、安全内外链接、触控板缩放、页码跳转和 Save as PDF；保留双击 SyncTeX。

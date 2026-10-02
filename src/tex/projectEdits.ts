@@ -72,7 +72,10 @@ export function previewReplace(snapshot: ProjectSnapshot, query: string, replace
 
 export const LABEL_REFERENCE_COMMANDS = new Set(["ref", "eqref", "pageref", "autoref", "Autoref", "nameref", "Nameref", "cref", "Cref", "crefrange", "Crefrange", "cpageref", "Cpageref", "cpagerefrange", "Cpagerefrange", "vref", "Vref", "vpageref", "Vpageref", "hyperref", "getrefnumber", "getpagerefnumber", "labelcref", "labelcpageref", "namecref", "nameCref", "lcnamecref", "namecrefs", "nameCrefs", "lcnamecrefs"]);
 const REFERENCE_CODE = new RegExp(`\\\\(?:label|${[...LABEL_REFERENCE_COMMANDS].join("|")})\\b`);
-const literalKey = (s: string) => !!s && !/[\\{}%#$&^~\s,]/u.test(s);
+// Ordinary \label/\ref arguments are one key, including literal commas. Only the
+// cleveref list commands split them. New names exclude commas to keep later list use safe.
+const literalKey = (s: string) => !!s && !/[\\{}%#$&^~\s]/u.test(s);
+const newLiteralKey = (s: string) => literalKey(s) && !s.includes(",");
 const presentArgs = (node: TexNode & { t: "macro" }) => node.args.filter(arg => (arg.kind === "m" || arg.kind === "g" || (node.name === "hyperref" && arg.kind === "o")) && arg.to > arg.from);
 
 /** AST traversal ignores comments/verbatim and scans raw math with the same signatures. */
@@ -88,9 +91,9 @@ export function indexProjectLabels(snapshot: ProjectSnapshot): LabelIndex {
       if (!list && !literalKey(raw)) { unsafe.push(locate(base + arg.from, base + arg.to)); return; }
       const start = arg.from + (/[{[]/.test(source[arg.from] ?? "") ? 1 : 0);
       let offset = 0;
-      for (const part of raw.split(",")) {
-        const key = part.trim();
-        if (!literalKey(key) || (kind === "definition" && raw.includes(","))) { unsafe.push(locate(base + arg.from, base + arg.to)); return; }
+      for (const part of list ? raw.split(",") : [raw]) {
+        const key = list ? part.trim() : part;
+        if (!literalKey(key)) { unsafe.push(locate(base + arg.from, base + arg.to)); return; }
         const from = base + start + offset + part.indexOf(key);
         occurrences.push({ ...locate(from, from + key.length), key: prefix ? `${prefix}:${key}` : key, kind, command, ...(prefix ? { prefix } : {}) });
         offset += part.length + 1;
@@ -137,7 +140,8 @@ export function indexProjectLabels(snapshot: ProjectSnapshot): LabelIndex {
 }
 
 export function previewLabelRename(snapshot: ProjectSnapshot, oldKey: string, newKey: string): ProjectEditPlan {
-  if (!literalKey(oldKey) || !literalKey(newKey)) throw new Error("Label names must be literal keys without spaces, commas or TeX commands.");
+  if (!literalKey(oldKey)) throw new Error("The existing label must be a literal key without spaces or TeX commands.");
+  if (!newLiteralKey(newKey)) throw new Error("New label names must be literal keys without spaces, commas or TeX commands.");
   if (oldKey === newKey) throw new Error("Choose a different label name.");
   const index = indexProjectLabels(snapshot);
   if (snapshot.plan.missing.size || snapshot.warnings.length) throw new Error("Resolve unreadable, dynamic or incomplete project inputs before a safe label rename.");
@@ -152,7 +156,7 @@ export function previewLabelRename(snapshot: ProjectSnapshot, oldKey: string, ne
     if (item.prefix) {
       if (!newKey.startsWith(`${item.prefix}:`)) throw new Error(`This theorem's native label must keep its ${item.prefix}: prefix.`);
       insert = newKey.slice(item.prefix.length + 1);
-      if (!literalKey(insert)) throw new Error("The native theorem label suffix must be nonempty and literal.");
+      if (!newLiteralKey(insert)) throw new Error("The native theorem label suffix must be nonempty and literal.");
     }
     const edits = changes.get(item.path) ?? [];
     edits.push({ from: item.from, to: item.to, insert });

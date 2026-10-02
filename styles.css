@@ -908,3 +908,48 @@ SOFTWARE.
 .ll-project-toolbar input[type="text"] { flex: 1 1 auto; }
 .ll-bib-detail button { max-width: 100%; white-space: normal; }
 .ll-project-outline { overflow: auto; min-height: 0; }
+
+/* pdf:pdfReading.css begin */
+/* PDF text and link geometry comes from the host's pdf.js, independent of editor typography. */
+.ll-page .ll-pdf-text {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  user-select: text;
+  z-index: 1;
+}
+.ll-pdf-text :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+}
+.ll-pdf-text .markedContent { top: 0; height: 0; }
+.ll-pdf-text span[role="img"] { user-select: none; cursor: default; }
+.ll-pdf-text ::selection { background: rgba(50, 120, 230, 0.3); color: transparent; }
+.ll-pdf-text br::selection { background: transparent; }
+.ll-pdf-links { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.ll-pdf-link { position: absolute; display: block; pointer-events: auto; cursor: pointer; }
+.ll-pdf-link:hover { background: rgba(50, 120, 230, 0.12); }
+.ll-pdf-link:focus-visible { outline: 2px solid var(--interactive-accent); }
+.ll-pdf-navigation {
+  display: flex;
+  gap: 4px;
+  padding: 3px 8px;
+  align-items: center;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-small);
+}
+.ll-pdf-navigation input { width: 4.5em; height: 24px; text-align: center; }
+.ll-pdf-count { color: var(--text-muted); white-space: nowrap; }
+.ll-pdf-scale { color: var(--text-muted); margin-left: auto; }
+.ll-preview .ll-toolbar { flex-wrap: wrap; }
+.ll-preview .ll-actions { flex-wrap: wrap; }
+/* pdf:pdfReading.css end */

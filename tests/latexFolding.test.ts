@@ -8,7 +8,7 @@ import { parseTex } from "../src/export/texTree";
 import { projectSignatures } from "../src/export/signatures";
 import { emptyDefinitions } from "../src/tex/macros";
 import { semanticFolds } from "../src/tex/outline";
-import { ensureLatexFoldIndex, foldAllLatex, foldLatexSection, latexFoldStats, latexFolding } from "../src/editor/latexFolding";
+import { LATEX_FOLD_MAX_CHARS, ensureLatexFoldIndex, foldAllLatex, foldLatexSection, latexFoldStats, latexFolding } from "../src/editor/latexFolding";
 import { texEditorExtensions } from "../src/editor/texExtensions";
 import { latexLiveLanguage } from "../src/editor/latexLive";
 import { theoremMap } from "../src/tex/theorems";
@@ -150,6 +150,52 @@ More.`;
     await sleep(20);
     assert.equal(view.dom.querySelectorAll(".cm-foldPlaceholder").length, 1);
     assert.equal(view.state.doc.toString(), src);
+  } finally { done(); }
+});
+
+test("oversize sources never stringify or parse during manual or idle folding", async () => {
+  const src = "\\section{Large}\n" + "Prose line.\n".repeat(Math.ceil(LATEX_FOLD_MAX_CHARS / 12) + 1);
+  const parent = document.body.appendChild(document.createElement("div"));
+  const view = new EditorView({ parent, state: EditorState.create({ doc: src, extensions: latexFolding }) });
+  let stringifications = 0;
+  const rejectStringifying = () => {
+    stringifications++;
+    throw new Error("Oversize folding must not stringify the source");
+  };
+  Object.defineProperty(view.state.doc, "toString", { configurable: true, value: rejectStringifying });
+  try {
+    assert.ok(view.state.doc.length > LATEX_FOLD_MAX_CHARS);
+    assert.equal(ensureLatexFoldIndex(view), true);
+    assert.equal(foldLatexSection(view), false);
+    assert.equal(foldAllLatex(view), false);
+    const line = view.state.doc.line(1);
+    assert.equal(foldable(view.state, line.from, line.to), null);
+    // Make the index stale again and let only the idle path refresh this new document.
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "x" } });
+    Object.defineProperty(view.state.doc, "toString", { configurable: true, value: rejectStringifying });
+    assert.equal(latexFoldStats(view.state).fresh, false);
+    await sleep(440);
+    assert.deepEqual(latexFoldStats(view.state), { scans: 0, ranges: 0, fresh: true });
+    assert.equal(stringifications, 0);
+  } finally { view.destroy(); parent.remove(); }
+});
+
+test("crossing the size limit clears cached markers and shrinking restores semantic folds", () => {
+  const small = "\\section{Small}\nProse.\n\\section{Next}\nMore.";
+  const { view, done } = setup(small);
+  try {
+    ensureLatexFoldIndex(view);
+    assert.equal(latexFoldStats(view.state).scans, 1);
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "x".repeat(LATEX_FOLD_MAX_CHARS) } });
+    assert.equal(latexFoldStats(view.state).ranges, 0);
+    const largeDoc = view.state.doc;
+    Object.defineProperty(largeDoc, "toString", { configurable: true, value: () => { throw new Error("Must reject before toString"); } });
+    assert.equal(foldLatexSection(view), false);
+    assert.equal(latexFoldStats(view.state).scans, 1);
+    view.dispatch({ changes: { from: 0, to: largeDoc.length, insert: small } });
+    assert.equal(foldLatexSection(view), true);
+    assert.equal(latexFoldStats(view.state).scans, 2);
+    assert.equal(foldedRanges(view.state).size, 1);
   } finally { done(); }
 });
 

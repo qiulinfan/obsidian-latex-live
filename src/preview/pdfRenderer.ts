@@ -1,11 +1,14 @@
 import { loadPdfJs } from "obsidian";
 import type { PdfBox } from "../tex/synctex";
 import { abortError } from "../tex/run";
+import { externalPdfUrl, openPdfExternal } from "./pdfReading";
 
 // The slice of the pdf.js API (bundled with Obsidian) used here and by PDF crops.
 export interface Viewport {
   width: number;
   height: number;
+  convertToViewportRectangle?(rect: number[]): number[];
+  convertToViewportPoint?(x: number, y: number): number[];
 }
 interface RenderTask {
   promise: Promise<void>;
@@ -14,6 +17,8 @@ interface RenderTask {
 export interface PdfPage {
   /** `offsetX`/`offsetY` shift the page on the canvas (CSS pixels of this scale). */
   getViewport(p: { scale: number; offsetX?: number; offsetY?: number }): Viewport;
+  getTextContent?(): Promise<unknown>;
+  getAnnotations?(options?: { intent: string }): Promise<PdfLink[]>;
   render(p: {
     canvasContext: CanvasRenderingContext2D;
     canvas: HTMLCanvasElement;
@@ -23,9 +28,25 @@ export interface PdfPage {
 export interface PdfDoc {
   numPages: number;
   getPage(n: number): Promise<PdfPage>;
+  getDestination?(name: string): Promise<unknown[] | null>;
+  getPageIndex?(ref: unknown): Promise<number>;
   destroy(): Promise<void>;
 }
+interface PdfLink {
+  subtype?: string;
+  annotationType?: number;
+  rect?: number[];
+  url?: string;
+  dest?: unknown[] | string;
+  action?: string;
+}
+interface TextLayerTask {
+  render(): Promise<void>;
+  cancel(): void;
+  update(options: { viewport: Viewport }): void;
+}
 interface PdfJs {
+  TextLayer?: new (options: { textContentSource: unknown; container: HTMLElement; viewport: Viewport }) => TextLayerTask;
   getDocument(src: {
     data: Uint8Array;
     isEvalSupported?: boolean;
@@ -153,325 +174,476 @@ export async function pdfPagePngs(
 interface Slot {
   el: HTMLDivElement;
   canvas: HTMLCanvasElement | null;
-  /** Generation the displayed canvas was rendered for; -1 when blank. */
+  text: HTMLDivElement | null;
+  textTask: TextLayerTask | null;
+  links: HTMLDivElement | null;
+  page: PdfPage | null;
+  renderedDoc: number;
   renderedGen: number;
-  /** Generation currently being rendered; -1 when idle. */
   renderingGen: number;
   task: RenderTask | null;
+  pendingText: TextLayerTask | null;
+  failedGen: number;
 }
 
-export interface PdfPoint {
-  page: number;
-  x: number;
-  y: number;
+export interface PdfPoint { page: number; x: number; y: number }
+export interface PdfReadingStatus { page: number; pages: number; scale: number; fit: boolean }
+export interface PdfReadingOptions {
+  onStatus?(status: PdfReadingStatus): void;
+  openExternal?(url: string): Promise<void>;
 }
-
+interface Anchor { page: number; x: number; y: number; clientX: number; clientY: number }
 const PAGE_GAP = 12;
 const PADDING = 12;
-/** Rendered canvases kept alive; offscreen ones beyond this are dropped. */
 const MAX_RENDERED = 10;
+const MAX_RENDERING = 2;
+const MAX_CANVAS_PIXELS = 8_000_000;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 5;
 
-/**
- * Renders a PDF into a scrollable stack of page canvases. Reloads keep the
- * scroll position and swap each page's canvas only once its new rendering
- * is complete, so recompiles do not flicker. Pages render lazily when near
- * the viewport.
- */
+/** Lazy canvas, selectable text and link layers; all three are evicted together. */
 export class PdfRenderer {
   readonly scrollEl: HTMLDivElement;
   private pagesEl: HTMLDivElement;
   private emptyEl: HTMLDivElement;
+  private win: Window & typeof globalThis;
+  private pdfjs: PdfJs | null = null;
   private doc: PdfDoc | null = null;
+  private loading: ReturnType<PdfJs["getDocument"]> | null = null;
   private sizes: { w: number; h: number }[] = [];
+  private tops: number[] = [];
   private slots: Slot[] = [];
   private visible = new Set<number>();
   private gen = 0;
+  private docGen = 0;
   private loadSeq = 0;
+  private disposed = false;
   private zoom: number | "fit" = "fit";
   private scale = 1;
   private lastWidth = 0;
   private observer: IntersectionObserver;
   private resizeObserver: ResizeObserver;
   private resizeTimer: number | null = null;
+  private renderTimer: number | null = null;
+  private frame: number | null = null;
+  private pendingZoom: { scale: number; x: number; y: number } | null = null;
+  private inFlight = 0;
+  private lastStatus = "";
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, private options: PdfReadingOptions = {}) {
+    this.win = parent.ownerDocument.defaultView as Window & typeof globalThis;
     this.scrollEl = parent.createDiv({ cls: "ll-scroll" });
+    this.scrollEl.tabIndex = 0;
+    this.scrollEl.setAttribute("aria-label", "PDF preview");
     this.emptyEl = this.scrollEl.createDiv({ cls: "ll-empty" });
     this.pagesEl = this.scrollEl.createDiv({ cls: "ll-pages" });
-    this.observer = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          const idx = Number((e.target as HTMLElement).dataset.index);
-          if (e.isIntersecting) this.visible.add(idx);
-          else this.visible.delete(idx);
-        }
-        this.renderVisible();
-      },
-      { root: this.scrollEl, rootMargin: "50% 0px" },
-    );
-    this.resizeObserver = new ResizeObserver(() => {
-      if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer);
-      this.resizeTimer = window.setTimeout(() => {
+    this.observer = new this.win.IntersectionObserver((entries) => {
+      for (const e of entries) {
+        const idx = Number((e.target as HTMLElement).dataset.index);
+        if (e.isIntersecting) this.visible.add(idx);
+        else this.visible.delete(idx);
+      }
+      this.renderVisible();
+    }, { root: this.scrollEl, rootMargin: "50% 0px" });
+    this.resizeObserver = new this.win.ResizeObserver(() => {
+      if (this.resizeTimer !== null) this.win.clearTimeout(this.resizeTimer);
+      this.resizeTimer = this.win.setTimeout(() => {
         this.resizeTimer = null;
-        const w = this.scrollEl.clientWidth;
-        if (this.zoom === "fit" && w !== this.lastWidth) this.relayout();
+        if (this.zoom === "fit" && this.scrollEl.clientWidth !== this.lastWidth) this.relayout();
       }, 80);
     });
     this.resizeObserver.observe(this.scrollEl);
+    this.scrollEl.addEventListener("wheel", this.onWheel, { passive: false });
+    this.scrollEl.addEventListener("scroll", this.onScroll, { passive: true });
     this.setEmpty("No PDF yet.");
+    this.notifyStatus();
   }
 
-  get hasDocument(): boolean {
-    return this.doc !== null;
+  get hasDocument(): boolean { return this.doc !== null; }
+  get status(): PdfReadingStatus {
+    return { page: this.doc ? this.pageAt(this.scrollEl.scrollTop + this.scrollEl.clientHeight * 0.3) + 1 : 0,
+      pages: this.sizes.length, scale: this.scale, fit: this.zoom === "fit" };
   }
-
   setEmpty(message: string | null): void {
     this.emptyEl.toggleClass("is-hidden", message === null);
     this.emptyEl.setText(message ?? "");
   }
 
-  /** Show a new PDF. The data buffer is transferred to pdf.js. */
+  /** Keep the last document on a load failure; kill superseded loads and ignore all stale results. */
   async load(data: Uint8Array): Promise<void> {
+    if (this.disposed) return;
     const seq = ++this.loadSeq;
-    const pdfjs = (await loadPdfJs()) as PdfJs;
-    const doc = await pdfjs.getDocument({
-      data,
-      isEvalSupported: false,
-      ...PDFJS_ASSETS,
-    }).promise;
-    const first = await doc.getPage(1);
-    if (seq !== this.loadSeq) {
-      void doc.destroy();
-      return;
+    this.cancelLoading();
+    let loading: ReturnType<PdfJs["getDocument"]> | null = null;
+    let doc: PdfDoc | null = null;
+    try {
+      const pdfjs = (await loadPdfJs()) as PdfJs;
+      if (seq !== this.loadSeq || this.disposed) return;
+      this.pdfjs = pdfjs;
+      loading = pdfjs.getDocument({ data: data.slice(), isEvalSupported: false, ...PDFJS_ASSETS });
+      this.loading = loading;
+      doc = await loading.promise;
+      if (seq !== this.loadSeq || this.disposed) return;
+      const first = await doc.getPage(1);
+      if (seq !== this.loadSeq || this.disposed) return;
+      const vp = first.getViewport({ scale: 1 });
+      const sizes = Array.from({ length: doc.numPages }, (_, i) =>
+        this.doc && this.sizes[i] ? this.sizes[i] : { w: vp.width, h: vp.height });
+      sizes[0] = { w: vp.width, h: vp.height };
+      this.cancelRenders();
+      const old = this.doc;
+      this.doc = doc;
+      doc = null;
+      this.loading = null;
+      this.sizes = sizes;
+      this.docGen++;
+      this.gen++;
+      this.setEmpty(null);
+      this.layout();
+      this.renderVisible();
+      this.notifyStatus();
+      void old?.destroy().catch(() => undefined);
+    } catch (error) {
+      void loading?.destroy().catch(() => undefined);
+      if (seq === this.loadSeq && !this.disposed && !this.doc) this.setEmpty(`Could not open PDF: ${String(error)}`);
+    } finally {
+      if (doc) void doc.destroy().catch(() => undefined);
+      if (this.loading === loading) this.loading = null;
     }
-    const vp = first.getViewport({ scale: 1 });
-    // Assume uniform pages; renderSlot corrects any page that differs.
-    const sizes = Array.from({ length: doc.numPages }, (_, i) =>
-      this.sizes[i] && this.doc ? this.sizes[i] : { w: vp.width, h: vp.height },
-    );
-    sizes[0] = { w: vp.width, h: vp.height };
-
-    for (const slot of this.slots) slot.task?.cancel();
-    const old = this.doc;
-    this.doc = doc;
-    this.sizes = sizes;
-    this.gen++;
-    this.setEmpty(null);
-    this.layout();
-    this.renderVisible();
-    void old?.destroy();
   }
 
-  /** Drop the current document (e.g. when switching to another root). */
   clear(message: string): void {
     this.loadSeq++;
-    for (const slot of this.slots) {
-      slot.task?.cancel();
-      this.observer.unobserve(slot.el);
-      slot.el.remove();
-    }
+    this.cancelLoading();
+    this.cancelRenders();
+    this.cancelScheduled();
+    for (const slot of this.slots) { this.dropSlot(slot); this.observer.unobserve(slot.el); slot.el.remove(); }
     this.slots = [];
     this.visible.clear();
     this.sizes = [];
-    void this.doc?.destroy();
+    this.tops = [];
+    void this.doc?.destroy().catch(() => undefined);
     this.doc = null;
+    this.docGen++;
     this.gen++;
-    this.scrollEl.scrollTop = 0;
+    this.scrollEl.scrollTop = this.scrollEl.scrollLeft = 0;
     this.setEmpty(message);
+    this.notifyStatus();
   }
 
-  zoomIn(): void {
-    this.setZoom(this.scale * 1.2);
+  zoomIn(): void { this.setZoom(this.scale * 1.2); }
+  zoomOut(): void { this.setZoom(this.scale / 1.2); }
+  fitWidth(): void { this.setZoom("fit"); }
+  setInverted(on: boolean): void { this.scrollEl.toggleClass("ll-invert", on); }
+
+  goToPage(number: number): void {
+    if (!this.doc || !Number.isFinite(number)) return;
+    const idx = Math.max(0, Math.min(this.slots.length - 1, Math.round(number) - 1));
+    this.scrollEl.scrollTop = this.tops[idx] - PADDING;
+    this.visible.add(idx);
+    this.renderVisible();
+    this.notifyStatus();
   }
 
-  zoomOut(): void {
-    this.setZoom(this.scale / 1.2);
-  }
-
-  fitWidth(): void {
-    this.setZoom("fit");
-  }
-
-  setInverted(on: boolean): void {
-    this.scrollEl.toggleClass("ll-invert", on);
-  }
-
-  /** Map a mouse event on a page to PDF points from the page's top-left. */
+  /** Link double-clicks stay links; text/canvas double-clicks retain SyncTeX. */
   pointFromEvent(ev: MouseEvent): PdfPoint | null {
-    const pageEl = (ev.target as HTMLElement | null)?.closest?.(".ll-page");
-    if (!(pageEl instanceof HTMLElement)) return null;
+    const target = ev.target as Element | null;
+    if (target?.closest?.(".ll-pdf-link")) return null;
+    const pageEl = target?.closest?.(".ll-page") as HTMLElement | null;
+    if (!pageEl || !this.pagesEl.contains(pageEl)) return null;
     const idx = Number(pageEl.dataset.index);
     const rect = pageEl.getBoundingClientRect();
-    return {
-      page: idx + 1,
-      x: (ev.clientX - rect.left) / this.scale,
-      y: (ev.clientY - rect.top) / this.scale,
-    };
+    return { page: idx + 1, x: (ev.clientX - rect.left) / this.scale, y: (ev.clientY - rect.top) / this.scale };
   }
 
-  /** Scroll a SyncTeX box into view and flash it. */
   reveal(box: PdfBox, onlyIfHidden: boolean): void {
     const slot = this.slots[box.page - 1];
     if (!slot) return;
-    const scrollRect = this.scrollEl.getBoundingClientRect();
-    const pageTop =
-      slot.el.getBoundingClientRect().top - scrollRect.top + this.scrollEl.scrollTop;
-    const top = pageTop + box.y * this.scale;
+    const top = this.tops[box.page - 1] + box.y * this.scale;
     const bottom = top + Math.max(box.height, 10) * this.scale;
-    const viewTop = this.scrollEl.scrollTop;
-    const viewBottom = viewTop + this.scrollEl.clientHeight;
     const margin = this.scrollEl.clientHeight * 0.1;
-    const hidden = top < viewTop + margin || bottom > viewBottom - margin;
-    if (hidden || !onlyIfHidden) {
-      this.scrollEl.scrollTo({
-        top: Math.max(0, top - this.scrollEl.clientHeight / 3),
-        behavior: onlyIfHidden ? "auto" : "smooth",
-      });
-    }
+    const hidden = top < this.scrollEl.scrollTop + margin || bottom > this.scrollEl.scrollTop + this.scrollEl.clientHeight - margin;
+    if (hidden || !onlyIfHidden) this.scrollEl.scrollTo({
+      top: Math.max(0, top - this.scrollEl.clientHeight / 3), behavior: onlyIfHidden ? "auto" : "smooth" });
     if (onlyIfHidden && !hidden) return;
     const mark = slot.el.createDiv({ cls: "ll-sync-mark" });
     mark.style.left = `${Math.max(0, box.x - 2) * this.scale}px`;
     mark.style.top = `${Math.max(0, box.y - 2) * this.scale}px`;
     mark.style.width = `${Math.max(box.width + 4, 24) * this.scale}px`;
     mark.style.height = `${Math.max(box.height + 4, 12) * this.scale}px`;
-    window.setTimeout(() => mark.remove(), 1500);
+    this.win.setTimeout(() => mark.remove(), 1500);
   }
 
   destroy(): void {
-    this.loadSeq++;
-    for (const slot of this.slots) slot.task?.cancel();
+    if (this.disposed) return;
+    this.clear("No PDF yet.");
+    this.disposed = true;
     this.observer.disconnect();
     this.resizeObserver.disconnect();
-    if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer);
-    void this.doc?.destroy();
-    this.doc = null;
-    this.slots = [];
+    if (this.resizeTimer !== null) this.win.clearTimeout(this.resizeTimer);
+    this.scrollEl.removeEventListener("wheel", this.onWheel);
+    this.scrollEl.removeEventListener("scroll", this.onScroll);
   }
 
-  private setZoom(zoom: number | "fit"): void {
-    this.zoom =
-      zoom === "fit" ? "fit" : Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
-    this.relayout();
+  private onWheel = (event: WheelEvent): void => {
+    // Chromium/macOS delivers trackpad pinch as a ctrl-wheel. Ordinary scrolling is untouched.
+    if (!event.ctrlKey || !this.doc) return;
+    event.preventDefault();
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? this.scrollEl.clientHeight : 1);
+    const base = this.pendingZoom?.scale ?? this.scale;
+    this.pendingZoom = { scale: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, base * Math.exp(-Math.max(-100, Math.min(100, delta)) * 0.005))),
+      x: event.clientX, y: event.clientY };
+    this.scheduleFrame();
+  };
+  private onScroll = (): void => { this.scheduleFrame(); };
+  private scheduleFrame(): void {
+    if (this.frame !== null) return;
+    this.frame = this.win.requestAnimationFrame(() => {
+      this.frame = null;
+      const zoom = this.pendingZoom;
+      this.pendingZoom = null;
+      if (zoom) this.setZoom(zoom.scale, zoom.x, zoom.y, true);
+      this.notifyStatus();
+    });
   }
-
-  /** Re-scale after a zoom or width change, keeping the view centered. */
-  private relayout(): void {
+  private setZoom(zoom: number | "fit", x?: number, y?: number, defer = false): void {
+    this.zoom = zoom === "fit" ? zoom : Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+    this.relayout(x, y, defer);
+  }
+  private anchor(x?: number, y?: number): Anchor {
+    const scroll = this.scrollEl.getBoundingClientRect();
+    const clientX = x ?? scroll.left + this.scrollEl.clientWidth / 2;
+    const clientY = y ?? scroll.top + this.scrollEl.clientHeight / 2;
+    const page = this.pageAt(this.scrollEl.scrollTop + clientY - scroll.top);
+    const rect = this.slots[page].el.getBoundingClientRect();
+    return { page, x: (clientX - rect.left) / this.scale, y: (clientY - rect.top) / this.scale,
+      clientX: clientX - scroll.left, clientY: clientY - scroll.top };
+  }
+  private relayout(x?: number, y?: number, defer = false): void {
     if (!this.doc) return;
-    const el = this.scrollEl;
-    const anchor =
-      el.scrollHeight > 0 ? (el.scrollTop + el.clientHeight / 2) / el.scrollHeight : 0;
+    const anchor = this.anchor(x, y);
+    this.cancelRenders();
     this.gen++;
     this.layout();
-    el.scrollTop = anchor * el.scrollHeight - el.clientHeight / 2;
-    this.renderVisible();
+    const scroll = this.scrollEl.getBoundingClientRect();
+    const page = this.slots[anchor.page].el.getBoundingClientRect();
+    this.scrollEl.scrollLeft += page.left - scroll.left + anchor.x * this.scale - anchor.clientX;
+    this.scrollEl.scrollTop = this.tops[anchor.page] + anchor.y * this.scale - anchor.clientY;
+    if (this.renderTimer !== null) this.win.clearTimeout(this.renderTimer);
+    if (defer) this.renderTimer = this.win.setTimeout(() => { this.renderTimer = null; this.renderVisible(); }, 140);
+    else { this.renderTimer = null; this.renderVisible(); }
+    this.notifyStatus();
   }
-
   private layout(): void {
     this.lastWidth = this.scrollEl.clientWidth;
     const maxW = Math.max(...this.sizes.map((s) => s.w), 1);
-    this.scale =
-      this.zoom === "fit"
-        ? Math.max(MIN_ZOOM, (this.lastWidth - 2 * PADDING) / maxW)
-        : this.zoom;
+    this.scale = this.zoom === "fit" ? Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, (this.lastWidth - 2 * PADDING) / maxW)) : this.zoom;
     this.pagesEl.style.padding = `${PADDING}px`;
     this.pagesEl.style.gap = `${PAGE_GAP}px`;
-
     while (this.slots.length > this.sizes.length) {
       const slot = this.slots.pop()!;
-      slot.task?.cancel();
-      this.observer.unobserve(slot.el);
-      this.visible.delete(this.slots.length);
-      slot.el.remove();
+      this.dropSlot(slot); this.observer.unobserve(slot.el); this.visible.delete(this.slots.length); slot.el.remove();
     }
     while (this.slots.length < this.sizes.length) {
       const el = this.pagesEl.createDiv({ cls: "ll-page" });
       el.dataset.index = String(this.slots.length);
-      this.slots.push({
-        el,
-        canvas: null,
-        renderedGen: -1,
-        renderingGen: -1,
-        task: null,
-      });
+      this.slots.push({ el, canvas: null, text: null, textTask: null, links: null, page: null,
+        renderedDoc: -1, renderedGen: -1, renderingGen: -1, task: null, pendingText: null, failedGen: -1 });
       this.observer.observe(el);
     }
-    this.sizes.forEach((s, i) => this.sizeSlot(i, s));
+    let top = PADDING;
+    this.tops = this.sizes.map((size, index) => { const at = top; top += size.h * this.scale + PAGE_GAP; this.sizeSlot(index, size); return at; });
   }
-
-  private sizeSlot(i: number, s: { w: number; h: number }): void {
-    const el = this.slots[i].el;
-    el.style.width = `${Math.floor(s.w * this.scale)}px`;
-    el.style.height = `${Math.floor(s.h * this.scale)}px`;
-  }
-
-  private renderVisible(): void {
-    for (const idx of this.visible) {
-      const slot = this.slots[idx];
-      if (slot && slot.renderedGen !== this.gen && slot.renderingGen !== this.gen) {
-        void this.renderSlot(idx);
-      }
-    }
-  }
-
-  private async renderSlot(idx: number): Promise<void> {
-    const doc = this.doc;
+  private sizeSlot(idx: number, size: { w: number; h: number }): void {
     const slot = this.slots[idx];
-    if (!doc || !slot) return;
-    const gen = this.gen;
+    slot.el.style.width = `${Math.floor(size.w * this.scale)}px`;
+    slot.el.style.height = `${Math.floor(size.h * this.scale)}px`;
+    // pdf.js TextLayer consumes these variables; original glyph geometry stays its responsibility.
+    slot.el.style.setProperty("--total-scale-factor", String(this.scale));
+    slot.el.style.setProperty("--scale-round-x", "1px");
+    slot.el.style.setProperty("--scale-round-y", "1px");
+    // CSS rescales existing glyph positions during a gesture. Font measurement is deferred
+    // until the final canvas lands, rather than repeating it for every cached page per wheel.
+  }
+  private pageAt(y: number): number {
+    let low = 0, high = Math.max(0, this.tops.length - 1);
+    while (low < high) { const middle = Math.ceil((low + high) / 2); if (this.tops[middle] <= y) low = middle; else high = middle - 1; }
+    return low;
+  }
+  private notifyStatus(): void {
+    const status = this.status;
+    const key = `${status.page}|${status.pages}|${status.scale}|${status.fit}`;
+    if (key === this.lastStatus) return;
+    this.lastStatus = key;
+    this.options.onStatus?.(status);
+  }
+  private renderVisible(): void {
+    if (!this.doc || this.renderTimer !== null || this.disposed) return;
+    const center = this.pageAt(this.scrollEl.scrollTop + this.scrollEl.clientHeight / 2);
+    const wanted = [...this.visible].filter((idx) => this.slots[idx]).sort((a, b) => Math.abs(a - center) - Math.abs(b - center)).slice(0, MAX_RENDERED);
+    for (const idx of wanted) {
+      if (this.inFlight >= MAX_RENDERING) break;
+      const slot = this.slots[idx];
+      if (slot.renderedGen !== this.gen && slot.renderingGen !== this.gen && slot.failedGen !== this.gen) void this.renderSlot(idx);
+    }
+    this.evictOffscreen(new Set(wanted));
+  }
+  private async renderSlot(idx: number): Promise<void> {
+    const doc = this.doc, pdfjs = this.pdfjs, slot = this.slots[idx];
+    if (!doc || !pdfjs || !slot) return;
+    const gen = this.gen, docGen = this.docGen;
     slot.renderingGen = gen;
-    let task: RenderTask | null = null;
+    this.inFlight++;
+    let task: RenderTask | null = null, textTask: TextLayerTask | null = null;
+    const current = () => gen === this.gen && doc === this.doc && !this.disposed && this.slots[idx] === slot;
     try {
-      const page = await doc.getPage(idx + 1);
-      if (gen !== this.gen) return;
+      const page = slot.renderedDoc === docGen && slot.page ? slot.page : await doc.getPage(idx + 1);
+      if (!current()) return;
       const base = page.getViewport({ scale: 1 });
       const size = this.sizes[idx];
       if (Math.abs(base.width - size.w) > 0.5 || Math.abs(base.height - size.h) > 0.5) {
-        this.sizes[idx] = { w: base.width, h: base.height };
-        this.sizeSlot(idx, this.sizes[idx]);
+        this.sizes[idx] = { w: base.width, h: base.height }; this.layout();
       }
-      const dpr = window.devicePixelRatio || 1;
+      const css = page.getViewport({ scale: this.scale });
+      const dpr = Math.min(this.win.devicePixelRatio || 1, Math.sqrt(MAX_CANVAS_PIXELS / (css.width * css.height)));
       const viewport = page.getViewport({ scale: this.scale * dpr });
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
+      const canvas = this.scrollEl.ownerDocument.createElement("canvas");
+      canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
       const ctx = canvas.getContext("2d", { alpha: false });
-      if (!ctx) return;
-      task = page.render({ canvasContext: ctx, canvas, viewport });
-      slot.task = task;
+      if (!ctx) throw new Error("No canvas to draw the PDF on.");
+      task = page.render({ canvasContext: ctx, canvas, viewport }); slot.task = task;
+      void task.promise.catch(() => undefined);
+      const reuse = slot.renderedDoc === docGen;
+      let text: HTMLDivElement | null = null, links: HTMLDivElement | null = null;
+      if (!reuse && page.getTextContent && pdfjs.TextLayer) {
+        const content = await page.getTextContent();
+        if (!current()) return;
+        text = this.scrollEl.ownerDocument.createElement("div"); text.className = "ll-pdf-text textLayer";
+        textTask = new pdfjs.TextLayer({ textContentSource: content, container: text, viewport: css });
+        slot.pendingText = textTask;
+        // The off-DOM layer inherits none of the page's variables until it is committed.
+        text.style.setProperty("--total-scale-factor", String(this.scale));
+        text.style.setProperty("--scale-round-x", "1px"); text.style.setProperty("--scale-round-y", "1px");
+        await textTask.render();
+      }
+      if (!reuse && page.getAnnotations) {
+        const annotations = await page.getAnnotations({ intent: "display" });
+        if (!current()) return;
+        links = this.createLinks(annotations, base, doc, docGen);
+      }
       await task.promise;
-      if (gen !== this.gen) return;
-      // Swap only a finished rendering in: no blank frame between compiles.
-      if (slot.canvas) slot.canvas.replaceWith(canvas);
-      else slot.el.prepend(canvas);
+      if (!current()) return;
+      if (reuse) slot.textTask?.update({ viewport: css });
+      if (slot.canvas) slot.canvas.replaceWith(canvas); else slot.el.prepend(canvas);
       slot.canvas = canvas;
-      slot.renderedGen = gen;
-      this.evictOffscreen();
-    } catch {
-      // Cancelled by a newer document or zoom level.
-    } finally {
+      if (!reuse) {
+        slot.textTask?.cancel(); slot.text?.remove(); slot.links?.remove();
+        slot.text = text; slot.textTask = textTask; slot.links = links;
+        if (text) {
+          slot.el.append(text);
+          text.style.removeProperty("--total-scale-factor");
+          text.style.removeProperty("--scale-round-x"); text.style.removeProperty("--scale-round-y");
+        }
+        if (links) slot.el.append(links);
+        textTask = null;
+      }
+      slot.page = page; slot.renderedDoc = docGen; slot.renderedGen = gen;
+    } catch (error) {
+      if (current()) { slot.failedGen = gen; console.warn(`LaTeX Live: could not render PDF page ${idx + 1}`, error); }
+      // A superseded render cannot replace the last successful page.
+    }
+    finally {
+      // Observe rejections immediately even if an awaited text/annotation operation fails first.
+      void task?.promise.catch(() => undefined);
+      textTask?.cancel();
+      if (slot.pendingText === textTask || slot.renderedGen === gen) slot.pendingText = null;
       if (slot.task === task) slot.task = null;
       if (slot.renderingGen === gen) slot.renderingGen = -1;
+      this.inFlight--;
+      this.renderVisible();
     }
   }
-
-  /** Free canvases of pages far from view to bound memory. */
-  private evictOffscreen(): void {
-    const rendered = this.slots
-      .map((s, i) => ({ s, i }))
-      .filter(({ s }) => s.canvas !== null);
-    if (rendered.length <= MAX_RENDERED) return;
-    const vis = [...this.visible];
-    const center = vis.length ? vis.reduce((a, b) => a + b, 0) / vis.length : 0;
-    rendered
-      .filter(({ i }) => !this.visible.has(i))
-      .sort((a, b) => Math.abs(b.i - center) - Math.abs(a.i - center))
-      .slice(0, rendered.length - MAX_RENDERED)
-      .forEach(({ s }) => {
-        s.canvas?.remove();
-        s.canvas = null;
-        s.renderedGen = -1;
+  private createLinks(annotations: PdfLink[], viewport: Viewport, doc: PdfDoc, docGen: number): HTMLDivElement {
+    const layer = this.scrollEl.ownerDocument.createElement("div"); layer.className = "ll-pdf-links";
+    for (const annotation of annotations) {
+      if (annotation.subtype !== "Link" && annotation.annotationType !== 2) continue;
+      if (!annotation.rect || annotation.rect.length !== 4 || !viewport.convertToViewportRectangle) continue;
+      const rect = viewport.convertToViewportRectangle(annotation.rect);
+      if (!rect.every(Number.isFinite)) continue;
+      const left = Math.max(0, Math.min(viewport.width, Math.min(rect[0], rect[2])));
+      const top = Math.max(0, Math.min(viewport.height, Math.min(rect[1], rect[3])));
+      const right = Math.max(0, Math.min(viewport.width, Math.max(rect[0], rect[2])));
+      const bottom = Math.max(0, Math.min(viewport.height, Math.max(rect[1], rect[3])));
+      if (right <= left || bottom <= top) continue;
+      const url = externalPdfUrl(annotation.url);
+      const internal = annotation.dest || ["NextPage", "PrevPage", "FirstPage", "LastPage"].includes(annotation.action ?? "");
+      if (!url && !internal) continue;
+      const link = this.scrollEl.ownerDocument.createElement("a");
+      link.className = "ll-pdf-link";
+      link.href = url ?? "#";
+      link.setAttribute("aria-label", url ?? "Go to PDF destination");
+      if (url) { link.title = url; link.rel = "noopener noreferrer"; }
+      link.style.left = `${left / viewport.width * 100}%`;
+      link.style.top = `${top / viewport.height * 100}%`;
+      link.style.width = `${(right - left) / viewport.width * 100}%`;
+      link.style.height = `${(bottom - top) / viewport.height * 100}%`;
+      link.addEventListener("click", (event) => {
+        event.preventDefault(); event.stopPropagation();
+        if (doc !== this.doc || docGen !== this.docGen || this.disposed) return;
+        if (url) void (this.options.openExternal ?? openPdfExternal)(url).catch(() => undefined);
+        else void this.followDestination(annotation, doc, docGen).catch(() => undefined);
       });
+      link.addEventListener("dblclick", (event) => event.stopPropagation());
+      layer.append(link);
+    }
+    return layer;
+  }
+  private async followDestination(annotation: PdfLink, doc: PdfDoc, docGen: number): Promise<void> {
+    if (annotation.action) {
+      const page = this.status.page;
+      this.goToPage(annotation.action === "FirstPage" ? 1 : annotation.action === "LastPage" ? doc.numPages : annotation.action === "NextPage" ? page + 1 : page - 1);
+      return;
+    }
+    const dest = typeof annotation.dest === "string" ? await doc.getDestination?.(annotation.dest) : annotation.dest;
+    if (!Array.isArray(dest)) return;
+    const idx = typeof dest[0] === "number" ? dest[0] : await doc.getPageIndex?.(dest[0]);
+    if (typeof idx !== "number" || !Number.isInteger(idx) || idx < 0 || idx >= doc.numPages || doc !== this.doc || docGen !== this.docGen || this.disposed) return;
+    const page = await doc.getPage(idx + 1);
+    if (doc !== this.doc || docGen !== this.docGen || this.disposed) return;
+    const type = (dest[1] as { name?: string } | undefined)?.name;
+    let y = 0;
+    const viewport = page.getViewport({ scale: 1 });
+    if (viewport.convertToViewportPoint) {
+      const top = type === "XYZ" ? dest[3] : type === "FitH" || type === "FitBH" ? dest[2] : undefined;
+      if (typeof top === "number") y = viewport.convertToViewportPoint(0, top)[1];
+    }
+    this.goToPage(idx + 1);
+    this.scrollEl.scrollTop = this.tops[idx] + Math.max(0, y) * this.scale - PADDING;
+    this.notifyStatus();
+  }
+  private evictOffscreen(wanted: Set<number>): void {
+    const selection = this.scrollEl.ownerDocument.getSelection();
+    const protectedPage = (slot: Slot) => !!selection && !selection.isCollapsed &&
+      (slot.el.contains(selection.anchorNode) || slot.el.contains(selection.focusNode));
+    const held = this.slots.filter((slot) => slot.canvas || slot.text);
+    const center = this.pageAt(this.scrollEl.scrollTop + this.scrollEl.clientHeight / 2);
+    held.sort((a, b) => Math.abs(Number(b.el.dataset.index) - center) - Math.abs(Number(a.el.dataset.index) - center));
+    let count = held.length;
+    for (const slot of held) {
+      if (count <= MAX_RENDERED) break;
+      if (!wanted.has(Number(slot.el.dataset.index)) && !protectedPage(slot)) { this.dropSlot(slot); count--; }
+    }
+  }
+  private dropSlot(slot: Slot): void {
+    slot.task?.cancel(); slot.pendingText?.cancel(); slot.textTask?.cancel(); slot.canvas?.remove(); slot.text?.remove(); slot.links?.remove();
+    slot.task = null; slot.pendingText = null; slot.textTask = null; slot.canvas = null; slot.text = null; slot.links = null; slot.page = null;
+    slot.renderedDoc = slot.renderedGen = slot.failedGen = -1;
+  }
+  private cancelRenders(): void { for (const slot of this.slots) { slot.task?.cancel(); slot.pendingText?.cancel(); } }
+  private cancelLoading(): void { const loading = this.loading; this.loading = null; void loading?.destroy().catch(() => undefined); }
+  private cancelScheduled(): void {
+    if (this.frame !== null) this.win.cancelAnimationFrame(this.frame);
+    if (this.renderTimer !== null) this.win.clearTimeout(this.renderTimer);
+    this.frame = this.renderTimer = null; this.pendingZoom = null;
   }
 }

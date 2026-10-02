@@ -748,7 +748,8 @@
   After a saved CAS update, `TexView.acceptProjectData` cancels its autosave and applies the
   external minimal diff; never add an unguarded second `flush`/write after that boundary.
   `latexFolding` maps its structural RangeSet during edits and rebuilds after 400 ms idle;
-  no whole-document scan in a fold gutter callback or typing transaction. The outline works
+  no whole-document scan in a fold gutter callback or typing transaction. Sources over
+  1,000,000 characters skip both manual and idle parsing without converting the doc to a string. The outline works
   only while open and coalesces committed edits at 800 ms. Keep keyArbiter ownership unchanged.
 - The full bibliography index parses active AST declarations, not regex matches from code
   examples. Cache invalidation tracks balanced declaration ranges, including multiline paths;
@@ -757,3 +758,17 @@
   uses plain text for original entry details. Prose/spelling/table tools run explicitly;
   spelling uses project signatures, skips identifiers/code/math and reports a missing host
   dictionary. Generated table previews escape TeX specials and reject unsupported merged cells.
+- PDF reading uses Obsidian's actual pdf.js TextLayer and link annotations with independent
+  geometry, copied data and PDFJS_ASSETS. Preserve the ctrl-wheel RAF anchor and 140 ms quiet
+  redraw, at most two concurrent renders and ten cached page layers (a selection may protect
+  its two endpoint pages). Keep the old successful canvas/text until a replacement is ready;
+  failed loads never clear it. TextLayer.update runs only after a replacement canvas is ready,
+  not on every pinch frame. Internal destinations and safe http/https/mailto/tel links are
+  isolated from double-click inverse SyncTeX. Save PDF copies the last successful bytes before
+  the native dialog and writes through an adjacent temporary file plus atomic rename.
+  `src/preview/pdfReading.css` is embedded verbatim in styles.css between its named markers.
+  After changes run `pdf-reading-smoke.mjs` (host pdf.js, real TeX, 65 pages, native English/
+  Chinese drag/copy, links, pinch/text geometry and cache bounds) and the reading regressions.
+  Ordinary label/ref arguments are single literal keys even when they contain commas;
+  only cleveref list commands split commas. Range commands keep each endpoint whole.
+  Existing comma keys can be renamed to a safe new key; new comma names are rejected.

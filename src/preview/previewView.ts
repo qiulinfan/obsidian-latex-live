@@ -1,6 +1,7 @@
 import {
   ItemView,
   Modal,
+  Notice,
   ViewStateResult,
   WorkspaceLeaf,
   setIcon,
@@ -10,7 +11,8 @@ import type LatexLivePlugin from "../main";
 import type { LatexSession, SessionEvent } from "../session";
 import type { TexDiagnostic } from "../tex/logParser";
 import type { PdfBox } from "../tex/synctex";
-import { PdfRenderer } from "./pdfRenderer";
+import { PdfRenderer, type PdfReadingStatus } from "./pdfRenderer";
+import { savePdfSnapshot } from "./pdfReading";
 
 export const VIEW_TYPE_PREVIEW = "latex-live-preview";
 
@@ -28,6 +30,12 @@ export class LatexPreviewView extends ItemView {
   private renderer: PdfRenderer | null = null;
   private statusEl!: HTMLElement;
   private problemsEl!: HTMLDetailsElement;
+  private pageInput!: HTMLInputElement;
+  private pageCount!: HTMLElement;
+  private scaleEl!: HTMLElement;
+  private saveButton!: HTMLButtonElement;
+  private pageButtons: HTMLButtonElement[] = [];
+  private saving = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -64,6 +72,7 @@ export class LatexPreviewView extends ItemView {
       });
       setIcon(b, icon);
       b.addEventListener("click", run);
+      return b;
     };
     button("refresh-cw", "Recompile", () => this.session?.request("fast"));
     button("hammer", "Full build (latexmk, runs BibTeX/Biber)", () =>
@@ -73,9 +82,31 @@ export class LatexPreviewView extends ItemView {
     button("zoom-in", "Zoom in", () => this.renderer?.zoomIn());
     button("move-horizontal", "Fit width", () => this.renderer?.fitWidth());
     button("scroll-text", "Show log", () => this.showLog());
+    this.saveButton = button("download", "Save the last successful build as PDF", () => { void this.savePdf(); });
+
+    const navigation = dock.createDiv({ cls: "ll-pdf-navigation" });
+    this.pageButtons = [];
+    const pageButton = (icon: string, label: string, offset: number) => {
+      const b = navigation.createEl("button", { cls: "clickable-icon ll-button", attr: { "aria-label": label } });
+      setIcon(b, icon);
+      b.addEventListener("click", () => this.renderer?.goToPage(this.renderer.status.page + offset));
+      this.pageButtons.push(b);
+    };
+    pageButton("chevron-left", "Previous page", -1);
+    this.pageInput = navigation.createEl("input", { attr: { type: "number", min: "1", step: "1", "aria-label": "Go to PDF page" } });
+    this.pageInput.addEventListener("change", () => { this.renderer?.goToPage(Number(this.pageInput.value)); this.updateReading(this.renderer?.status); });
+    this.pageInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault(); event.stopPropagation();
+      this.renderer?.goToPage(Number(this.pageInput.value));
+      this.pageInput.blur(); this.updateReading(this.renderer?.status);
+    });
+    this.pageCount = navigation.createSpan({ cls: "ll-pdf-count", text: "/ 0" });
+    pageButton("chevron-right", "Next page", 1);
+    this.scaleEl = navigation.createSpan({ cls: "ll-pdf-scale" });
 
     this.problemsEl = dock.createEl("details", { cls: "ll-problems" });
-    this.renderer = new PdfRenderer(root);
+    this.renderer = new PdfRenderer(root, { onStatus: (status) => this.updateReading(status) });
     this.renderer.scrollEl.addEventListener("dblclick", (ev) => {
       void this.inverseSearch(ev);
     });
@@ -148,6 +179,7 @@ export class LatexPreviewView extends ItemView {
   private render(): void {
     if (!this.statusEl) return;
     const s = this.session;
+    this.saveButton.disabled = !s?.lastPdf || this.saving;
     this.statusEl.empty();
     this.statusEl.removeClass("is-error", "is-ok", "is-busy");
     if (!s) {
@@ -230,6 +262,30 @@ export class LatexPreviewView extends ItemView {
     ev.preventDefault();
     const loc = await this.plugin.inverseSearch(s, pt.page, pt.x, pt.y);
     if (loc) await this.plugin.openLocation(loc.file, loc.line);
+  }
+
+  private updateReading(status?: PdfReadingStatus): void {
+    if (!this.pageInput) return;
+    const current = status ?? { page: 0, pages: 0, scale: 1, fit: true };
+    if (this.pageInput.ownerDocument.activeElement !== this.pageInput) this.pageInput.value = current.page ? String(current.page) : "";
+    this.pageInput.max = String(current.pages);
+    this.pageInput.disabled = current.pages === 0;
+    this.pageCount.setText(`/ ${current.pages}`);
+    this.scaleEl.setText(`${Math.round(current.scale * 100)}%${current.fit ? " · Fit width" : ""}`);
+    this.pageButtons[0].disabled = current.page <= 1;
+    this.pageButtons[1].disabled = current.page >= current.pages;
+  }
+
+  private async savePdf(): Promise<void> {
+    const root = this.root, session = this.session, data = session?.lastPdf;
+    if (!root || !data || this.saving) return;
+    this.saving = true;
+    this.render();
+    try {
+      const path = await savePdfSnapshot(root, data);
+      if (path) new Notice(`LaTeX Live: saved ${basename(path)} (last successful build).`);
+    } catch (error) { new Notice(`LaTeX Live: could not save PDF: ${String(error)}`); }
+    finally { this.saving = false; this.render(); }
   }
 
   private showLog(): void {

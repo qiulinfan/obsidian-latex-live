@@ -67,8 +67,10 @@ export class Bibliographies {
     const info = this.sources.get(file);
     if (this.loading) this.invalidate();
     changes.iterChangedRanges((a, b, c, d) => {
-      const old = before.sliceString(before.lineAt(a).from, before.lineAt(b).to);
-      const fresh = after.sliceString(after.lineAt(c).from, after.lineAt(d).to);
+      // Existing declaration ranges cover multiline arguments. A small lexical window
+      // catches a newly typed declaration without reading a soft-wrapped megabyte line.
+      const old = before.sliceString(Math.max(0, a - 64), Math.min(before.length, b + 64));
+      const fresh = after.sliceString(Math.max(0, c - 64), Math.min(after.length, d + 64));
       if (info?.ranges.some(r => a <= r.to && b >= r.from) || declarations(old).fingerprint !== declarations(fresh).fingerprint) this.invalidate();
     });
     if (info) info.ranges = info.ranges.map(r => ({ from: changes.mapPos(r.from, -1), to: changes.mapPos(r.to, 1) }));

@@ -93,6 +93,58 @@ $\eqref{old}$ \[\ref{old}\] \cref{ other, old } \Crefrange{old}{other}\hyperref[
   assert.ok(plan.files.find(file => file.path === t.root)!.after.includes("\\cref{ other, renamed }"));
 });
 
+test("ordinary comma references remain whole keys when renaming one cleveref list member", async () => {
+  const t = await project(String.raw`\label{a}\label{b}
+\ref{a,b}\autoref{a,b}\Autoref{a,b}\hyperref[a,b]{link}\vref{a,b}\Vref{a,b}\eqref{a,b}
+\cref{a,b}\Cref{ a, b }\crefrange{a,b}{b}\Crefrange{a}{a,b}`);
+  const index = indexProjectLabels(t.snapshot);
+  assert.equal(index.unsafe.length, 0);
+  assert.equal(index.occurrences.filter(item => item.key === "a,b").length, 9);
+  assert.equal(index.occurrences.filter(item => item.command === "crefrange" && item.key === "a,b").length, 1);
+  assert.equal(index.occurrences.filter(item => item.command === "Crefrange" && item.key === "a,b").length, 1);
+  const plan = previewLabelRename(t.snapshot, "a", "renamed");
+  assert.equal(plan.count, 4);
+  const after = plan.files[0].after;
+  for (const command of ["ref", "autoref", "Autoref", "vref", "Vref", "eqref"]) assert.ok(after.includes(`\\${command}{a,b}`), command);
+  assert.ok(after.includes("\\hyperref[a,b]{link}"));
+  assert.ok(after.includes("\\cref{renamed,b}"));
+  assert.ok(after.includes("\\Cref{ renamed, b }"));
+  assert.ok(after.includes("\\crefrange{a,b}{b}"));
+  assert.ok(after.includes("\\Crefrange{renamed}{a,b}"));
+});
+
+test("existing comma label keys can be indexed and renamed to a new comma-free key", async () => {
+  const t = await project(String.raw`\label{a,b}\label{a}\label{b}
+\ref{a,b}\autoref{a,b}\hyperref[a,b]{link}\vref{a,b}\eqref{a,b}
+\cref{a,b}\Cref{ a, b }\crefrange{a,b}{b}\Crefrange{a}{a,b}`);
+  const index = indexProjectLabels(t.snapshot);
+  assert.equal(index.unsafe.length, 0);
+  const definition = index.occurrences.find(item => item.kind === "definition" && item.key === "a,b")!;
+  assert.equal(definition.text, "a,b");
+  const plan = previewLabelRename(t.snapshot, "a,b", "combined");
+  assert.equal(plan.count, 8);
+  const after = plan.files[0].after;
+  assert.ok(after.includes("\\label{combined}"));
+  for (const command of ["ref", "autoref", "vref", "eqref"]) assert.ok(after.includes(`\\${command}{combined}`), command);
+  assert.ok(after.includes("\\hyperref[combined]{link}"));
+  assert.ok(after.includes("\\cref{a,b}"));
+  assert.ok(after.includes("\\Cref{ a, b }"));
+  assert.ok(after.includes("\\crefrange{combined}{b}"));
+  assert.ok(after.includes("\\Crefrange{a}{combined}"));
+  assert.throws(() => previewLabelRename(t.snapshot, "a,b", "new,comma"), /New label.*commas/);
+});
+
+test("elegant native labels retain literal comma suffixes until explicitly renamed", async () => {
+  const t = await project(String.raw`\begin{theorem}{Title}{a,b}Statement.\end{theorem}\ref{thm:a,b}`, {}, {}, "", "elegantbook");
+  const index = indexProjectLabels(t.snapshot);
+  assert.equal(index.unsafe.length, 0);
+  assert.deepEqual(index.occurrences.map(item => [item.key, item.text]), [["thm:a,b", "a,b"], ["thm:a,b", "thm:a,b"]]);
+  const plan = previewLabelRename(t.snapshot, "thm:a,b", "thm:combined");
+  assert.equal(plan.count, 2);
+  assert.ok(plan.files[0].after.includes("{Title}{combined}"));
+  assert.ok(plan.files[0].after.includes("\\ref{thm:combined}"));
+});
+
 test("safe rename rejects duplicate definitions, collisions, dynamic refs and reference-generating definitions", async () => {
   const duplicate = await project(String.raw`\label{old}\input{second}`, { "paper/second.tex": String.raw`\label{old}` });
   assert.throws(() => previewLabelRename(duplicate.snapshot, "old", "new"), /duplicate/);

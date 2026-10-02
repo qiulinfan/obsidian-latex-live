@@ -62,3 +62,18 @@ one.bib
     assert.equal(await index.load(root), cached, "ordinary prose changes retain the index");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("Ordinary typing on a very long soft-wrapped line reads a bounded window", () => {
+  const state = EditorState.create({ doc: "word ".repeat(100_000) }), position = 250_000;
+  const tr = state.update({ changes: { from: position, insert: "x" } });
+  const sizes: number[] = [];
+  const instrument = (doc: import("@codemirror/state").Text) => {
+    const value = Object.create(doc) as import("@codemirror/state").Text;
+    value.sliceString = (from, to = doc.length) => { sizes.push(to - from); return doc.sliceString(from, to); };
+    value.lineAt = () => { throw new Error("A line-wide read would scan half a megabyte on every key."); };
+    return value;
+  };
+  const index = new Bibliographies(() => new Map());
+  index.edited("/project/chapter.tex", tr.changes, instrument(state.doc), instrument(tr.newDoc));
+  assert.equal(sizes.length, 2); assert.ok(Math.max(...sizes) <= 129, String(sizes));
+});
