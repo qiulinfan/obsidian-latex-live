@@ -1,6 +1,23 @@
 # Clear showcase recordings / 清晰演示录屏
 
-Recorded in real Obsidian on **2026-10-01, America/Detroit**. The three opening demos are available separately with English and Chinese captions in the READMEs. Each also has a full-resolution MP4 link.
+Recorded in real Obsidian on **2026-10-01, America/Detroit**. The READMEs now use two short clips of the user's own operation alongside the opening ElegantBook demo. Earlier extended recordings remain available below.
+
+## Current short clips
+
+| Demo | Length | Recording |
+| --- | --- | --- |
+| Inline completion, editing and native PDF update | **5.0 s** | [GIF](../assets/showcase/user-yolo-compilation.gif) |
+| PDF-to-source navigation across chapter files | **4.8 s** | [GIF](../assets/showcase/user-inverse-synctex.gif) |
+
+These are continuous excerpts of the user's native Obsidian operation around 6:00 and 6:40 of the original recording. They play at normal speed, with one proportional downsample from 2880 × 1690 to **1440 × 845**, 20 fps GIF sampling and palette conversion. No captions are added; both READMEs use the same clips. The original recording and longer MP4 excerpts remain outside Git.
+
+The completion clip retains normal editing: an incomplete list briefly reports a TeX error before the final PDF update succeeds. Duplicate-label warnings in the demonstration source remain visible in both clips. These are workflow excerpts; the earlier **0.50 s** Mercury observation and separate Overleaf comparison retain their original measurement boundaries.
+
+中文：这两段是用户亲自操作的连续短片，分别展示补全、编辑到 PDF 更新，以及从 PDF 返回章节源码。保持原速，不加字幕，中英文 README 共用。补全过程保留了列表未闭合时的短暂错误以及随后成功的 PDF 更新；演示稿的重复标签警告也保留在画面中。此前 0.50 秒补全与 Overleaf 同稿实测使用各自的原始记录。
+
+## Earlier extended recordings
+
+The following three demos have separate English and Chinese captions and full-resolution MP4 versions.
 
 | Demo | What the real recording shows | English / 中文 |
 | --- | --- | --- |

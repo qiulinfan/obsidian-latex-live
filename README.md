@@ -23,23 +23,23 @@ The project stays ordinary `.tex`. Formulas use project macros, theorem headings
 
 ## Fast PDF feedback, both directions
 
-Edit a formula and see the native PDF update. Jump from your cursor to the typeset passage, then double-click the PDF to return to its source—even across chapter files.
+Keep the native PDF beside your writing. Jump from your cursor to the typeset passage, or double-click the PDF to return to its source—even across chapter files. This **4.8-second** recording shows the return from PDF to a different source file.
 
-![A real edit updates the PDF, followed by forward and inverse SyncTeX](./docs/assets/showcase/speed-navigation-clear.gif)
+![Native PDF-to-source navigation across chapter files at normal speed](./docs/assets/showcase/user-inverse-synctex.gif)
 
-[Watch the Retina-resolution video](./docs/assets/showcase/speed-navigation-clear.mp4).
+[Watch automatic compilation and both navigation directions in the extended Retina video](./docs/assets/showcase/speed-navigation-clear.mp4).
 
-This two-page ElegantBook take reaches the new PDF in **1.02 s**, including the default 400 ms delay; the TeX run takes **0.52 s** with a warm preamble. In the separate same-source Overleaf comparison below, the observed median PDF wait is **76–79% shorter** with LaTeX Live. [Recording details](./docs/demo/clear-showcase.md).
+In the separate same-source Overleaf comparison below, the observed median PDF wait is **76–79% shorter** with LaTeX Live. [Recording details](./docs/demo/clear-showcase.md).
 
 ## Write with YOLO + Mercury Edit 2
 
-Keep writing inside the rendered proof. The separately installed [YOLO](https://github.com/Lapis0x0/obsidian-yolo) plugin supplies ghost-text completion from your configured model; **Mercury Edit 2** is shown here. Press Tab to accept, or Undo to restore the original source. Enter continues normal writing.
+Let [YOLO](https://github.com/Lapis0x0/obsidian-yolo) continue your LaTeX while you work in live editing mode. The separately installed plugin supplies ghost-text completion from your configured model; **Mercury Edit 2** is shown here. Press Tab to accept, or Undo to restore the original source. Enter continues normal writing.
 
-![A real Mercury Edit 2 suggestion, native Tab acceptance and native Undo](./docs/assets/showcase/mercury-edit2-writing.gif)
+![Real inline completion, acceptance and the next native PDF update in five seconds](./docs/assets/showcase/user-yolo-compilation.gif)
 
-[Watch the Retina-resolution video](./docs/assets/showcase/mercury-edit2-writing.mp4).
+This **5-second** clip preserves the actual suggestion, editing and PDF update at normal speed.
 
-The actual short continuation in this take appears in **0.50 s**. The clips retain the real request wait and normal playback speed; cuts omit time spent reviewing the suggestion. [Source and timing evidence](./docs/demo/clear-showcase.md).
+[Watch suggestion, acceptance and Undo in the extended Retina video](./docs/assets/showcase/mercury-edit2-writing.mp4) · [Recording evidence](./docs/demo/clear-showcase.md).
 
 ## Advantages over Overleaf for individual writing
 
@@ -121,7 +121,7 @@ Real TeX diagnostics reach the source editor. The PDF remains available while yo
 
 </details>
 
-All GIFs are excerpts of real applications at normal speed. The first three also have full Retina-resolution videos linked above. Some other clips use fixed detail crops; montages omit pauses between scenes. Chinese captions are in the [Chinese README](./README_zh-CN.md). See [recording provenance](./docs/demo/showcase-provenance.json).
+All GIFs are excerpts of real applications at normal speed. The two short user-operated clips have no added captions and are shared by both READMEs. Extended Retina videos are linked above; other clips may use fixed detail crops or montages that omit pauses between scenes. Chinese-captioned versions of those recordings are in the [Chinese README](./README_zh-CN.md). See [recording provenance](./docs/demo/showcase-provenance.json).
 
 ## Quick start
 

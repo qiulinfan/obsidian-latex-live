@@ -23,23 +23,23 @@
 
 ## 快速编译，源码与 PDF 双向跳转
 
-修改公式，查看原生 PDF 更新。从光标直接定位排版结果，再双击 PDF 回到对应源码行；多文件项目也能沿章节跳转。
+原生 PDF 始终与写作并排显示。从光标直接定位排版结果，或双击 PDF 回到对应源码行；多文件项目也能沿章节跳转。下面 **4.8 秒**的实际操作展示从 PDF 回到另一个源文件。
 
-![实际修改后更新 PDF，并展示源码与 PDF 双向跳转](./docs/assets/showcase/speed-navigation-clear-zh.gif)
+![正常速度展示从 PDF 反向跳转到章节源码](./docs/assets/showcase/user-inverse-synctex.gif)
 
-[查看 Retina 分辨率高清录屏](./docs/assets/showcase/speed-navigation-clear-zh.mp4)。
+[查看自动编译与双向跳转的 Retina 高清长版](./docs/assets/showcase/speed-navigation-clear-zh.mp4)。
 
-这次两页 ElegantBook 的修改到新 PDF 为 **1.02 秒**，包含默认 400 ms 延迟；导言区缓存后的 TeX 编译为 **0.52 秒**。下方另有真实 Overleaf 同稿对比：本次测量中，LaTeX Live 的 PDF 等待时间缩短约 **76%–79%**。详见[录制说明](./docs/demo/clear-showcase.md)。
+下方另有真实 Overleaf 同稿对比：本次测量中，LaTeX Live 的 PDF 等待时间缩短约 **76%–79%**。详见[录制说明](./docs/demo/clear-showcase.md)。
 
 ## YOLO + Mercury Edit 2，边写边补全
 
-在实时编辑的证明里继续写作。单独安装的 [YOLO](https://github.com/Lapis0x0/obsidian-yolo) 提供所配置模型的 ghost text 补全，这次展示的是 **Mercury Edit 2**。按 Tab 接受到正文，撤销还原原稿；Enter 继续正常写作。
+在实时编辑模式里，让 [YOLO](https://github.com/Lapis0x0/obsidian-yolo) 接着写 LaTeX。单独安装的 YOLO 提供所配置模型的 ghost text 补全，这次展示的是 **Mercury Edit 2**。按 Tab 接受到正文，撤销还原原稿；Enter 继续正常写作。
 
-![真实 Mercury Edit 2 补全、Tab 接受和原生撤销](./docs/assets/showcase/mercury-edit2-writing-zh.gif)
+![五秒展示真实行内补全、接受以及原生 PDF 更新](./docs/assets/showcase/user-yolo-compilation.gif)
 
-[查看 Retina 分辨率高清录屏](./docs/assets/showcase/mercury-edit2-writing-zh.mp4)。
+这段 **5 秒**短片保留了实际补全、编辑和 PDF 更新，全程正常速度。
 
-本次简短数学结论的真实补全约 **0.50 秒**出现。片段保留模型请求的实际等待与正常播放速度，剪辑省略审阅建议时的停顿。详见[源码与计时证据](./docs/demo/clear-showcase.md)。
+[查看补全、接受与撤销的 Retina 高清长版](./docs/assets/showcase/mercury-edit2-writing-zh.mp4) · [录制证据](./docs/demo/clear-showcase.md)。
 
 ## 个人数学写作，省下等待和来回查找
 
@@ -121,7 +121,7 @@ texlab 提供命令补全与 snippet。Tab 在占位符间移动，Enter 续写�
 
 </details>
 
-所有 GIF 都截取自真实应用，并按正常速度播放；前三项另有上方链接的 Retina 分辨率视频。部分其他片段使用固定细节裁剪，剪辑省略场景间的停顿。英文字幕版本位于[英文 README](./README.md)。[录制来源与收据](./docs/demo/showcase-provenance.json)可供核对。
+所有 GIF 都截取自真实应用，并按正常速度播放。两段用户亲自操作的短 GIF 不加字幕，中英文 README 共用；上方另有 Retina 高清长版。部分其他片段使用固定细节裁剪，剪辑省略场景间的停顿。其英文字幕版本位于[英文 README](./README.md)。[录制来源与收据](./docs/demo/showcase-provenance.json)可供核对。
 
 ## 快速开始
 

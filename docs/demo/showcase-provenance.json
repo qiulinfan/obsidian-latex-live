@@ -3,6 +3,62 @@
   "recording_date": "2026-10-01",
   "assets": [
     {
+      "id": "user-yolo-compilation",
+      "path": "../assets/showcase/user-yolo-compilation.gif",
+      "sha256": "9374a381fdcefd9da81c7273a53950306bf1e2d83ec6136ee41f4a4a869089a6",
+      "width": 1440,
+      "height": 845,
+      "fps": 20,
+      "duration_s": 5.0,
+      "nativeRangeSum_s": 5.0,
+      "bytes": 2960482,
+      "montage": false,
+      "playbackSpeed": 1,
+      "recording_date": "2026-10-01",
+      "language": "shared",
+      "captions": false,
+      "sources": [
+        {
+          "source": "user-take-2026-10-01-225722.mp4",
+          "sourceSha256": "d8d59a6405bbecd6f807482b0a80ab4d8da31e22e854c70fab668a5e97f4de49",
+          "start_s": 360.95,
+          "end_s": 365.95,
+          "requested_s": 5.0
+        }
+      ],
+      "feature": "Human inline completion, editing and native PDF update",
+      "provenance": "Human-operated native Obsidian selected-window recording; continuous excerpt, one proportional resize and GIF palette conversion, no acceleration or reconstructed UI. The working draft briefly reports an incomplete list before the final error-free PDF update. Duplicate-label warnings from the demonstration source remain visible.",
+      "measurementBoundary": "This clip is a workflow demonstration, not the earlier timed Mercury or same-source Overleaf experiment."
+    },
+    {
+      "id": "user-inverse-synctex",
+      "path": "../assets/showcase/user-inverse-synctex.gif",
+      "sha256": "7ef90fb7f1d42098c78f72a393379646461637aa35d2fd3677db5546b60ded11",
+      "width": 1440,
+      "height": 845,
+      "fps": 20,
+      "duration_s": 4.8,
+      "nativeRangeSum_s": 4.75,
+      "bytes": 1293539,
+      "montage": false,
+      "playbackSpeed": 1,
+      "recording_date": "2026-10-01",
+      "language": "shared",
+      "captions": false,
+      "sources": [
+        {
+          "source": "user-take-2026-10-01-225722.mp4",
+          "sourceSha256": "d8d59a6405bbecd6f807482b0a80ab4d8da31e22e854c70fab668a5e97f4de49",
+          "start_s": 395.0,
+          "end_s": 399.75,
+          "requested_s": 4.75
+        }
+      ],
+      "feature": "Human PDF-to-source navigation across chapter files",
+      "provenance": "Human-operated native Obsidian selected-window recording; continuous excerpt, one proportional resize and GIF palette conversion, no acceleration or reconstructed UI. The real recording switches from writing.tex to chapter.tex after PDF navigation. Duplicate-label warnings from the demonstration source remain visible.",
+      "measurementBoundary": "This clip is a workflow demonstration, not the earlier timed Mercury or same-source Overleaf experiment."
+    },
+    {
       "id": "elegantbook-clear",
       "path": "../assets/showcase/elegantbook-clear.gif",
       "sha256": "d661fe4f8c21d3018830fd6245096d184d6e46b3fa74cb6c1c9e2f50e83d85e0",
