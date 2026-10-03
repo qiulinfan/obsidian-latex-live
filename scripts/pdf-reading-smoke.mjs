@@ -30,6 +30,7 @@ import { PdfRenderer } from './src/preview/pdfRenderer';
 const p = HTMLElement.prototype;
 p.createDiv=function(options={}){const el=this.ownerDocument.createElement('div');el.className=options.cls??'';this.append(el);return el;};
 p.toggleClass=function(cls,on){this.classList.toggle(cls,on);};p.setText=function(text){this.textContent=text;};
+p.setCssProps=function(props){for(const[property,value]of Object.entries(props))this.style.setProperty(property,value);};
 window.activeWindow=window;window.activeDocument=document;window.loaded=0;window.opened=[];window.errors=[];const warn=console.warn.bind(console);console.warn=(...args)=>{if(String(args[0]).startsWith('LaTeX Live:'))window.errors.push(args.map(String).join(' '));warn(...args);};window.addEventListener('error',e=>window.errors.push(e.message));window.addEventListener('unhandledrejection',e=>window.errors.push(String(e.reason)));
 let renderer;window.mount=async()=>{ renderer = new PdfRenderer(document.querySelector('#preview'),{openExternal:async(url)=>window.opened.push(url),onStatus:s=>document.querySelector('#status').textContent=s.page+' / '+s.pages+' · '+Math.round(s.scale*100)+'%'});window.renderer=renderer;await renderer.load(new Uint8Array(await (await fetch('/fixture.pdf')).arrayBuffer()));};
 const rect=el=>{const r=el.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};};

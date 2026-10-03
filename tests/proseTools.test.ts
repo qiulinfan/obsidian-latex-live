@@ -46,6 +46,12 @@ test("Clipboard HTML tables never execute markup or silently flatten merged cell
     assert.equal(document.querySelector("img"), null);
   }
 });
+test("Clipboard tables discard active HTML content while preserving cell text and merge detection", () => {
+  const html = '<table><tr><td><strong>A &amp; B</strong><script>window.clipboardAttack=1</script></td><td><iframe srcdoc="bad">hidden frame</iframe><img src=x onerror="window.clipboardAttack=2">100%</td></tr></table>';
+  assert.deepEqual(clipboardTable("", html, document), [["A & B", "100%"]]);
+  assert.throws(() => clipboardTable("", '<table><tr><td rowspan="2">merged</td><td>A</td></tr><tr><td>B</td></tr></table>', document), /Merged cells/);
+  assert.equal(document.querySelector("script,iframe,img"), null);
+});
 test("Spelling checks prose only, yields/cancels, caches repeated words and clears stale decorations", async () => {
   const src = String.raw`mispeling $mispeling$ \ref{mispeling} 中文 mispeling good`;
   const calls: string[] = [];

@@ -459,9 +459,11 @@ export class PdfRenderer {
     slot.el.style.width = `${Math.floor(size.w * this.scale)}px`;
     slot.el.style.height = `${Math.floor(size.h * this.scale)}px`;
     // pdf.js TextLayer consumes these variables; original glyph geometry stays its responsibility.
-    slot.el.style.setProperty("--total-scale-factor", String(this.scale));
-    slot.el.style.setProperty("--scale-round-x", "1px");
-    slot.el.style.setProperty("--scale-round-y", "1px");
+    slot.el.setCssProps({
+      "--total-scale-factor": String(this.scale),
+      "--scale-round-x": "1px",
+      "--scale-round-y": "1px",
+    });
     // CSS rescales existing glyph positions during a gesture. Font measurement is deferred
     // until the final canvas lands, rather than repeating it for every cached page per wheel.
   }
@@ -522,8 +524,11 @@ export class PdfRenderer {
         textTask = new pdfjs.TextLayer({ textContentSource: content, container: text, viewport: css });
         slot.pendingText = textTask;
         // The off-DOM layer inherits none of the page's variables until it is committed.
-        text.style.setProperty("--total-scale-factor", String(this.scale));
-        text.style.setProperty("--scale-round-x", "1px"); text.style.setProperty("--scale-round-y", "1px");
+        text.setCssProps({
+          "--total-scale-factor": String(this.scale),
+          "--scale-round-x": "1px",
+          "--scale-round-y": "1px",
+        });
         await textTask.render();
       }
       if (!reuse && page.getAnnotations) {

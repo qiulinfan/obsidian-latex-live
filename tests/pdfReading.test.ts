@@ -36,7 +36,13 @@ function fixture(pages = 65) {
   const api = {
     TextLayer: class {
       constructor(private args: { container: HTMLElement }) {}
-      async render() { textRenders++; const span = this.args.container.appendChild(document.createElement("span")); span.textContent = "Copy 中文 text"; }
+      async render() {
+        assert.equal(this.args.container.isConnected, false, "font geometry is prepared before the text layer is attached");
+        assert.equal(this.args.container.style.getPropertyValue("--scale-round-x"), "1px");
+        assert.equal(this.args.container.style.getPropertyValue("--scale-round-y"), "1px");
+        assert.ok(Number(this.args.container.style.getPropertyValue("--total-scale-factor")) > 0);
+        textRenders++; const span = this.args.container.appendChild(document.createElement("span")); span.textContent = "Copy 中文 text";
+      }
       cancel() {}
       update() {}
     },

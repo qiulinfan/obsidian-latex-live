@@ -4,7 +4,7 @@ const purifiers = new WeakMap<Window, DOMPurify>();
 // CHTML uses these scalar layout attributes in addition to standard HTML/MathML.
 const chtmlAttributes = new Set(["jax", "size", "space", "rspace", "texclass", "type", "unselectable"]);
 
-/** Sanitize generated card HTML before inserting nodes into the actual editor window. */
+/** Sanitize card or clipboard HTML in its actual owner window before reading or inserting nodes. */
 export function safeHtmlFragment(doc: Document, html: string): DocumentFragment {
   const win = doc.defaultView;
   if (!win) throw new Error("The theorem card requires an active document window.");

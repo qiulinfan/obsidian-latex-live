@@ -69,7 +69,7 @@ type Helpers = {
 
 /** Obsidian's DOM helpers, as far as the plugin uses them (once; the globals of tests/support/dom). */
 function installDomHelpers(): void {
-  const el = HTMLElement.prototype as unknown as Partial<Helpers> & { setText(t: string): void; addClass(...c: string[]): void };
+  const el = HTMLElement.prototype as unknown as Partial<Helpers> & { setText(t: string): void; addClass(...c: string[]): void; setCssProps(props: Record<string, string>): void };
   if (el.createEl) return;
   for (const proto of [el as Helpers, DocumentFragment.prototype as unknown as Helpers]) {
     proto.createEl = function (this: Node, tag, o = {}, cb) {
@@ -97,6 +97,9 @@ function installDomHelpers(): void {
   };
   el.addClass = function (this: HTMLElement, ...c: string[]) {
     this.classList.add(...c);
+  };
+  el.setCssProps = function (this: HTMLElement, props: Record<string, string>) {
+    for (const [property, value] of Object.entries(props)) this.style.setProperty(property, value);
   };
 }
 

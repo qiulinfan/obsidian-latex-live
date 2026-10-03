@@ -226,6 +226,12 @@ test("canceling a Lua PDF probe and its converter kills each process group, incl
   await prepareWorkDir(planOf(root), host);
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const publishedPid = (name: string): number | null => {
+    try {
+      const value = Number(readFileSync(join(host.workDir, name), "utf8"));
+      return Number.isInteger(value) && value > 1 ? value : null;
+    } catch { return null; }
+  };
   for (const tool of ["lualatex", "dvisvgm"]) {
     const executable = join(bin, tool);
     writeFileSync(executable, "#!/bin/sh\nsleep 60 &\necho $! > helper.pid\necho $$ > engine.pid\nwait\n");
@@ -233,11 +239,13 @@ test("canceling a Lua PDF probe and its converter kills each process group, incl
     const controller = new AbortController();
     const run = tool === "lualatex" ? runProbe(planOf(root), host, controller.signal) : runDvisvgm(join(host.workDir, "main.pdf"), host, controller.signal);
     const settled = run.then(() => null, (e: unknown) => e);
-    for (let i = 0; i < 100 && !existsSync(join(host.workDir, "helper.pid")); i++) await pause(20);
-    const helper = Number(readFileSync(join(host.workDir, "helper.pid"), "utf8"));
-    const engine = Number(readFileSync(join(host.workDir, "engine.pid"), "utf8"));
+    // The shell publishes these files separately; a parallel test run can observe
+    // helper.pid before engine.pid exists or before either write has completed.
+    for (let i = 0; i < 100 && (!publishedPid("helper.pid") || !publishedPid("engine.pid")); i++) await pause(20);
+    const helper = publishedPid("helper.pid"), engine = publishedPid("engine.pid");
     controller.abort();
     assert.ok(isAbortError(await settled), tool);
+    assert.ok(helper && engine, `${tool} published both process IDs before cancellation`);
     for (let i = 0; i < 40 && (alive(helper) || alive(engine)); i++) await pause(25);
     assert.equal(alive(engine), false, `${tool} engine died`);
     assert.equal(alive(helper), false, `${tool} helper died`);

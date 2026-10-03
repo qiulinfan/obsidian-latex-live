@@ -6,6 +6,7 @@ import { countProse, parseDelimitedTable, proseWords, tableLatex, type ProseWord
 import { readProjectSnapshot } from "../tex/projectIndex";
 import { visitNodes } from "../export/plan";
 import { TexView } from "./texView";
+import { safeHtmlFragment } from "./htmlFragment";
 
 export interface SpellDictionary { isWordMisspelled(word: string): boolean; getWordSuggestions(word: string): string[]; }
 export function nativeSpellDictionary(): SpellDictionary | null {
@@ -86,12 +87,11 @@ export class SpellingModal extends Modal {
     }).catch(e => status.setText(`Spelling check failed: ${String(e)}`));
   }
 }
-/** HTML clipboard tables use textContent only; reject merged cells instead of losing topology. */
+/** Sanitize clipboard HTML, read cell text only, and reject merged cells without losing topology. */
 export function clipboardTable(text: string, html: string, document: Document): string[][] | null {
   if (html) {
     if (html.length > 1_000_000) throw new Error("Table is too large (maximum 1 MB).");
-    const template = document.createElement("template"); template.innerHTML = html;
-    const table = template.content.querySelector("table");
+    const table = safeHtmlFragment(document, html).querySelector("table");
     if (table) {
       if (table.querySelector('td[colspan]:not([colspan="1"]),th[colspan]:not([colspan="1"]),td[rowspan]:not([rowspan="1"]),th[rowspan]:not([rowspan="1"])')) throw new Error("Merged cells are not supported; paste a rectangular table.");
       const rows = [...table.rows].map(row => [...row.cells].map(cell => cell.textContent ?? ""));

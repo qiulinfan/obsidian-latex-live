@@ -747,6 +747,14 @@
   versions metadata; `--assets` verifies the production three-file release and no sourcemap.
   GitHub release assets are built from the pushed tag. Never overwrite published tags or
   release assets to correct a mistake; increment the patch version and publish a fresh release.
+  `npm run lint:review` uses the official Obsidian static-style rule and SDL unsafe-HTML rule
+  on production TypeScript; CI and tag releases run it before the build. This is the blocking
+  review gate, not an assertion that every advisory finding has been eliminated. The official
+  lint package's old pinned Obsidian dependency is overridden to the project's host SDK;
+  never downgrade the runtime/type baseline to install a development-only checker.
+  SDL 1.1 requires ESLint 9, so keep that checker pairing until upstream supports ESLint 10.
+  Moment 2.31.0 overrides the host SDK's old development-only peer to resolve
+  GHSA-4p3w-j4w9-5jqw; this does not change the Moment supplied by Obsidian at runtime.
 
 - Project writing tools are documented in `docs/project-writing-tools.md`. `projectIndex`
   snapshots committed buffers and literal inputs (including vault-local parent-folder inputs)

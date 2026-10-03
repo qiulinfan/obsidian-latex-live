@@ -15,6 +15,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run lint:review
       - run: node scripts/check-release.mjs
       - run: npm run build
       - run: node scripts/check-release.mjs --assets
