@@ -750,6 +750,11 @@
   serialize mutations per host, keep a recovery backup, and conditionally roll back/Undo.
   After a saved CAS update, `TexView.acceptProjectData` cancels its autosave and applies the
   external minimal diff; never add an unguarded second `flush`/write after that boundary.
+  `newTexFile.ts` adds a folder-only `file-menu` creation item in `action-primary` and a
+  command-palette entry. Name before creating an empty `.tex` through Vault.create, never
+  overwrite an existing entry, reject paths/removed targets and defer IME confirmation.
+  Open via a new tab so Obsidian's extension registration selects TexView. A failed open
+  retries the already-created file rather than creating again; unload closes pending dialogs.
   `latexFolding` maps its structural RangeSet during edits and rebuilds after 400 ms idle;
   no whole-document scan in a fold gutter callback or typing transaction. Sources over
   1,000,000 characters skip both manual and idle parsing without converting the doc to a string. The outline works

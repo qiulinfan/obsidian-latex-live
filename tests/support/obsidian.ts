@@ -198,6 +198,12 @@ export class TFile {
   }
 }
 
+export class TFolder {
+  constructor(public path: string) {}
+  isRoot(): boolean { return this.path === "/" || this.path === ""; }
+}
+export function getLanguage(): string { return "zh"; }
+
 /** An in-memory vault; `writes` records every modify in order. */
 export class TestVault {
   files = new Map<string, string>();
