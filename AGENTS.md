@@ -743,6 +743,9 @@
 - Public source and authored documentation use MIT. Upstream libraries, external programs,
   fonts and referenced/demo materials retain their original terms; do not relabel those.
   README.md and README_zh-CN.md are user-facing release documentation.
+  README.md is the complete bilingual source with Markdown language headings and raw HTML
+  fragment links (the community modal handles those in place). README_zh-CN.md is a compatibility
+  entry only; keep language switching within README.md and do not restore a second translation.
 - `node scripts/check-release.mjs` verifies the public identity, exact x.y.z tag, package and
   versions metadata; `--assets` verifies the production three-file release and no sourcemap.
   GitHub release assets are built from the pushed tag. Never overwrite published tags or
