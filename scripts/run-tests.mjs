@@ -25,7 +25,6 @@ await build({
   external: ["jsdom"],
   alias: { obsidian: resolve("tests/support/obsidian.ts") },
   logLevel: "warning",
-  loader: { ".css": "text" },
 });
 const res = spawnSync(
   process.execPath,

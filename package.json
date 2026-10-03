@@ -1,6 +1,6 @@
 {
   "name": "obsidian-latex-live",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Live LaTeX compilation and PDF preview for .tex files in Obsidian, driven by the TeX installation already on the machine",
   "main": "main.js",
   "private": true,

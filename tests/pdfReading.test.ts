@@ -26,8 +26,7 @@ Object.assign(dom.window, { IntersectionObserver: FakeObserver, ResizeObserver: 
 const context = dom.window.HTMLCanvasElement.prototype.getContext;
 dom.window.HTMLCanvasElement.prototype.getContext = (() => ({})) as unknown as typeof context;
 const renderers: PdfRenderer[] = [];
-const styleCleanups: (() => void)[] = [];
-afterEach(() => { renderers.splice(0).forEach((renderer) => renderer.destroy()); styleCleanups.splice(0).forEach((cleanup) => cleanup()); setPdfJsForTest(undefined); document.body.replaceChildren(); });
+afterEach(() => { renderers.splice(0).forEach((renderer) => renderer.destroy()); setPdfJsForTest(undefined); document.body.replaceChildren(); });
 const tick = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 function defer<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
@@ -247,7 +246,7 @@ test("preview controls navigate pages and text double-click retains inverse Sync
   };
   const opened: unknown[] = [], inverses: unknown[] = [];
   const app = testApp();
-  const plugin = { app, register: (cleanup: () => void) => { styleCleanups.push(cleanup); }, acquireSession: () => session, releaseSession: () => {}, vaultBase: () => "/vault", vaultPath: (path: string) => path,
+  const plugin = { app, acquireSession: () => session, releaseSession: () => {}, vaultBase: () => "/vault", vaultPath: (path: string) => path,
     invertsPaper: () => false, inverseSearch: async (...args: unknown[]) => { inverses.push(args); return { file: "/vault/main.tex", line: 3 }; },
     openLocation: async (...args: unknown[]) => { opened.push(args); },
   } as unknown as LatexLivePlugin;

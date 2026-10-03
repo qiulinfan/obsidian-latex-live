@@ -1,71 +1,55 @@
 import "./support/dom";
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
-import { Component, Notice } from "./support/obsidian";
-import { ensurePluginStyles } from "../src/pluginStyles";
-import stylesheet from "../styles.css";
+import { Notice, notices } from "./support/obsidian";
+import { checkPluginStyles } from "../src/pluginStyles";
 
-new Notice("");
+new Notice(""); notices.length = 0;
 const cleanups: (() => void)[] = [];
+const wait = () => new Promise((resolve) => setTimeout(resolve, 350));
 afterEach(() => {
   cleanups.splice(0).forEach((cleanup) => cleanup());
-  document.head.replaceChildren(); document.body.replaceChildren();
+  document.head.replaceChildren(); document.body.replaceChildren(); notices.length = 0;
 });
-function owner(): Component {
-  const component = new Component();
-  component.register = (cleanup) => { cleanups.push(() => { cleanup(); }); };
-  return component;
-}
 function preview(doc = document): HTMLElement {
-  const element = doc.body.appendChild(doc.createElement("div"));
-  element.className = "ll-preview";
-  const bar = element.appendChild(doc.createElement("div")); bar.className = "ll-toolbar";
-  const actions = bar.appendChild(doc.createElement("div")); actions.className = "ll-actions";
+  const element = doc.body.appendChild(doc.createElement("div")); element.className = "ll-preview";
   return element;
 }
+function loadStyles(doc = document): void {
+  const sheet = doc.head.appendChild(doc.createElement("style"));
+  sheet.textContent = readFileSync("styles.css", "utf8");
+}
+function check(element: HTMLElement): void { cleanups.push(checkPluginStyles(element)); }
 
-test("missing host stylesheet recovers horizontal preview controls from the authored CSS", () => {
-  const element = preview();
-  assert.notEqual(getComputedStyle(element.querySelector(".ll-actions")!).display, "flex");
-  ensurePluginStyles(element, owner());
-  assert.equal(getComputedStyle(element).display, "flex");
-  assert.equal(getComputedStyle(element.querySelector(".ll-toolbar")!).display, "flex");
-  assert.equal(getComputedStyle(element.querySelector(".ll-actions")!).display, "flex");
-  assert.equal(document.head.querySelector("style")!.textContent, stylesheet);
+test("missing stylesheet gives actionable update/restart guidance, with no CSS injection", async () => {
+  check(preview()); await wait();
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /preview styles are not loaded.*Community plugins.*restart Obsidian/);
+  assert.equal(document.head.children.length, 0);
 });
 
-test("normally loaded CSS needs no recovery; theme overrides retain their order", () => {
-  const native = document.head.createEl("style", { text: stylesheet });
-  const theme = document.head.createEl("style", { text: ".ll-preview { color: rgb(1, 2, 3); }" });
-  const element = preview(), component = owner();
-  ensurePluginStyles(element, component);
-  assert.equal(document.head.querySelectorAll("style").length, 2);
-  assert.equal(cleanups.length, 0);
-  native.remove();
-  ensurePluginStyles(element, component);
-  assert.equal(document.head.lastElementChild, theme);
-  assert.equal(getComputedStyle(element).color, "rgb(1, 2, 3)");
+test("normal and startup-delayed host stylesheet loading gives no false warning", async () => {
+  check(preview()); loadStyles(); await wait();
+  assert.equal(notices.length, 0);
+  assert.equal(document.head.children.length, 1);
+  check(preview()); await wait(); assert.equal(notices.length, 0);
 });
 
-test("multiple previews reuse recovery and plugin unload removes only the recovery sheet", () => {
-  const theme = document.head.createEl("style", { text: ".ll-preview { color: red; }" });
-  const component = owner();
-  ensurePluginStyles(preview(), component); ensurePluginStyles(preview(), component);
-  assert.equal(document.querySelectorAll("[data-latex-live-recovery]").length, 1);
-  cleanups.splice(0).forEach((cleanup) => cleanup());
-  assert.deepEqual([...document.head.children], [theme]);
+test("closing or disconnecting the preview cancels the check; repeated checks warn once", async () => {
+  const closed = preview(), detached = preview();
+  checkPluginStyles(closed)(); check(detached); detached.remove(); await wait();
+  assert.equal(notices.length, 0);
+  check(closed); await wait(); check(closed); await wait();
+  assert.equal(notices.length, 1);
 });
 
-test("a popout recovers in its own document and both sheets clean up", () => {
+test("a popout checks its own stylesheet rather than the main document", async () => {
   const other = new JSDOM("<!doctype html><html><head></head><body></body></html>", { pretendToBeVisual: true });
   try {
-    Object.assign(other.window.HTMLElement.prototype, { createEl: HTMLElement.prototype.createEl });
-    const component = owner(); ensurePluginStyles(preview(), component);
-    ensurePluginStyles(preview(other.window.document), component);
-    assert.equal(other.window.document.head.querySelectorAll("[data-latex-live-recovery]").length, 1);
-    assert.equal(cleanups.length, 2);
-    cleanups.splice(0).forEach((cleanup) => cleanup());
+    loadStyles(); check(preview()); check(preview(other.window.document)); await wait();
+    assert.equal(notices.length, 1);
     assert.equal(other.window.document.head.children.length, 0);
   } finally { other.window.close(); }
 });

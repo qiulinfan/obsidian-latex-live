@@ -1,22 +1,17 @@
-import type { Component } from "obsidian";
-import stylesheet from "../styles.css";
+import { Notice } from "obsidian";
 
-type StyleOwner = Pick<Component, "register">;
-const recovered = new WeakMap<StyleOwner, WeakMap<Document, HTMLStyleElement>>();
+const warned = new WeakSet<HTMLElement>();
 
-/** The host treats a failed styles.css download as optional. Recover from the same
- * authored stylesheet bundled in main.js, without a network request or a second source. */
-export function ensurePluginStyles(element: HTMLElement, owner: StyleOwner): void {
-  const doc = element.ownerDocument;
-  const win = doc.defaultView;
-  if (!win || win.getComputedStyle(element).getPropertyValue("--ll-styles-loaded").trim() === "1") return;
-  let windows = recovered.get(owner);
-  if (!windows) { windows = new WeakMap(); recovered.set(owner, windows); }
-  if (windows.get(doc)?.isConnected) return;
-  // Match the host's ordering: plugin CSS precedes theme/snippet style elements.
-  const before = doc.head.querySelector("style");
-  const style = doc.head.createEl("style", { text: stylesheet, attr: { "data-latex-live-recovery": "" } });
-  if (before) doc.head.insertBefore(style, before);
-  windows.set(doc, style);
-  owner.register(() => { style.remove(); windows.delete(doc); });
+/** The host loads styles.css after plugin startup. Check after that loading window;
+ * a missing optional download must produce an actionable notice, never runtime CSS. */
+export function checkPluginStyles(element: HTMLElement): () => void {
+  const win = element.ownerDocument.defaultView;
+  if (!win) return () => {};
+  const timer = win.setTimeout(() => {
+    if (!element.isConnected || warned.has(element) ||
+        win.getComputedStyle(element).getPropertyValue("--ll-styles-loaded").trim() === "1") return;
+    warned.add(element);
+    new Notice("LaTeX Live: preview styles are not loaded. Update LaTeX Live in Community plugins, then restart Obsidian. If styles.css is still missing, reinstall the plugin after backing up its settings.", 15_000);
+  }, 300);
+  return () => { win.clearTimeout(timer); };
 }

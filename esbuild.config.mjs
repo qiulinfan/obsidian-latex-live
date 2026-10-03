@@ -34,7 +34,6 @@ const context = await esbuild.context({
   treeShaking: true,
   outfile: "main.js",
   platform: "node",
-  loader: { ".css": "text" },
 });
 
 if (production) {

@@ -45,9 +45,9 @@ window.pinch=()=>{const a=window.anchor();for(let i=0;i<10;i++)renderer.scrollEl
 window.linkRect=(href)=>{const a=[...document.querySelectorAll('.ll-pdf-link')].find(x=>href==='internal'?x.getAttribute('href')==='#':x.href.includes(href));return a?rect(a):null;};
 window.canvasDensity=()=>{const canvas=document.querySelector('.ll-page canvas');return {dpr:devicePixelRatio,width:canvas?.width,css:canvas?.getBoundingClientRect().width,text:document.querySelector('.ll-pdf-text')?.textContent};};
 window.mountPreview=async()=>{
- renderer.destroy();window.previewCleanups=[];
+ renderer.destroy();window.previewNotices=[];
  const bytes=new Uint8Array(await(await fetch('/fixture.pdf')).arrayBuffer());
- const plugin={app:{},register:cleanup=>window.previewCleanups.push(cleanup),invertsPaper:()=>false,vaultPath:p=>p,vaultBase:()=>'/vault',
+ const plugin={app:{},invertsPaper:()=>false,vaultPath:p=>p,vaultBase:()=>'/vault',
  acquireSession:()=>({engine:'xelatex',compiling:null,failure:null,last:{log:{diagnostics:[]},durationMs:490,pdfWritten:true,engine:'xelatex',mode:'fast'},lastPdf:bytes,onEvent:()=>()=>{},request:()=>{}}),releaseSession:()=>{}};
  window.previewView=new LatexPreviewView({app:plugin.app},plugin);await window.previewView.onOpen();window.previewView.setRoot('/vault/test.tex');
 };
@@ -55,7 +55,7 @@ window.previewLayout=()=>{
  const root=document.querySelector('#preview'),bar=root.querySelector('.ll-toolbar'),actions=root.querySelector('.ll-actions'),nav=root.querySelector('.ll-pdf-navigation'),canvas=root.querySelector('.ll-page canvas'),page=canvas?.parentElement;
  return {root:rect(root),bar:rect(bar),nav:rect(nav),buttons:[...actions.children].map(rect),display:getComputedStyle(bar).display,actionDisplay:getComputedStyle(actions).display,navDisplay:getComputedStyle(nav).display,
  checkmark:getComputedStyle(root.querySelector('.ll-status'),'::before').content,emptyDisplay:getComputedStyle(root.querySelector('.ll-problems')).display,
- canvas:canvas?{width:canvas.width,css:rect(canvas),page:rect(page),dpr:devicePixelRatio}:null,recovery:document.querySelectorAll('[data-latex-live-recovery]').length};
+ canvas:canvas?{width:canvas.width,css:rect(canvas),page:rect(page),dpr:devicePixelRatio}:null,notices:window.previewNotices};
 };
 window.__ready=true;
 `;
@@ -70,7 +70,7 @@ A second paragraph with mathematical notation $a^2+b^2=c^2$.`+(i<64?'\n\\newpage
 \begin{document}
 `+rows.join('\n')+'\n\\end{document}\n');
  const run=spawn(process.execPath,[join(work,'build.mjs'),work],{stdio:['ignore','pipe','pipe']});let log='';run.stdout.on('data',d=>log+=d);run.stderr.on('data',d=>log+=d);await new Promise((yes,no)=>run.once('exit',code=>code===0?yes():no(new Error(log))));
- const built=await build({stdin:{contents:entry,resolveDir:root,loader:'ts'},bundle:true,platform:'browser',format:'iife',target:'es2022',write:false,loader:{'.css':'text'},external:['/lib/pdfjs/*'],plugins:[{name:'host',setup(b){b.onResolve({filter:/^obsidian$/},()=>({path:'host',namespace:'host'}));b.onLoad({filter:/.*/,namespace:'host'},()=>({loader:'js',contents:`export class ItemView{constructor(leaf){this.leaf=leaf;this.app=leaf.app;this.contentEl=document.querySelector('#preview');}getState(){return{};}async setState(){}}export class Modal{}export class Notice{}export function setIcon(el){const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width','24');svg.setAttribute('height','24');const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d','M5 12h14M12 5v14');path.setAttribute('stroke','currentColor');svg.append(path);el.append(svg);}
+ const built=await build({stdin:{contents:entry,resolveDir:root,loader:'ts'},bundle:true,platform:'browser',format:'iife',target:'es2022',write:false,external:['/lib/pdfjs/*'],plugins:[{name:'host',setup(b){b.onResolve({filter:/^obsidian$/},()=>({path:'host',namespace:'host'}));b.onLoad({filter:/.*/,namespace:'host'},()=>({loader:'js',contents:`export class ItemView{constructor(leaf){this.leaf=leaf;this.app=leaf.app;this.contentEl=document.querySelector('#preview');}getState(){return{};}async setState(){}}export class Modal{}export class Notice{constructor(text){(window.previewNotices??=[]).push(text);}}export function setIcon(el){const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width','24');svg.setAttribute('height','24');const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d','M5 12h14M12 5v14');path.setAttribute('stroke','currentColor');svg.append(path);el.append(svg);}
 export async function loadPdfJs(){const api=await import('/lib/pdfjs/pdf.min.mjs');api.GlobalWorkerOptions.workerSrc='/lib/pdfjs/pdf.worker.min.mjs';window.pdfVersion=api.version;return {...api,getDocument(src){window.loaded++;return api.getDocument(src);}};}`}));b.onResolve({filter:/^(?:node:)?(?:fs|path|crypto|child_process)$/},a=>({path:a.path,namespace:'noio'}));b.onLoad({filter:/.*/,namespace:'noio'},()=>({loader:'js',contents:'module.exports=new Proxy({},{get:()=>()=>{throw new Error("No Node IO from browser");}})'}));}}]});
  writeFileSync(join(work,'bundle.js'),built.outputFiles[0].contents);
  const css=readFileSync(join(root,'styles.css'),'utf8');
@@ -102,12 +102,14 @@ export async function loadPdfJs(){const api=await import('/lib/pdfjs/pdf.min.mjs
  await evaluate('mountPreview()');await sleep(500);
  for(const theme of ['light','dark'])for(const width of [800,375]){
   await evaluate(`document.body.className='theme-${theme} mod-macos';document.querySelector('#preview').style.width='${width}px';document.querySelector('.ll-scroll').scrollTop=0`);await sleep(350);
-  const layout=await evaluate('previewLayout()');check(`preview dock remains horizontal and Retina-sized: ${theme} ${width}px`,layout.display==='flex'&&layout.actionDisplay==='flex'&&layout.navDisplay==='flex'&&layout.buttons.every(button=>Math.abs(button.y-layout.buttons[0].y)<1)&&layout.bar.height<100&&layout.emptyDisplay==='none'&&layout.canvas&&Math.abs(layout.canvas.css.width-layout.canvas.page.width)<1&&layout.canvas.width/layout.canvas.css.width>1.98&&layout.recovery===0,layout);
+  const layout=await evaluate('previewLayout()');check(`preview dock remains horizontal and Retina-sized: ${theme} ${width}px`,layout.display==='flex'&&layout.actionDisplay==='flex'&&layout.navDisplay==='flex'&&layout.buttons.every(button=>Math.abs(button.y-layout.buttons[0].y)<1)&&layout.bar.height<100&&layout.emptyDisplay==='none'&&layout.canvas&&Math.abs(layout.canvas.css.width-layout.canvas.page.width)<1&&layout.canvas.width/layout.canvas.css.width>1.98&&layout.notices.length===0,layout);
  }
  await evaluate('previewView.onClose();document.querySelector("#plugin-css").sheet.disabled=true;document.querySelector("#preview").style.width="800px";mountPreview()');await sleep(500);
- const restored=await evaluate('previewLayout()');check('missing styles.css recovers the complete preview layout and Retina canvas',restored.recovery===1&&restored.display==='flex'&&restored.actionDisplay==='flex'&&restored.navDisplay==='flex'&&restored.emptyDisplay==='none'&&restored.checkmark.includes('✓')&&restored.canvas&&Math.abs(restored.canvas.css.width-restored.canvas.page.width)<1&&restored.canvas.width/restored.canvas.css.width>1.98,restored);
+ const missing=await evaluate('previewLayout()');check('missing stylesheet reports how to update/restart the plugin',missing.notices.length===1&&missing.notices[0].includes('preview styles are not loaded')&&missing.notices[0].includes('Community plugins'),missing.notices);
+ await evaluate('document.querySelector("#plugin-css").sheet.disabled=false;previewView.onClose();mountPreview()');await sleep(500);
+ const restored=await evaluate('previewLayout()');check('restoring the released stylesheet fixes layout and Retina canvas',restored.notices.length===0&&restored.display==='flex'&&restored.actionDisplay==='flex'&&restored.navDisplay==='flex'&&restored.emptyDisplay==='none'&&restored.checkmark.includes('✓')&&restored.canvas&&Math.abs(restored.canvas.css.width-restored.canvas.page.width)<1&&restored.canvas.width/restored.canvas.css.width>1.98,restored);
  const recoveredShot=await page('Page.captureScreenshot',{format:'png'});writeFileSync(join(evidence,'styles-recovered.png'),Buffer.from(recoveredShot.data,'base64'));
- await evaluate('previewView.onClose();previewCleanups.forEach(cleanup=>cleanup())');check('dispose removes PDF layers and recovered stylesheet',await evaluate('document.querySelectorAll(".ll-page, [data-latex-live-recovery]").length===0'));
+ await evaluate('previewView.onClose()');check('dispose removes PDF layers',await evaluate('document.querySelectorAll(".ll-page").length===0'));
  writeFileSync(join(evidence,'measurements.json'),JSON.stringify(results,null,2));
 } catch(error){check('reader smoke',false,error.stack??String(error));}
 finally{ws?.close();if(chrome?.exitCode===null){try{process.kill(-chrome.pid,'SIGKILL');}catch{chrome.kill('SIGKILL');}}server?.close();rmSync(work,{recursive:true,force:true});}

@@ -747,8 +747,9 @@
   versions metadata; `--assets` verifies the production three-file release and no sourcemap.
   GitHub release assets are built from the pushed tag. Never overwrite published tags or
   release assets to correct a mistake; increment the patch version and publish a fresh release.
-  `npm run lint:review` uses the official Obsidian static-style rule and SDL unsafe-HTML rule
-  on production TypeScript; CI and tag releases run it before the build. This is the blocking
+  `npm run lint:review` uses every error-level rule from the official Obsidian recommended
+  config and the SDL unsafe-HTML rule on production TypeScript; CI and tag releases run it
+  before the build. This is the blocking
   review gate, not an assertion that every advisory finding has been eliminated. The official
   lint package's old pinned Obsidian dependency is overridden to the project's host SDK;
   never downgrade the runtime/type baseline to install a development-only checker.
@@ -800,11 +801,11 @@
   Existing comma keys can be renamed to a safe new key; new comma names are rejected.
 
 - Obsidian's community installer treats a failed `styles.css` download as optional. The preview
-  calls `ensurePluginStyles` if its stylesheet marker is absent: the same root styles.css is
-  bundled as text in main.js, loaded before theme/snippet styles, reused per plugin/document and
-  removed through Plugin.register on unload. Normal loading injects nothing. This guard addresses
-  the reported missing-style toolbar/canvas layout; keep one authored CSS source, no remote fetch
-  or appearance reset. Retire the guard when the host guarantees required stylesheet installation.
-  All esbuild entry points importing the plugin use the .css text loader. Cover a missing sheet,
-  normal loading, multiple panes, popouts, theme order and cleanup in pluginStyles.test.ts, and
-  run the full preview with real host CSS/pdf.js through pdf-reading-smoke.mjs.
+  checks its marker after a 300ms host-loading window and reports how to update/restart (or
+  reinstall after backing up settings) if the sheet is absent. Each preview warns once;
+  closing it cancels the check, and popouts use their own window. Never attach style/link nodes,
+  use constructed stylesheets or assign static layout styles to bypass the host's CSS boundary.
+  Official review rejected 0.1.6's runtime CSS recovery; 0.1.7 removes it and retains the density
+  fix. Keep authored styles in styles.css. Cover missing/delayed loading, close/disconnect,
+  duplicate warnings and popouts in pluginStyles.test.ts; pdf-reading-smoke uses actual host
+  CSS/pdf.js and verifies that restoring the released sheet fixes the reported layout.
