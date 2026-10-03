@@ -15,6 +15,11 @@
   CHTML inline scale. Portaled tooltips copy the view's local typography; images, PDF crops,
   spinner/error text and PDF typography are independent. Run `editor-appearance-smoke.mjs`
   after changing this wiring, including short source documents and gutter alignment.
+  With any nonempty selection, `texEditorExtensions` adds `ll-has-selection` through
+  editorAttributes and the active-line background becomes transparent: drawSelection
+  paints below content, so an opaque current line would hide its selected region.
+  Keep the cursor-only active-line paint and selection-layer order unchanged. Check
+  `selection-smoke.mjs` for forward/reverse/wrapped/dark pixel coverage and restoration.
 
 - This plugin is a thin Obsidian frontend over the TeX distribution already
   installed on the machine (pdfLaTeX, XeLaTeX, LuaLaTeX, latexmk, SyncTeX).

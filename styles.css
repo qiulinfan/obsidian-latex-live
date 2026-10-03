@@ -45,6 +45,9 @@ SOFTWARE.
 .ll-editor-content .cm-editor .cm-activeLine {
   background: var(--background-primary-alt);
 }
+.ll-editor-content .cm-editor.ll-has-selection .cm-activeLine {
+  background: transparent;
+}
 .ll-editor-content .cm-editor .cm-selectionBackground,
 .ll-editor-content .cm-editor.cm-focused .cm-selectionBackground {
   background: var(--text-selection);

@@ -85,6 +85,11 @@ export function texEditorExtensions(o: TexEditorOptions): Extension[] {
     keyArbiter({ inline: o.inline, enter: latexEnterHooks, tabFallback: indentOrInsertTab, completesWord: typingCommand }),
     o.yolo ?? [],
     EditorState.allowMultipleSelections.of(true),
+    // drawSelection paints behind the text. An opaque active-line background must not
+    // hide the selected part of the line containing a range's head.
+    EditorView.editorAttributes.of(view => ({
+      class: view.state.selection.ranges.some(range => !range.empty) ? "ll-has-selection" : "",
+    })),
     darkThemeExtension(),
     languageData({ brackets: ["(", "[", "{", "$"], before: CLOSE_BEFORE, lineComment: "%" }),
     indentUnitFor(o.text, "    "),
