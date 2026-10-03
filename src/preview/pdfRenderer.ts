@@ -223,6 +223,7 @@ export class PdfRenderer {
   private lastWidth = 0;
   private observer: IntersectionObserver;
   private resizeObserver: ResizeObserver;
+  private resolutionQuery: MediaQueryList | null = null;
   private resizeTimer: number | null = null;
   private renderTimer: number | null = null;
   private frame: number | null = null;
@@ -253,6 +254,7 @@ export class PdfRenderer {
       }, 80);
     });
     this.resizeObserver.observe(this.scrollEl);
+    this.watchResolution();
     this.scrollEl.addEventListener("wheel", this.onWheel, { passive: false });
     this.scrollEl.addEventListener("scroll", this.onScroll, { passive: true });
     this.setEmpty("No PDF yet.");
@@ -380,10 +382,27 @@ export class PdfRenderer {
     this.disposed = true;
     this.observer.disconnect();
     this.resizeObserver.disconnect();
+    this.resolutionQuery?.removeEventListener("change", this.onResolutionChange);
+    this.resolutionQuery = null;
     if (this.resizeTimer !== null) this.win.clearTimeout(this.resizeTimer);
     this.scrollEl.removeEventListener("wheel", this.onWheel);
     this.scrollEl.removeEventListener("scroll", this.onScroll);
   }
+
+  private watchResolution(): void {
+    this.resolutionQuery?.removeEventListener("change", this.onResolutionChange);
+    this.resolutionQuery = this.win.matchMedia?.(`(resolution: ${this.win.devicePixelRatio || 1}dppx)`) ?? null;
+    this.resolutionQuery?.addEventListener("change", this.onResolutionChange);
+  }
+  private onResolutionChange = (): void => {
+    if (this.disposed) return;
+    this.watchResolution();
+    // A move between Retina/external displays need not change the pane's CSS width.
+    // Refresh backing pixels without moving the page, reloading the PDF or rebuilding text.
+    this.cancelRenders();
+    this.gen++;
+    this.renderVisible();
+  };
 
   private onWheel = (event: WheelEvent): void => {
     // Chromium/macOS delivers trackpad pinch as a ctrl-wheel. Ordinary scrolling is untouched.

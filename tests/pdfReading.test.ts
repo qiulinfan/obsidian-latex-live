@@ -26,7 +26,8 @@ Object.assign(dom.window, { IntersectionObserver: FakeObserver, ResizeObserver: 
 const context = dom.window.HTMLCanvasElement.prototype.getContext;
 dom.window.HTMLCanvasElement.prototype.getContext = (() => ({})) as unknown as typeof context;
 const renderers: PdfRenderer[] = [];
-afterEach(() => { renderers.splice(0).forEach((renderer) => renderer.destroy()); setPdfJsForTest(undefined); document.body.replaceChildren(); });
+const styleCleanups: (() => void)[] = [];
+afterEach(() => { renderers.splice(0).forEach((renderer) => renderer.destroy()); styleCleanups.splice(0).forEach((cleanup) => cleanup()); setPdfJsForTest(undefined); document.body.replaceChildren(); });
 const tick = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 function defer<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
@@ -130,6 +131,44 @@ test("pinch coalesces at animation frames without reopening the PDF or recreatin
   assert.equal(f.counts().textRenders, 1);
 });
 
+test("display density changes redraw backing pixels at unchanged width and preserve text selection", async () => {
+  const originalMatch = dom.window.matchMedia;
+  const originalDpr = Object.getOwnPropertyDescriptor(dom.window, "devicePixelRatio")!;
+  const queries: { listeners: Set<() => void> }[] = [];
+  dom.window.matchMedia = (() => {
+    const query = { listeners: new Set<() => void>(),
+      addEventListener(_event: string, listener: () => void) { this.listeners.add(listener); },
+      removeEventListener(_event: string, listener: () => void) { this.listeners.delete(listener); } };
+    queries.push(query); return query;
+  }) as unknown as typeof dom.window.matchMedia;
+  const density = (value: number) => {
+    Object.defineProperty(dom.window, "devicePixelRatio", { value, configurable: true });
+    [...queries].forEach((query) => [...query.listeners].forEach((listener) => listener()));
+  };
+  try {
+    density(1);
+    const f = fixture(2); await f.renderer.load(new Uint8Array([1])); observer.show(0); await tick();
+    const old = f.host.querySelector("canvas")!, text = f.host.querySelector(".ll-pdf-text")!;
+    const range = document.createRange(); range.selectNodeContents(text);
+    document.getSelection()!.addRange(range);
+    const status = f.renderer.status, selected = document.getSelection()!.toString();
+    density(2); await tick();
+    const retina = f.host.querySelector("canvas")!;
+    assert.notEqual(retina, old); assert.equal(retina.width, old.width * 2);
+    assert.equal(f.host.querySelector(".ll-pdf-text"), text);
+    assert.equal(document.getSelection()!.toString(), selected);
+    assert.deepEqual(f.renderer.status, status);
+    assert.equal(f.counts().opens, 1); assert.equal(f.counts().textRenders, 1);
+    density(1); await tick(); assert.equal(f.host.querySelector("canvas")!.width, old.width);
+    assert.equal(queries.reduce((total, query) => total + query.listeners.size, 0), 1);
+    f.renderer.destroy();
+    assert.equal(queries.reduce((total, query) => total + query.listeners.size, 0), 0);
+  } finally {
+    dom.window.matchMedia = originalMatch;
+    Object.defineProperty(dom.window, "devicePixelRatio", originalDpr);
+  }
+});
+
 test("superseded PDF loads and disposal cannot install an old document", async () => {
   const f = fixture(2), first = defer<unknown>();
   const original = f.api.getDocument;
@@ -208,7 +247,7 @@ test("preview controls navigate pages and text double-click retains inverse Sync
   };
   const opened: unknown[] = [], inverses: unknown[] = [];
   const app = testApp();
-  const plugin = { app, acquireSession: () => session, releaseSession: () => {}, vaultBase: () => "/vault", vaultPath: (path: string) => path,
+  const plugin = { app, register: (cleanup: () => void) => { styleCleanups.push(cleanup); }, acquireSession: () => session, releaseSession: () => {}, vaultBase: () => "/vault", vaultPath: (path: string) => path,
     invertsPaper: () => false, inverseSearch: async (...args: unknown[]) => { inverses.push(args); return { file: "/vault/main.tex", line: 3 }; },
     openLocation: async (...args: unknown[]) => { opened.push(args); },
   } as unknown as LatexLivePlugin;

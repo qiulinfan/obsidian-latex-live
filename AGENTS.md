@@ -780,7 +780,12 @@
   spelling uses project signatures, skips identifiers/code/math and reports a missing host
   dictionary. Generated table previews escape TeX specials and reject unsupported merged cells.
 - PDF reading uses Obsidian's actual pdf.js TextLayer and link annotations with independent
-  geometry, copied data and PDFJS_ASSETS. Preserve the ctrl-wheel RAF anchor and 140 ms quiet
+  geometry, copied data and PDFJS_ASSETS.
+  Screen-density changes rearm the owner window's resolution media query and redraw backing
+  pixels even when the pane width is unchanged; preserve scroll, zoom, text selection and cache
+  bounds, and remove the listener on dispose. `pdf-reading-smoke.mjs` changes window DPR with a
+  fixed 800px pane to exercise the actual browser notification (no synthetic change event).
+  Preserve the ctrl-wheel RAF anchor and 140 ms quiet
   redraw, at most two concurrent renders and ten cached page layers (a selection may protect
   its two endpoint pages). Keep the old successful canvas/text until a replacement is ready;
   failed loads never clear it. TextLayer.update runs only after a replacement canvas is ready,
@@ -793,3 +798,13 @@
   Ordinary label/ref arguments are single literal keys even when they contain commas;
   only cleveref list commands split commas. Range commands keep each endpoint whole.
   Existing comma keys can be renamed to a safe new key; new comma names are rejected.
+
+- Obsidian's community installer treats a failed `styles.css` download as optional. The preview
+  calls `ensurePluginStyles` if its stylesheet marker is absent: the same root styles.css is
+  bundled as text in main.js, loaded before theme/snippet styles, reused per plugin/document and
+  removed through Plugin.register on unload. Normal loading injects nothing. This guard addresses
+  the reported missing-style toolbar/canvas layout; keep one authored CSS source, no remote fetch
+  or appearance reset. Retire the guard when the host guarantees required stylesheet installation.
+  All esbuild entry points importing the plugin use the .css text loader. Cover a missing sheet,
+  normal loading, multiple panes, popouts, theme order and cleanup in pluginStyles.test.ts, and
+  run the full preview with real host CSS/pdf.js through pdf-reading-smoke.mjs.

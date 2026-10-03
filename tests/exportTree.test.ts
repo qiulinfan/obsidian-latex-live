@@ -485,7 +485,7 @@ test("unified-latex is a devDependency only: the plugin's bundle never includes 
     const esbuild = require("esbuild");
     const builtins = require("node:module").builtinModules.flatMap((m) => [m, "node:" + m]);
     esbuild.build({ entryPoints: ["src/main.ts"], bundle: true, write: false, metafile: true, format: "cjs",
-      platform: "node", target: "es2022", logLevel: "silent",
+      platform: "node", target: "es2022", logLevel: "silent", loader: { ".css": "text" },
       external: ["obsidian", "electron", "@codemirror/*", "@lezer/*", ...builtins] })
       .then((r) => console.log(JSON.stringify(Object.keys(r.metafile.inputs))));`;
   const inputs = JSON.parse(execFileSync(process.execPath, ["-e", script], { encoding: "utf8" })) as string[];

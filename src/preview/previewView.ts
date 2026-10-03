@@ -13,6 +13,7 @@ import type { TexDiagnostic } from "../tex/logParser";
 import type { PdfBox } from "../tex/synctex";
 import { PdfRenderer, type PdfReadingStatus } from "./pdfRenderer";
 import { savePdfSnapshot } from "./pdfReading";
+import { ensurePluginStyles } from "../pluginStyles";
 
 export const VIEW_TYPE_PREVIEW = "latex-live-preview";
 
@@ -60,6 +61,7 @@ export class LatexPreviewView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("ll-preview");
+    ensurePluginStyles(root, this.plugin);
 
     const dock = root.createDiv({ cls: "ll-preview-dock" });
     const bar = dock.createDiv({ cls: "ll-toolbar" });

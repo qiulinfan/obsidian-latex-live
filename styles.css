@@ -633,6 +633,7 @@ SOFTWARE.
 
 /* Preview pane */
 .ll-preview {
+  --ll-styles-loaded: 1;
   display: flex;
   flex-direction: column;
   padding: 0 !important;
