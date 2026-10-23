@@ -11,10 +11,14 @@ import { resolve } from "path";
 //             \write gives `\llpos{serial}{env}{abs page}{x}{y}{wd}{ht}{dp}{file}{line}` (sp; x, y
 //             the box's left baseline point from the page's bottom left; file \CurrentFilePath/
 //             \CurrentFile; line \inputlineno at \end). Writes in boxes TeX throws away (beamer's
-//             trial typesetting, a gobbled \only) never fire. The output opens at
-//             begindocument/before, so the same file works on the command line and inside a
-//             preamble format. Without the LaTeX 2020-10 hooks or a savepos primitive it does
-//             nothing.
+//             trial typesetting, a gobbled \only) never fire. The output stream is allocated and
+//             opened at begindocument/end, after every package and the preamble took theirs, and
+//             only while one is free (pdfTeX and XeTeX have 16; LuaTeX's are not counted down to
+//             that): a document that needs every stream records nothing. Being a hook, the same
+//             file works on the command line and inside a preamble format. Without the LaTeX
+//             2020-10 hooks or a savepos primitive it does nothing.
+//   Builds    Fast compiles read it; latexmk full builds do not (`-usepretex` replaces the command
+//             lines of the user's latexmkrc), so their PDF has no records and crops use SyncTeX.
 //   Version   POS_RECORDER_VERSION goes into the preamble format's key: a changed recorder
 //             rebuilds the format it is baked into.
 
@@ -24,7 +28,7 @@ import { resolve } from "path";
  */
 export const RECORDED_ENVS: ReadonlySet<string> = new Set(["tikzpicture", "tikzcd", "circuitikz"]);
 
-export const POS_RECORDER_VERSION = 2;
+export const POS_RECORDER_VERSION = 3;
 /** The recorder's file name in the output dir. */
 export const POS_RECORDER_FILE = "latex-live-pos.tex";
 
@@ -36,15 +40,15 @@ export const POS_RECORDER = String.raw`% latex-live position recorder (written b
   \let\llpos@savepos\savepos \let\llpos@xpos\lastxpos \let\llpos@ypos\lastypos
 \fi\fi
 \ifdefined\llpos@savepos\ifdefined\ReadonlyShipoutCounter
-\newwrite\llpos@out
-\AddToHook{begindocument/before}{\immediate\openout\llpos@out=\jobname.llpos\relax}
+\def\llpos@open{\newwrite\llpos@out\immediate\openout\llpos@out=\jobname.llpos\relax}
+\AddToHook{begindocument/end}{\ifx\directlua\@undefined\ifnum\count17<15 \llpos@open\fi\else\llpos@open\fi}
 \newbox\llpos@box
 \newcount\llpos@depth
 \newcount\llpos@serial
 \def\llpos@file{\ifdefined\CurrentFilePath\ifx\CurrentFilePath\@empty\else\CurrentFilePath/\fi\fi\ifdefined\CurrentFile\CurrentFile\fi}
 \def\llpos@begin{\global\advance\llpos@depth\@ne}
 \def\llpos@after#1{%
-  \ifnum\llpos@depth=\@ne
+  \ifdefined\llpos@out\ifnum\llpos@depth=\@ne
     \ifhmode
       \setbox\llpos@box\lastbox
       \ifvoid\llpos@box\else
@@ -59,7 +63,7 @@ export const POS_RECORDER = String.raw`% latex-live position recorder (written b
         \box\llpos@box
       \fi
     \fi
-  \fi
+  \fi\fi
   \global\advance\llpos@depth\m@ne}
 \def\llpos@hook#1{%
   \AddToHook{env/#1/begin}{\llpos@begin}%

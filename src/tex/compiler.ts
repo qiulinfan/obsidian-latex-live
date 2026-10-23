@@ -179,7 +179,6 @@ export class Compiler {
     // with the distribution's and project's normal rc files.
     const hookFile = join(o.outDir, "latex-live.latexmkrc");
     await fsp.writeFile(hookFile, logreqDependencyHook(await fsp.realpath(o.outDir), this.jobName));
-    const recorder = await this.writeRecorder(o.outDir);
     const args = [
       flag,
       "-interaction=nonstopmode",
@@ -196,12 +195,12 @@ export class Compiler {
       ...(biber && biber !== texTool(o.binDir, "biber")
         ? ["-e", `$biber = q{"${biber}" %O %S}`]
         : []),
-      // The position recorder before the root; latexmk would otherwise name the job after it.
-      `-usepretex=${texInput(recorder)}`,
-      `-jobname=${this.jobName}`,
+      // No position recorder: -usepretex would replace the command lines of the user's
+      // latexmkrc (shell escape, $pre_tex_code). Crops of this PDF use SyncTeX.
       basename(this.root),
     ];
     await this.removeLog(o.outDir);
+    await this.removePositions(o.outDir);
     const executed = await this.exec(
       texTool(o.binDir, "latexmk"),
       args,
@@ -423,8 +422,8 @@ export class Compiler {
   }
 
   /**
-   * A run that dies before \begin{document} must not leave the last run's positions (latexmk's
-   * keep theirs: a run it skips reuses the PDF they describe).
+   * A run that dies before \begin{document} must not leave the last run's positions, and a full
+   * build, which records none, must not take a fast compile's.
    */
   private async removePositions(outDir: string): Promise<void> {
     await fsp.rm(join(outDir, `${this.jobName}.llpos`), { force: true });

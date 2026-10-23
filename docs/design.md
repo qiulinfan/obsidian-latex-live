@@ -924,8 +924,11 @@ SyncTeX 在 beamer 里把一帧当成一整页（帧体是宏参数，记录都�
   - pdfLaTeX 的导言区格式：mylatexformat 会吞掉一遍读入的第一行（直到 `\begin{document}`），命令行上的 `\input` 会被
     吞掉。所以记录器烤进格式：`buildFormat` 读一个包装文件 `<job>-preamble-wrap.tex`（记录器 + 主文件）代替主文件，
     记录器版本进格式缓存键（`formatKey`）。输出目录里的这两个文件不算格式的依赖（每次都重写）。
-  - latexmk：`-usepretex=\input{记录器}` 加 `-jobname`。
-  - 每次快速编译前删掉旧的 `.llpos`；结果落地时会话把记录读进 `CompiledPdf.positions`（下一遍开始前）。
+  - latexmk 完整构建不注入记录器：`-usepretex` 会替换用户 latexmkrc 里的命令行（shell escape、`$pre_tex_code`），
+    所以完整构建的 PDF 没有记录，裁剪用 SyncTeX。
+  - 每次快速编译和完整构建前删掉旧的 `.llpos`；结果落地时会话把记录读进 `CompiledPdf.positions`（下一遍开始前）。
+- **写入流**：pdfTeX 和 XeTeX 只有 16 个写入流。记录器在 `begindocument/end` 才分配自己的流，此时宏包和导言区已经
+  分配完；没有空闲的流就不记录，文档自己的流优先。
 - **配对**（`blockCrop.ts` 的 `pairedRecord`，只用于 "picture" 块）：
   - 论文：（文件、环境、`\end` 行）恰好一条记录。
   - beamer：帧里最外层的被记录环境排成一个种类序列（带 `overlay` 选项的不算）；这一帧的记录按页分组、按序号排，

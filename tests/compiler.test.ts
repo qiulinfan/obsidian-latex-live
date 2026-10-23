@@ -272,8 +272,34 @@ test("full build runs latexmk", { skip }, async () => {
   assert.equal(r.mode, "full");
   assert.equal(r.pdfWritten, true, r.rawLog.slice(-800));
   assert.equal(r.pdfPath, join(h.outDir, "main.pdf"));
-  // latexmk reads the position recorder first (-usepretex).
-  assert.deepEqual(readLlpos(r.pdfPath, dir), []);
+  // No recorder in latexmk builds (the user's latexmkrc keeps its command lines): no records.
+  assert.equal(readLlpos(r.pdfPath, dir), null);
+  h.compiler.dispose();
+});
+
+test("full build keeps the project's latexmkrc command lines", { skip }, async () => {
+  const dir = project({
+    "main.tex": "\\documentclass{article}\n\\begin{document}\n\\typeout{RCFLAG=\\llrcflag}x\n\\end{document}\n",
+    "latexmkrc": "$pdflatex = 'pdflatex %O \"\\\\def\\\\llrcflag{fromrc}\\\\input{%S}\"';\n",
+  });
+  const h = harness(join(dir, "main.tex"));
+  h.compiler.request("full");
+  const r = await h.next();
+  assert.equal(r.pdfWritten, true, r.rawLog.slice(-800));
+  assert.match(r.rawLog, /RCFLAG=fromrc/);
+  h.compiler.dispose();
+});
+
+test("the position recorder leaves the last write stream to the document", { skip }, async () => {
+  const writes = Array.from({ length: 12 }, (_, i) => `\\newwrite\\w${String.fromCharCode(97 + i)}`).join("\n");
+  const dir = project({ "main.tex": `\\documentclass{article}\n\\usepackage{tikz}\n${writes}\n\\begin{document}\n\\begin{tikzpicture}\\draw (0,0)--(1,1);\\end{tikzpicture}\n\\end{document}\n` });
+  const h = harness(join(dir, "main.tex"), { engine: "xelatex" });
+  h.compiler.request();
+  const r = await h.final();
+  assert.equal(r.pdfWritten, true, r.rawLog.slice(-800));
+  // Twelve streams of its own plus the kernel's fill pdfTeX's and XeTeX's sixteen: a recorder that
+  // took one first broke the document; now it takes what is left after \begin{document}, or none.
+  assert.doesNotMatch(r.rawLog, /No room for a new \\write/);
   h.compiler.dispose();
 });
 
