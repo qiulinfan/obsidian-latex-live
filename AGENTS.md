@@ -266,7 +266,8 @@
   the real stack with Obsidian's MathJax): formulas (`$..$`, `\(..\)`, `\[..\]`, `$$..$$`, the math
   environments), since P3 the text constructs of design 4.4 #5-#11, since P4 theorem boxes (#12),
   figure/table lines (#8) and images (#13), since P5 PDF crops (#14: TikZ pictures and tables; #4:
-  a block formula MathJax rejects); unknown environments stay source. A display
+  a block formula MathJax rejects), tables drawn from their source (#23); unknown environments
+  stay source. A display
   formula owning its lines (latexScan's `block`; inline math never is one) becomes a block
   widget, one in running text an inline display widget; a formula MathJax rejects shows its crop
   when it owns its lines and has one, else keeps its source with the `lsp-lp-error` underline.
@@ -349,7 +350,18 @@
     lines, no preview below. While a new result's crop is pending, the block shows the crop its
     `previous` request drew (the key changes with every result, so the core's stale-while-revalidate
     cannot match it); changed, without a preview or failing (quietly) it is source (#4: MathJax's
-    error).
+    error), a `TABLE_ENVS` tabular a table (#23).
+  - tables (#23, `src/editor/latexTable.ts`, pure; `tests/latexTable.test.ts`): `tabular`,
+    `tabular*` and `tabularx` (not longtable or array) whose `\begin` line may go on with
+    `\toprule`/`\hline` and whose `\end` line with further `\end`s (latexScan's `tableAlone`).
+    `parseTabular` reuses the export's column specs (`tables.ts`) and splits rows and cells at the
+    body's own `\\` and `&`; it gives up (null: source) on unbalanced braces or `$`, a tabular
+    inside, an open inner environment. `cellParts` turns a cell's constructs into parts (math,
+    styles, chips; hidden commands omitted; anything else its source) and the gaps into text
+    (`cellText`: unknown commands as written). latexLive sends the spec as JSON in a `table` block
+    request (`below: false`), TexRender's `renderLive` builds it with `tableNode` through the
+    inline MathJax path; a cell whose formula throws shows its source. Shown in papers without a
+    crop and in decks with crops off (or none yet); classes `ll-table`, styles in styles.css.
     `cropKindOf` decides how a block crops and refuses anything inside a tcolorbox (elegantbook's
     fancy theorems): pgf moves a box's content, and SyncTeX places it ~20 pt off.
   - `\ref`-family, `\cite`-family (`CITE_COMMANDS` in latexHighlight: natbib's and biblatex's,

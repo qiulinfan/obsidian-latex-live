@@ -19,7 +19,7 @@ PDF 和导出仍按 TeX 处理。
 | 横幅宏的调用，例如 `\sectionframe{Part}{标题}{说明}` | 一张居中的横幅卡片，各参数分行显示，参数可以直接编辑；右上角是页码 | 显示源码 |
 | 图片宏的调用，例如 `\DeckFigure[height=3cm]{figures/a.pdf}`，独占一行 | 显示图片（同 `\includegraphics`） | 显示源码，图片在下方 |
 | `tikzpicture`（以及 `tikzcd`、`pgfpicture`、`circuitikz`） | 折叠成一行「▸ TikZ (N lines)」。点击或光标进入时展开成源码 | 显示源码 |
-| `tabular` 等表格 | 源码 | — |
+| `tabular`、`tabular*`、`tabularx`（`\begin` 独占一行，可接 `\toprule`/`\hline`；`\end` 行可接其他 `\end`） | 简单表格：列对齐，`\hline`、booktabs 线和 `\cline`/`\cmidrule` 画成横线，`\|` 画成竖线，`\multicolumn` 跨列，`\multirow` 只显示内容。格子里的公式、`\textbf` 等样式和引用照常渲染，不认识的命令照原样显示，公式渲染失败的格子显示源码。解析不了（括号不配对、表里套表等）时显示源码。`longtable` 和 `array` 不处理 | 显示源码 |
 
 **居中**（论文也生效）：`\centering` 之后到所在分组结束的行，和 `center` 环境里的行，按行居中显示，
 内容仍是可编辑的文字。
@@ -60,7 +60,7 @@ PDF 和导出仍按 TeX 处理。
 ## 设置
 
 **Crop tabular/TikZ in beamer**（默认关）：打开后，beamer 里的表格和 TikZ 图和论文一样显示为 PDF 裁剪图，
-不再折叠。论文里的裁剪不受这个设置影响。
+不再折叠；没有裁剪图（还没编译、没有预览）的表格仍显示为简单表格。论文里的裁剪不受这个设置影响。
 
 ## 不做的
 

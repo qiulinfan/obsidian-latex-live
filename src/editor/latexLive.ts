@@ -6,6 +6,7 @@ import type { TheoremDef, TheoremMap } from "../tex/theorems";
 import { texText } from "../tex/texText";
 import { LatexRefs, citeText, formulaRefs, refText } from "./latexRefs";
 import { LatexArg, LatexBanner, LatexConstruct, LatexEnv, LatexMath, LatexTitlePage, TextStyle, blocksAround, hasConstructs, scanLatex } from "./latexScan";
+import { TABLE_ENVS, TablePart, cellParts, parseTabular, tableSpec } from "./latexTable";
 import { prepareMath } from "./mathjaxProject";
 import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } from "./shared/livePreview";
 
@@ -74,7 +75,8 @@ import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } 
 //       preview holds the root's session and the block's text is the one compiled), in a paper
 //       card; the source while the cursor is on its lines, with no preview below (the crop
 //       would be stale). A new result's crop replaces the last one when it lands (the old one
-//       stays meanwhile); changed or without a crop, it is source (a table's formulas render).
+//       stays meanwhile); changed or without a crop, a TikZ picture is source and a table is
+//       drawn from its source (#23).
 //       Nothing inside a tcolorbox (elegantbook's theorems) is cropped: SyncTeX places what
 //       pgf moved ~20 pt off (cropKindOf).
 //   #17 the lines after \centering and in a center environment are centered (a line class; papers
@@ -95,8 +97,17 @@ import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } 
 //   #21 overlays: the `<..>` of \item and \only, \onslide, \uncover, \visible, \alt hides with
 //       their braces (the content stays); \pause is a hidden command (#15).
 //   #22 tables and TikZ pictures are not cropped unless env.beamerCrops() (SyncTeX places a
-//       beamer frame as a whole page): a table stays source, a TikZ picture folds to one line
-//       `▸ TikZ (n lines)` until the cursor enters it (a click on the line puts it there).
+//       beamer frame as a whole page): a table is drawn from its source (#23), a TikZ picture
+//       folds to one line `▸ TikZ (n lines)` until the cursor enters it (a click on the line
+//       puts it there); longtable stays source.
+//   #23 a tabular, tabular* or tabularx without a crop (#14, #22) whose \begin and \end are
+//       alone on their lines (the \begin line may go on with \toprule or \hline, the \end line
+//       with a wrapper's \end): a table widget over its lines (latexTable: columns, rows, rules,
+//       \multicolumn spans), its cells' formulas, styles and chips as in the running text and
+//       their other text as it prints (an unknown command as written); a cell with a formula
+//       MathJax rejects shows its source. Inside a center environment it is centered. The source
+//       while the cursor is on its lines, with nothing below; one the parse cannot follow
+//       (unbalanced braces, a tabular inside) stays source.
 // A construct with an error diagnostic on it stays source (the lint underline shows).
 // Numbers: a request carries the formula already prepared for MathJax (prepareMath: `\label`
 // -> `\tag{n}` from the root's last compile, a reference -> the chip's text), so a compile
@@ -236,6 +247,29 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
     if (src === undefined) memo.set(key, (src = prepareMath(m.src, now.numbers, m.display, formulaRefs(now))));
     return src;
   };
+  /** A table's cell part for a construct in it (#23): a formula, a chip, or null (its source). */
+  const leaf = (c: LatexConstruct, doc: Text): TablePart | null => {
+    if (c.kind === "math") return { t: "math", src: prepared(c), display: c.display };
+    if (c.kind === "label") return { t: "chip", text: c.key, cls: "lsp-lp-chip is-label", title: doc.sliceString(c.from, c.to) };
+    if (c.kind !== "ref" && c.kind !== "cite") return null;
+    const chip = c.kind === "ref" ? { ...refText(c.command, c.keys, env.refs()), title: doc.sliceString(c.from, c.to) } : citeText(c.keys, c.prenote, c.postnote, env.refs());
+    return { t: "chip", text: chip.text, cls: `lsp-lp-chip is-${c.kind}${chip.missing ? " is-missing" : ""}`, title: chip.title };
+  };
+  /**
+   * #23: a tabular as a table widget over its lines (a block, revealed over them as a crop is),
+   * its cells' constructs rendered as in the running text; one the parse cannot follow stays source.
+   */
+  const decorateTable = (c: LatexEnv, ctx: LiveContext): void => {
+    const { doc } = ctx.state;
+    const layout = parseTabular(doc.sliceString(c.from, c.to));
+    if (!layout) return;
+    const all = scanLatex(doc, env.rules);
+    const inside = all.filter((k) => k.from > c.from && k.to <= c.to);
+    const center = all.some((k) => k.kind === "center" && k.from <= c.from && k.to >= c.from);
+    const text = (from: number, to: number) => doc.sliceString(from, to);
+    const spec = tableSpec(layout, c.from, text, (from, to) => cellParts(inside, text, from, to, (k) => leaf(k, doc)), center);
+    renderConstruct(ctx, { from: c.from, to: c.to, block: true }, ctx.request("table", JSON.stringify(spec), true, c.from), { below: false });
+  };
   return {
     scan: (doc) => scanLatex(doc, env.rules),
     // A theorem box tests the selection on its \begin and \end lines only (decorateBox): a move
@@ -313,10 +347,14 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
         else if (def) decorateBox(c, def, ctx, refs, env.file);
         else if (beamer && CROP_ENVS.has(c.env) && !env.beamerCrops?.()) {
           if (TIKZ_ENVS.has(c.env)) foldPicture(c, ctx);
-        } else if (CROP_ENVS.has(c.env) && env.crop) {
-          const kind = cropKindOf(doc, c, c.env, refs.theorems);
-          const crop = kind && env.crop(doc, c.from, c.to, kind);
-          if (crop) decorateCrop(ctx, c, crop);
+          else if (TABLE_ENVS.has(c.env)) decorateTable(c, ctx);
+        } else if (CROP_ENVS.has(c.env)) {
+          // #23: a table without a crop (or whose crop failed) is drawn from its source.
+          const table = TABLE_ENVS.has(c.env) ? () => decorateTable(c, ctx) : undefined;
+          const kind = env.crop ? cropKindOf(doc, c, c.env, refs.theorems) : null;
+          const crop = kind && env.crop!(doc, c.from, c.to, kind);
+          if (crop) decorateCrop(ctx, c, crop, table);
+          else table?.();
         }
         return;
       }

@@ -14,6 +14,7 @@ import { sameTheorems, theoremMap } from "../tex/theorems";
 import { boxNumber, cropKindOf } from "./latexLive";
 import { LatexRefs, formulaRefs, refNames, sameRefNames } from "./latexRefs";
 import { LatexBlock, LatexEnv, LatexMath, blockAt, formulas, mathAt, scanLatex } from "./latexScan";
+import { tableNode } from "./latexTable";
 import { MathError, MathJaxLike, ProjectMath, ProjectMathInput, inputEpoch, numberedEnv, tagLabels } from "./mathjaxProject";
 import type { FragmentRenderer, RenderRequest, RenderResult } from "./shared/livePreview";
 import { hoverError } from "./shared/renderHover";
@@ -588,12 +589,17 @@ export class TexRender {
     return doc.importNode(node, true) as HTMLElement;
   }
 
-  /** A live request (see Live): its source has its numbers already. Images: see Images. */
+  /** A live request (see Live): its source has its numbers already. Images: see Images; tables: latexTable. */
   private renderLive(root: string, req: RenderRequest): RenderResult | Promise<RenderResult> {
     if (req.kind === "image") return this.renderImage(req.src);
     if (req.kind === "crop") return this.host.crops?.render(root, req.src) ?? { ok: false, message: "No crops here.", quiet: true };
     const mj = this.mathJax();
     if (!mj) return { ok: false, message: "MathJax is not available." };
+    if (req.kind === "table") {
+      // A cell whose formula MathJax rejects shows its source (tableNode).
+      const math = this.rootMath(mj, root).math;
+      return { ok: true, node: tableNode(req.src, this.host.mathJax.document, (src, display) => math.render(src, display)) };
+    }
     try {
       return { ok: true, node: this.rootMath(mj, root).math.render(req.src, req.display) };
     } catch (e) {

@@ -754,6 +754,83 @@ SOFTWARE.
   font-size: var(--font-ui-smaller);
   text-align: center;
 }
+/* A tabular drawn from its source (latexLive #23, latexTable.ts): rules are borders; a table
+   in a center environment is centered. No vertical margins (a block widget). */
+.ll-editor-content .lsp-lp-table {
+  text-align: left;
+}
+.ll-editor-content .ll-table {
+  margin: 0;
+  border-collapse: collapse;
+}
+.ll-editor-content .ll-table.is-center {
+  margin: 0 auto;
+}
+.ll-editor-content .ll-table td {
+  padding: 0.15em 0.6em;
+  border-width: 0;
+  border-style: solid;
+  border-color: var(--text-normal);
+  vertical-align: top;
+  white-space: nowrap;
+}
+.ll-editor-content .ll-table td.is-l,
+.ll-editor-content .ll-table td.is-p {
+  text-align: left;
+}
+.ll-editor-content .ll-table td.is-c {
+  text-align: center;
+}
+.ll-editor-content .ll-table td.is-r {
+  text-align: right;
+}
+/* Paragraph columns (p, m, b, X) wrap. */
+.ll-editor-content .ll-table td.is-p {
+  min-width: 8em;
+  white-space: normal;
+}
+.ll-editor-content .ll-table td.top-thin,
+.ll-editor-content .ll-table td.top-light {
+  border-top-width: 1px;
+}
+.ll-editor-content .ll-table td.top-heavy {
+  border-top-width: 2px;
+}
+.ll-editor-content .ll-table td.top-double {
+  border-top-width: 3px;
+  border-top-style: double;
+}
+.ll-editor-content .ll-table td.bottom-thin,
+.ll-editor-content .ll-table td.bottom-light {
+  border-bottom-width: 1px;
+}
+.ll-editor-content .ll-table td.bottom-heavy {
+  border-bottom-width: 2px;
+}
+.ll-editor-content .ll-table td.bottom-double {
+  border-bottom-width: 3px;
+  border-bottom-style: double;
+}
+.ll-editor-content .ll-table td.left-1 {
+  border-left-width: 1px;
+}
+.ll-editor-content .ll-table td.left-2 {
+  border-left-width: 3px;
+  border-left-style: double;
+}
+.ll-editor-content .ll-table td.right-1 {
+  border-right-width: 1px;
+}
+.ll-editor-content .ll-table td.right-2 {
+  border-right-width: 3px;
+  border-right-style: double;
+}
+/* A cell with a formula MathJax rejects: its source. */
+.ll-editor-content .ll-table td.is-source {
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
 /* A fragment compile in the render hover (fragments.ts): TeX's own output on paper. */
 .ll-editor-content .lsp-lp-paper.ll-fragment {
   vertical-align: top;

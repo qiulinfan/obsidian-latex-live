@@ -34,6 +34,9 @@
 //       page in the corner, a \sectionframe banner, the title page and the TikZ fold; every
 //       gutter number sits on its line (±1 px); ArrowDown visits each shown line of the card in
 //       order; a real click on the page number shows that page, one on the fold opens its source
+//   B11 a tabular in a frame card (latexTable.ts, latexLive #23): a table with its cells, rule
+//       and the plugin's styles, every gutter number on its line (±1 px); a real click on a cell
+//       reveals its source; ArrowDown from the line above enters its first line
 // The page bundles the real shared modules (keyArbiter first, live preview in its
 // compartment) with a LaTeX-like test language. Formulas render with MathJax 3.2.2 when the
 // `mathjax` dev dependency is installed (LaTeX Live, Obsidian's configuration; its glyph CSS
@@ -83,6 +86,7 @@ import { latexLiveLanguage } from "./src/editor/latexLive";
 import { DEFAULT_REF_NAMES } from "./src/editor/latexRefs";
 import { labelJump } from "./src/editor/labelJump";
 import { EMPTY_USER_RULES, NO_DETECTED, detectEnvRules, mergeEnvRules } from "./src/tex/envRules";
+import { tableNode } from "./src/editor/latexTable";
 
 /** B9: the rules of a deck whose preamble defines \DeckLayout[1] (the user hides it), and its refs. */
 const rules = mergeEnvRules({ ...EMPTY_USER_RULES, hidden: ["DeckLayout"] }, NO_DETECTED, (n) => (n === "DeckLayout" ? { args: 1, optional: false } : undefined));
@@ -155,6 +159,8 @@ let styleTimer = 0;
 const renderer = {
   epoch: 0,
   render(req) {
+    // B11's tables: their cells' formulas the same way.
+    if (req.kind === "table") return { ok: true, node: tableNode(req.src, document, (src, display) => renderer.render({ src, display }).node) };
     const MJ = window.MathJax;
     if (MJ && MJ.tex2chtml) return { ok: true, node: MJ.tex2chtml(req.src, { display: req.display }) };
     const el = document.createElement(req.display ? "div" : "span");
@@ -959,6 +965,67 @@ async function b10({ page, evaluate }) {
   check("B10", "a click on the fold opens the picture's source", !opened.fold && opened.source, opened);
 }
 
+const B11_DOC = [
+  "Before the deck.", // 1
+  "\\begin{frame}{People}", // 2
+  "{\\small",
+  "\\begin{tabular}{@{}l@{\\quad}l@{}}\\toprule", // 4
+  "  \\DeckLabel{Supervisors:} & PD Dr. A, $k_1$\\\\[3pt]",
+  "  & Prof. B \\& C",
+  "\\end{tabular}", // 7
+  "}",
+  "After the table.",
+  "\\end{frame}",
+  "After the deck.",
+].join("\n");
+
+async function b11({ page, evaluate }) {
+  await mount(evaluate, B11_DOC, 700, { deck: true });
+  const shown = await evaluate(`(() => {
+    const v = __view;
+    const gutter = new Map();
+    for (const el of v.dom.querySelectorAll(".cm-lineNumbers .cm-gutterElement")) {
+      if (/^\\d+$/.test(el.textContent)) gutter.set(+el.textContent, el.getBoundingClientRect().top);
+    }
+    const rows = [];
+    for (const el of v.contentDOM.querySelectorAll(".cm-line, .lsp-lp-render.is-block")) {
+      const n = v.state.doc.lineAt(v.lineBlockAt(v.posAtDOM(el)).from).number;
+      if (gutter.has(n)) rows.push([n, Math.round(el.getBoundingClientRect().top - gutter.get(n))]);
+    }
+    const t = v.contentDOM.querySelector(".ll-frame .lsp-lp-table table.ll-table");
+    const td = t && t.querySelector("td");
+    return {
+      cells: t ? [...t.rows].map((r) => [...r.cells].map((c) => c.textContent.replace(/\\s+/g, " ").trim())) : null,
+      math: !!(t && t.querySelector("mjx-container, .fake-math")),
+      top: td ? getComputedStyle(td).borderTopWidth : null,
+      collapse: t ? getComputedStyle(t).borderCollapse : null,
+      worst: Math.max(...rows.map((r) => Math.abs(r[1]))), off: rows.filter((r) => Math.abs(r[1]) > 1),
+    };
+  })()`);
+  check("B11", "the tabular in the card is a table: its cells, a formula, the \\toprule and the plugin's styles",
+    !!shown.cells && shown.cells.length === 2 && shown.cells[0][0] === "\\DeckLabel{Supervisors:}" && shown.cells[1][1] === "Prof. B & C" &&
+      shown.math && shown.top === "2px" && shown.collapse === "collapse",
+    shown);
+  check("B11", "gutter numbers sit on their lines (±1 px)", shown.worst <= 1, shown.off);
+  // A real click on the second row's cell: its source, the cursor in the tabular.
+  await evaluate("__view.focus(), __view.dispatch({ selection: { anchor: __view.state.doc.length } }), true");
+  await sleep(200);
+  const cell = await evaluate(`(() => { const r = __view.contentDOM.querySelectorAll(".lsp-lp-table td")[3].getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  for (const type of ["mousePressed", "mouseReleased"]) await page("Input.dispatchMouseEvent", { type, x: cell.x, y: cell.y, button: "left", clickCount: 1 });
+  await sleep(300);
+  const clicked = await evaluate("({ table: !!__view.contentDOM.querySelector('.lsp-lp-table'), source: __view.contentDOM.textContent.includes('Prof. B \\\\& C'), line: __view.state.doc.lineAt(__view.state.selection.main.head).number })");
+  check("B11", "a click on a cell reveals the tabular's source, the cursor on its lines", !clicked.table && clicked.source && clicked.line >= 4 && clicked.line <= 7, clicked);
+  // ArrowDown from line 3 into it: its first line, the source shown.
+  await evaluate("__view.dispatch({ selection: { anchor: __view.state.doc.length } }), true");
+  await sleep(200);
+  await evaluate("__view.dispatch({ selection: { anchor: __view.state.doc.line(3).to } }), true");
+  await sleep(200);
+  await press(page, "ArrowDown");
+  await sleep(200);
+  const down = await evaluate("({ line: __view.state.doc.lineAt(__view.state.selection.main.head).number, table: !!__view.contentDOM.querySelector('.lsp-lp-table') })");
+  check("B11", "ArrowDown from the line above enters the tabular's first line and reveals it", down.line === 4 && !down.table, down);
+}
+
 async function b8({ page, evaluate }) {
   const terms = Array.from({ length: 24 }, (_, i) => `a_{${i + 1}}`).join(" + ");
   const doc = ["A formula that wraps: $" + terms + "$ and text after it.", "The next line."].join("\n");
@@ -1050,6 +1117,7 @@ try {
   if (run("B8")) await b8(cdp);
   if (run("B9")) await b9(cdp);
   if (run("B10")) await b10(cdp);
+  if (run("B11")) await b11(cdp);
 } catch (e) {
   check("--", "smoke run", false, e instanceof Error ? e.message : String(e));
 } finally {

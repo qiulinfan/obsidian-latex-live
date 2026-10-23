@@ -2,6 +2,7 @@ import type { Text } from "@codemirror/state";
 import { texText } from "../tex/texText";
 import { Arity, DEFAULT_RULES, EnvRules, commandEnd } from "../tex/envRules";
 import { CITE_COMMANDS, VERBATIM_ENVS, iffalseEnd, iffalseStarts } from "./latexHighlight";
+import { TABLE_ENVS } from "./latexTable";
 
 // The constructs a LaTeX document renders: pure, no CodeMirror view and no Obsidian, so the
 // hover and live preview share one scan and tests run it directly (design 4.3, 4.4).
@@ -479,6 +480,15 @@ function bodyStart(s: string): number {
 
 const aloneOnLines = (s: string, from: number, to: number): boolean =>
   !s.slice(s.lastIndexOf("\n", from - 1) + 1, from).trim() && /^\s*(%.*)?$/.test(s.slice(to, lineEnd(s, to)));
+
+/**
+ * A table's \begin (#23) may share its line with the first rules (`\begin{tabular}{cll}\toprule`),
+ * its \end with the \end of the wrappers around it (`\end{tabular}\end{center}`).
+ */
+const TABLE_BEGIN_TAIL = /^(?:\s*\\(?:hline|toprule|midrule)(?![A-Za-z])(?:\[[^\]\n]*\])?)*\s*(%.*)?$/;
+const TABLE_END_TAIL = /^(?:\s*\\end\s*\{[^{}\n]*\})*\s*(%.*)?$/;
+const tableAlone = (s: string, from: number, to: number, tail: RegExp): boolean =>
+  !s.slice(s.lastIndexOf("\n", from - 1) + 1, from).trim() && tail.test(s.slice(to, lineEnd(s, to)));
 
 const labelsIn = (src: string): string[] => [...src.matchAll(/\\label\s*\{([^{}]*)\}/g)].map((m) => m[1].trim());
 
@@ -1190,7 +1200,8 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
           const open = envs[at];
           if (open) {
             envs.length = at;
-            if (open.at >= 0 && aloneOnLines(s, i, j) && lineBreaks(s, open.from, i) <= MAX_LINES) {
+            const alone = TABLE_ENVS.has(env) ? tableAlone(s, i, j, TABLE_END_TAIL) : aloneOnLines(s, i, j);
+            if (open.at >= 0 && alone && lineBreaks(s, open.from, i) <= MAX_LINES) {
               const { from, beginTo, args, label } = open;
               out[open.at] = { kind: "env", from, to: j, env, beginTo, endFrom: i, args, label };
             }
@@ -1270,7 +1281,8 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
           LABEL.lastIndex = lineEnd(s, beginTo) + 1;
           label = LABEL.lastIndex < n ? LABEL.exec(s) : null;
         }
-        const at = aloneOnLines(s, i, beginTo) ? out.push(null) - 1 : -1;
+        const alone = TABLE_ENVS.has(env) ? tableAlone(s, i, beginTo, TABLE_BEGIN_TAIL) : aloneOnLines(s, i, beginTo);
+        const at = alone ? out.push(null) - 1 : -1;
         envs.push({ env, from: i, beginTo, args, label: label ? label[1].trim() : null, at });
       }
     }

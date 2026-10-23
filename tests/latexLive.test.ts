@@ -1276,14 +1276,72 @@ test("P5 a new compile's crop replaces the last one when it lands; a crop that f
     await waitFor(() => cropCards(view).every((c) => c!.startsWith("crop 2|")), 3000);
     assert.equal(cropCards(view).length, 3);
 
-    // A crop that cannot render (no SyncTeX records): #14 keeps its source, #4 MathJax's error.
+    // A crop that cannot render (no SyncTeX records): #14 a table drawn from its source (#23), #4 MathJax's error.
     f.seq = 3;
     f.delay = 5;
     f.failing = new Set(["\\begin{tabular}{ll}", "\\begin{equation*}"]);
     p.render.cropsChanged(p.root);
     await waitFor(() => cropCards(view).length === 1 && cropCards(view)[0]!.startsWith("crop 3|"), 3000);
-    assert.ok(lines(view).includes("  \\begin{tabular}{ll}"));
+    await waitFor(() => !!view.contentDOM.querySelector(".lsp-lp-table"));
+    assert.deepEqual(tableCells(view), [["a", "𝑥2"]]);
     assert.ok(errors(view).includes("\\begin{equation*}"));
+  } finally {
+    p.done();
+  }
+});
+
+/** An element's text with each formula as its glyphs. */
+const cellChars = (el: Node): string =>
+  [...el.childNodes].map((n) => (n.nodeType === 3 ? n.textContent! : (n as Element).tagName === "MJX-CONTAINER" ? chars(n as Element) : cellChars(n))).join("");
+
+/** The cells of the table widgets, row by row. */
+const tableCells = (view: EditorView) =>
+  [...view.contentDOM.querySelectorAll(".lsp-lp-table tr")].map((tr) => [...tr.querySelectorAll("td")].map(cellChars));
+
+test("#23 a tabular without a crop is a table: rules, spans, formulas, styles and chips in its cells; source while touched", async () => {
+  const p = await project();
+  try {
+    const doc = [
+      "\\begin{center}\\renewcommand{\\arraystretch}{1.35}", // 1
+      "\\begin{tabular}{c|ll}\\toprule", // 2
+      "$k$ & \\textbf{Rate} & see \\ref{eq:none} \\\\\\midrule", // 3
+      "1 & a \\& b~--~c & $\\undefinedmacro$ \\\\[3pt]", // 4
+      "\\multicolumn{2}{r}{\\emph{both}} & \\DeckLabel{x} \\\\\\bottomrule", // 5
+      "\\end{tabular}\\end{center}", // 6
+      "\\begin{tabular}{ll}", // 7: a tabular inside: source
+      "a & \\begin{tabular}{l}x\\end{tabular}",
+      "\\end{tabular}",
+      "end", // 10
+    ].join("\n");
+    const view = await p.mount(doc);
+    await waitFor(() => !!view.contentDOM.querySelector(".lsp-lp-table"));
+    await rendered(view);
+    assert.deepEqual(lines(view), ["\\begin{center}\\renewcommand{\\arraystretch}{1.35}", "[w]", "\\begin{tabular}{ll}", "a & \\begin{tabular}{l}x\\end{tabular}", "\\end{tabular}", "end"]);
+    const table = view.contentDOM.querySelector(".lsp-lp-table table.ll-table")!;
+    assert.ok(table.classList.contains("is-center"), "in a center environment");
+    assert.deepEqual(tableCells(view), [
+      ["𝑘", "Rate", "see ??"],
+      ["1", "a & b – c", "$\\undefinedmacro$"],
+      ["both", "\\DeckLabel{x}"],
+    ]);
+    const tds = [...table.querySelectorAll("td")];
+    assert.ok(tds[0].querySelector("mjx-container"), "a formula renders");
+    assert.equal(tds[1].querySelector(".lsp-lp-strong")?.textContent, "Rate");
+    assert.ok(tds[2].querySelector(".lsp-lp-chip.is-ref.is-missing"));
+    assert.ok(tds[5].classList.contains("is-source"), "MathJax rejects it: the cell's source");
+    assert.equal(tds[6].colSpan, 2);
+    assert.ok(tds[6].classList.contains("is-r") && tds[6].querySelector(".lsp-lp-em"));
+    assert.deepEqual(tds.slice(0, 3).map((td) => td.className), ["is-c top-heavy bottom-light right-1", "is-l top-heavy bottom-light", "is-l top-heavy bottom-light"]);
+    assert.ok(tds[7].classList.contains("bottom-heavy"));
+    // The cursor in it: its source, nothing below.
+    cursorAt(view, view.state.doc.line(4).from + 1);
+    await rendered(view);
+    assert.equal(view.contentDOM.querySelector(".lsp-lp-table"), null);
+    assert.equal(lines(view)[1], "\\begin{tabular}{c|ll}\\toprule");
+    assert.equal(below(view), null);
+    cursorAt(view, view.state.doc.length);
+    await rendered(view);
+    assert.ok(view.contentDOM.querySelector(".lsp-lp-table"));
   } finally {
     p.done();
   }
@@ -1316,8 +1374,14 @@ test("beamer: frame cards with their title bar and page, banners, the title page
       "\\begin{tikzpicture}", // 7
       "  \\draw (0,0) -- (1,1);",
       "\\end{tikzpicture}",
-      "\\end{frame}", // 10
-      "\\sectionframe{Part}{Two}", // 11
+      "{\\small", // 10
+      "\\begin{tabular}{@{}l@{\\quad}l@{}}",
+      "  \\DeckLabel{Supervisors:} & PD Dr. A\\\\[3pt]",
+      "  & Prof. B",
+      "\\end{tabular}",
+      "}",
+      "\\end{frame}", // 16
+      "\\sectionframe{Part}{Two}", // 17
       "end",
     ].join("\n");
     const make = (beamerCrops: boolean) =>
@@ -1368,6 +1432,14 @@ test("beamer: frame cards with their title bar and page, banners, the title page
     assert.ok(!text.includes("<2->") && !text.includes("\\DeckGap") && !text.includes("\\end{frame}"), text);
     const banner = view.contentDOM.querySelector(".lsp-lp-box.ll-banner");
     assert.deepEqual([...(banner?.querySelectorAll(".ll-banner-arg") ?? [])].map((a) => a.textContent), ["Part", "Two"]);
+    // #23 a tabular is a table, also in a {\\small …} group; the cursor in it, its source (a real click: browser smoke B11).
+    assert.deepEqual(tableCells(view), [["\\DeckLabel{Supervisors:}", "PD Dr. A"], ["", "Prof. B"]]);
+    cursorAt(view, view.state.doc.line(13).from + 3);
+    await rendered(view);
+    assert.equal(view.contentDOM.querySelector(".lsp-lp-table"), null);
+    assert.ok((view.contentDOM.textContent ?? "").includes("& Prof. B"));
+    cursorAt(view, view.state.doc.length);
+    await rendered(view);
     // The cursor in the picture: its source.
     cursorAt(view, view.state.doc.line(8).from + 2);
     await rendered(view);
@@ -1378,6 +1450,7 @@ test("beamer: frame cards with their title bar and page, banners, the title page
     const cropped = make(true);
     await rendered(cropped);
     assert.equal(cropped.contentDOM.querySelector(".ll-tikz-fold"), null);
+    assert.equal(tableCells(cropped).length, 2, "no crop to show: the table");
     cropped.destroy();
   } finally {
     p.done();
