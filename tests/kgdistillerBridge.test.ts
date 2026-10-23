@@ -91,6 +91,29 @@ test("document bridge adds exact semantic anchors and repeated refs without touc
   } finally { await rm(folder, { recursive: true, force: true }); }
 });
 
+test("document bridge anchors a bracketed name where its text is shown", { skip: !tex, timeout: 90_000 }, async () => {
+  const folder = await mkdtemp(join(tmpdir(), "latex-live-bridge-named-test-"));
+  try {
+    const source = join(folder, "main.tex");
+    const main = "\\documentclass{article}\n\\providecommand{\\kn}[2][]{\\textbf{#2}}\n\\providecommand{\\knref}[1]{#1}\n\\begin{document}\n\\kn[Measure space]{A triple} is defined here. \\kn[Outer measure]{}An outer measure. See \\knref{Measure space}.\n\\end{document}\n";
+    await writeFile(source, main);
+    const result = await kgdistillerHtml({ schema, operation: "document", source, markers: [
+      { name: "Measure space", id: "measure-space", url: "#kn-measure-space" },
+      { name: "Outer measure", id: "outer-measure", url: "#kn-outer-measure" },
+    ] });
+    if (result.operation !== "document") throw new Error("Expected document");
+    const dom = new JSDOM(result.html);
+    const anchor = dom.window.document.querySelector('[id="kn-measure-space"][data-ql-kn="measure-space"]');
+    assert.ok(anchor);
+    assert.equal(dom.window.document.querySelectorAll('[data-ql-kn="outer-measure"]').length, 1);
+    assert.match(dom.window.document.body.textContent ?? "", /A triple is defined here/);
+    assert.doesNotMatch(dom.window.document.body.textContent ?? "", /\[Measure space\]|Outer measure\]/);
+    assert.equal(dom.window.document.querySelectorAll('a[data-ql-ref="measure-space"]').length, 1);
+    assert.equal(await readFile(source, "utf8"), main);
+    dom.window.close();
+  } finally { await rm(folder, { recursive: true, force: true }); }
+});
+
 test("notes wrapper can read absolute repository inputs within project_root", { skip: !tex, timeout: 90_000 }, async () => {
   const folder = await mkdtemp(join(tmpdir(), "latex-live-bridge-wrapper-test-"));
   try {

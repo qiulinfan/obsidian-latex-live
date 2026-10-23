@@ -12,7 +12,7 @@ import { exportHtml } from "./exporter";
 import { planExport } from "./plan";
 import { createNodeExportHost, createNodeMathEnv, type NodeMathEnv } from "./nodeHost";
 import { projectSignatures } from "./signatures";
-import { argText, parseTex, walkTex, type Signatures } from "./texTree";
+import { argText, given, parseTex, walkTex, type Signatures } from "./texTree";
 import type { ExportReport } from "./report";
 
 export interface KnowledgeMarker { name: string; id: string; url: string }
@@ -138,7 +138,10 @@ function rewriteMarkers(source: string, sig: Signatures, markers: ReadonlyMap<st
     }
     if (node.t === "macro" && node.name === "label" && reserved.has(argText(source, node.args[0]).trim())) throw new Error("A source label conflicts with a reserved knowledge anchor.");
     if (node.t !== "macro" || !/^(kn|knref)$/.test(node.name)) return;
-    const name = argText(source, node.args[0]);
+    // `\kn[NAME]{TEXT}` defines NAME and shows TEXT; `\kn{NAME}` and `\knref{NAME}` show their name.
+    const text = argText(source, node.args.find((arg) => arg.kind === "m"));
+    const named = node.args.find((arg) => arg.kind === "o" && given(arg));
+    const name = named ? argText(source, named).trim() : text;
     const mapping = markers.get(name);
     if (!mapping) throw new Error(`Unmapped explicit knowledge marker: ${name}`);
     if (node.name === "kn") {
@@ -146,12 +149,12 @@ function rewriteMarkers(source: string, sig: Signatures, markers: ReadonlyMap<st
         if (definitions.has(mapping.id)) throw new Error(`Duplicate explicit knowledge definition: ${name}`);
         definitions.add(mapping.id);
       }
-      edits.push({ from: node.from, to: node.to, text: `\\label{kgd-kn-${mapping.id}}${name}` });
+      edits.push({ from: node.from, to: node.to, text: `\\label{kgd-kn-${mapping.id}}${text}` });
     } else {
       const href = `https://kgdistiller.invalid/${token}/${references.size}`;
       references.set(href, mapping.id);
       if (activePositions.has(node.from)) expectedReferences.add(href);
-      edits.push({ from: node.from, to: node.to, text: `\\href{${href}}{${name}}` });
+      edits.push({ from: node.from, to: node.to, text: `\\href{${href}}{${text}}` });
     }
     return false;
   });
@@ -172,7 +175,7 @@ async function exportDocument(request: Extract<KgdistillerRequest, { operation: 
   const sources = await Promise.all(defs.files.map((file) => readFile(file, "utf8")));
   const base = projectSignatures(defs, sources, theoremMap(sources));
   const sig = {
-    ...base, macros: new Map([...base.macros, ["kn", "m"], ["knref", "m"]]),
+    ...base, macros: new Map([...base.macros, ["kn", "om"], ["knref", "m"]]),
     // The export parser recognizes newcommand/renewcommand natively; providecommand has
     // the same argument structure and must also be opaque code in marker/dependency walks.
     definers: new Map([...base.definers ?? [], ["providecommand", "newcommand"]]),
@@ -327,7 +330,7 @@ async function exportDocument(request: Extract<KgdistillerRequest, { operation: 
       if (original === source) {
         const document = parseTex(rewritten, sig).find((node) => node.t === "env" && node.name === "document");
         if (!document) throw new Error("document source must contain an active root document environment.");
-        const preamble = "\\makeatletter\\@ifpackageloaded{hyperref}{}{\\RequirePackage{hyperref}}\\makeatother\\providecommand{\\kn}[1]{#1}\\providecommand{\\knref}[1]{#1}";
+        const preamble = "\\makeatletter\\@ifpackageloaded{hyperref}{}{\\RequirePackage{hyperref}}\\makeatother\\providecommand{\\kn}[2][]{#2}\\providecommand{\\knref}[1]{#1}";
         rewritten = rewritten.slice(0, document.from) + preamble + rewritten.slice(document.from);
       }
       stageTexts.set(copy, rewritten);
