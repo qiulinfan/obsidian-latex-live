@@ -378,8 +378,13 @@
     styles, chips; hidden commands omitted; anything else its source) and the gaps into text
     (`cellText`: unknown commands as written). latexLive sends the spec as JSON in a `table` block
     request (`below: false`), TexRender's `renderLive` builds it with `tableNode` through the
-    inline MathJax path; a cell whose formula throws shows its source. Shown in papers without a
-    crop and in decks with crops off (or none yet); classes `ll-table`, styles in styles.css.
+    inline MathJax path; a cell whose formula throws shows its source. Every keystroke rebuilds
+    every table's decoration: latexLive remembers a request's source by the table's text and
+    centering (the memo starts over on new refs), so an untouched table is a lookup, and builds
+    a spec from binary searches over the scan. Smoke B12 guards the lookup (66 tables, <= 1 ms a
+    keystroke).
+    Shown in papers without a crop and in decks with crops off (or none yet); classes `ll-table`,
+    styles in styles.css.
     `cropKindOf` decides how a block crops and refuses anything inside a tcolorbox (elegantbook's
     fancy theorems): pgf moves a box's content, and SyncTeX places it ~20 pt off.
   - `\ref`-family, `\cite`-family (`CITE_COMMANDS` in latexHighlight: natbib's and biblatex's,

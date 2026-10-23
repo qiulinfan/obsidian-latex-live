@@ -37,6 +37,10 @@
 //   B11 a tabular in a frame card (latexTable.ts, latexLive #23): a table with its cells, rule
 //       and the plugin's styles, every gutter number on its line (±1 px); a real click on a cell
 //       reveals its source; ArrowDown from the line above enters its first line
+//   B12 LaTeX Live's own language on a 6,000-line chapter with 66 tables (60 tabulars, 6
+//       longtables; formulas and references in their cells): typing in the prose and inside a
+//       table within a frame, the tables taking at most 1 ms of each keystroke's rebuild (a table
+//       the edit left alone is a lookup, not a parse: before, 8.7 ms)
 // The page bundles the real shared modules (keyArbiter first, live preview in its
 // compartment) with a LaTeX-like test language. Formulas render with MathJax 3.2.2 when the
 // `mathjax` dev dependency is installed (LaTeX Live, Obsidian's configuration; its glyph CSS
@@ -115,6 +119,19 @@ const deck = latexLiveLanguage({
   beamerCrops: () => false,
 });
 window.__jumpedElsewhere = [];
+/** B12: the LaTeX language, timing what its tables take to decorate. */
+let tableMs = 0;
+const timedLatex = {
+  ...latex,
+  decorate(c, ctx) {
+    const t = c.kind === "env" && /^(?:tabular|longtable)$/.test(c.env) ? performance.now() : -1;
+    try {
+      latex.decorate(c, ctx);
+    } finally {
+      if (t >= 0) tableMs += performance.now() - t;
+    }
+  },
+};
 
 const MATH = /\\begin\{(align\*?|equation\*?|gather\*?)\}[\s\S]*?\\end\{\1\}|\$\$([\s\S]*?)\$\$|\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)|\$([^$\n]+)\$/g;
 
@@ -213,7 +230,7 @@ window.__smoke = {
           lineNumbers(),
           EditorView.lineWrapping,
           liveInput(),
-          livePreviewCompartment.of(o.live === false ? [] : livePreview({ language: o.deck ? deck : o.latex ? latex : language, renderer })),
+          livePreviewCompartment.of(o.live === false ? [] : livePreview({ language: o.deck ? deck : o.tables ? timedLatex : o.latex ? latex : language, renderer })),
           o.latex ? labelJump((key) => window.__jumpedElsewhere.push(key)) : [],
           o.preview ? preview : [],
           keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -225,6 +242,7 @@ window.__smoke = {
   },
   stats: () => renderStats(window.__view),
   decorated: () => decorated,
+  tableMs: () => tableMs,
   EditorSelection,
 };
 window.__ready = true;
@@ -1074,6 +1092,55 @@ async function b8({ page, evaluate }) {
   }
 }
 
+/** B12: gen-perf-fixture's chapter, a table after each of its first 66 sections (every tenth a 40-row longtable, else a 10-row tabular). */
+function tableChapter() {
+  const out = [];
+  latexChapter(6000).split("\n\n").forEach((section, i) => {
+    out.push(section, "");
+    if (i >= 66) return;
+    const long = i % 10 === 9;
+    const rows = Array.from({ length: long ? 40 : 10 }, (_, r) => `$t_{${i},${r}}$ & ${r} & \\textbf{x${r}} & see~\\eqref{eq:long-${i + 1}} & $\\frac{${r}}{${i + 1}}$ \\\\`);
+    const env = long ? "longtable" : "tabular";
+    out.push(`\\begin{${env}}{lllll}\\toprule`, ...(long ? ["A & B & C & D & E \\\\ \\midrule", "\\endhead"] : []), ...rows, "\\bottomrule", `\\end{${env}}`, "");
+  });
+  return out.join("\n").split("\n").slice(0, 6000).join("\n");
+}
+
+async function b12({ evaluate }) {
+  const doc = tableChapter();
+  const perf = await evaluate(`(async () => {
+    const q = (a, p) => { const s = [...a].sort((x, y) => x - y); return +s[Math.min(s.length - 1, Math.floor(s.length * p))].toFixed(2); };
+    const settled = () => new Promise((ok) => { const c = new MessageChannel(); c.port1.onmessage = () => ok(); c.port2.postMessage(0); });
+    const idle = () => new Promise((ok) => { const s = Date.now(); (function w() { if (!__smoke.stats().pending || Date.now() - s > 20000) ok(); else setTimeout(w, 50); })(); });
+    const v = __smoke.mount(${JSON.stringify(doc)}, 700, { tables: true });
+    await idle();
+    v.focus();
+    await new Promise((r) => setTimeout(r, 100));
+    const text = v.state.doc.toString();
+    const typeAt = async (at, n) => {
+      v.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+      await new Promise((r) => setTimeout(r, 60));
+      await idle();
+      const dispatch = [], tables = [];
+      for (let k = 0; k < n; k++) {
+        const t0 = __smoke.tableMs();
+        const t = performance.now();
+        v.dispatch({ changes: { from: at + k, insert: "a" }, selection: { anchor: at + k + 1 }, userEvent: "input.type" });
+        v.contentDOM.offsetHeight;
+        dispatch.push(performance.now() - t);
+        tables.push(__smoke.tableMs() - t0);
+        await settled();
+      }
+      return { p95: q(dispatch, 0.95), tablesP50: q(tables, 0.5) };
+    };
+    const prose = await typeAt(text.indexOf("This paragraph", text.length >> 1) + 10, 40);
+    const inTable = await typeAt(text.indexOf("& see~", text.length >> 1) + 2, 30);
+    return { lines: v.state.doc.lines, prose, inTable };
+  })()`);
+  check("B12", "typing within a frame (p95 <= 16 ms) with 66 tables, in the prose and inside a table", perf.prose.p95 <= 16 && perf.inTable.p95 <= 16, perf);
+  check("B12", "the tables take <= 1 ms of a keystroke's rebuild (p50)", perf.prose.tablesP50 <= 1 && perf.inTable.tablesP50 <= 1, perf);
+}
+
 // ---- main ------------------------------------------------------------------------------------------
 
 let chrome = null;
@@ -1117,6 +1184,7 @@ try {
   if (run("B9")) await b9(cdp);
   if (run("B10")) await b10(cdp);
   if (run("B11")) await b11(cdp);
+  if (run("B12")) await b12(cdp);
 } catch (e) {
   check("--", "smoke run", false, e instanceof Error ? e.message : String(e));
 } finally {

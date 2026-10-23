@@ -454,9 +454,9 @@ export function tableSpec(layout: TabularLayout, base: number, text: (from: numb
 }
 
 /**
- * The parts of [from, to]: the constructs in it (`all`, in document order, nested after their
- * parent) as `leaf` turns them (null: their source as text), a style's content and an overlay's
- * around what it hides as parts, hidden commands left out, the text between as cellText.
+ * The parts of [from, to]: the constructs in it (`all`, by `from`, nested after their parent) as
+ * `leaf` turns them (null: their source as text), a style's content and an overlay's around what
+ * it hides as parts, hidden commands left out, the text between as cellText.
  */
 export function cellParts(all: readonly LatexConstruct[], text: (from: number, to: number) => string, from: number, to: number, leaf: (c: LatexConstruct) => TablePart | null): TablePart[] {
   const out: TablePart[] = [];
@@ -469,7 +469,15 @@ export function cellParts(all: readonly LatexConstruct[], text: (from: number, t
     if (b > a) push({ t: "text", s: cellText(text(a, b)) });
   };
   let at = from;
-  for (const c of all) {
+  // A table has a cell per few constructs: start at the cell's first one, stop past its end.
+  let k = 0;
+  for (let hi = all.length; k < hi; ) {
+    const mid = (k + hi) >> 1;
+    if (all[mid].from < from) k = mid + 1;
+    else hi = mid;
+  }
+  for (; k < all.length && all[k].from <= to; k++) {
+    const c = all[k];
     if (c.from < at || c.to > to) continue;
     if (c.kind === "env" || c.kind === "center") continue;
     plain(at, c.from);

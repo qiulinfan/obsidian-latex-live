@@ -1375,6 +1375,34 @@ test("#23 a longtable is a table with its head once; a \\multirow spans its rows
   }
 });
 
+test("#23 a table the edit left alone renders nothing again; centering and new numbers draw it anew", async () => {
+  const p = await project();
+  try {
+    const aux = join(p.outDir, "chapters", "ch1.aux");
+    writeFileSync(aux, "\\newlabel{eq:a}{{1.1}{1}{}{equation.1.1}{}}\n");
+    p.render.compiled(p.root);
+    const table = ["\\begin{tabular}{ll}", "$x$ & \\eqref{eq:a} \\\\", "\\end{tabular}"];
+    // The same table in a center environment and outside it, prose after them.
+    const doc = ["\\begin{center}", ...table, "\\end{center}", ...table, "Some prose."].join("\n");
+    const view = await p.mount(doc);
+    await waitFor(() => view.contentDOM.querySelectorAll(".lsp-lp-table").length === 2);
+    await rendered(view);
+    const shown = () => [...view.contentDOM.querySelectorAll(".lsp-lp-table table")].map((t) => [t.classList.contains("is-center"), ...[...t.querySelectorAll("td")].map(cellChars)]);
+    assert.deepEqual(shown(), [[true, "𝑥", "(1.1)"], [false, "𝑥", "(1.1)"]]);
+    const renders = renderStats(view).renders;
+    const prose = doc.indexOf("Some prose.");
+    for (let k = 0; k < 5; k++) view.dispatch({ changes: { from: prose + k, insert: "a" }, selection: { anchor: prose + k + 1 } });
+    await rendered(view);
+    assert.equal(renderStats(view).renders, renders, "typing in the prose draws no table again");
+    writeFileSync(aux, "\\newlabel{eq:a}{{2.4}{1}{}{equation.2.4}{}}\n");
+    p.render.compiled(p.root);
+    await waitFor(() => shown()[1]?.[2] === "(2.4)");
+    assert.deepEqual(shown(), [[true, "𝑥", "(2.4)"], [false, "𝑥", "(2.4)"]]);
+  } finally {
+    p.done();
+  }
+});
+
 test("#23 a box around a table is a shell: its lines collapse, the table shows at its normal size", async () => {
   const p = await project();
   try {

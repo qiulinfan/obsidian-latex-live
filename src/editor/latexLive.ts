@@ -5,7 +5,7 @@ import { blockEnvKind, type EnvRules } from "../tex/envRules";
 import type { TheoremDef, TheoremMap } from "../tex/theorems";
 import { texText } from "../tex/texText";
 import { LatexRefs, citeText, formulaRefs, refText } from "./latexRefs";
-import { LatexArg, LatexBanner, LatexConstruct, LatexEnv, LatexMath, LatexTitlePage, TextStyle, blocksAround, hasConstructs, scanLatex } from "./latexScan";
+import { LatexArg, LatexBanner, LatexCenter, LatexConstruct, LatexEnv, LatexMath, LatexTitlePage, TextStyle, blocksAround, hasConstructs, scanLatex } from "./latexScan";
 import { TablePart, cellParts, parseTabular, tableSpec } from "./latexTable";
 import { prepareMath } from "./mathjaxProject";
 import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } from "./shared/livePreview";
@@ -189,6 +189,36 @@ export function cropKindOf(doc: Text, block: { from: number; to: number }, env: 
 
 /** Prepared sources remembered per refs; past this many the memo starts over. */
 const MEMO_SIZE = 4000;
+/** Table request sources remembered per refs (one per table and edit of one); past this many they start over. */
+const TABLE_MEMO_SIZE = 300;
+
+/**
+ * A scan's centered runs, and (on the first table that needs them) its other constructs by `from`:
+ * latexScan adds a run where it finds its `\centering`, after constructs it starts before.
+ */
+interface ScanIndex {
+  centers: LatexCenter[];
+  sorted: LatexConstruct[] | null;
+}
+const scanIndexes = new WeakMap<readonly LatexConstruct[], ScanIndex>();
+const scanIndex = (all: readonly LatexConstruct[]): ScanIndex => {
+  let hit = scanIndexes.get(all);
+  if (!hit) scanIndexes.set(all, (hit = { centers: all.filter((c): c is LatexCenter => c.kind === "center"), sorted: null }));
+  return hit;
+};
+
+/** The constructs strictly inside [from, to] (`sorted` by `from`), in order. */
+function constructsIn(sorted: readonly LatexConstruct[], from: number, to: number): LatexConstruct[] {
+  let k = 0;
+  for (let hi = sorted.length; k < hi; ) {
+    const mid = (k + hi) >> 1;
+    if (sorted[mid].from <= from) k = mid + 1;
+    else hi = mid;
+  }
+  const out: LatexConstruct[] = [];
+  for (; k < sorted.length && sorted[k].from <= to; k++) if (sorted[k].to <= to) out.push(sorted[k]);
+  return out;
+}
 
 const HIDDEN = Decoration.replace({});
 /** A \begin/\end line out of sight: a block replace without a widget. */
@@ -214,16 +244,24 @@ const FRAME_SUBTITLE = Decoration.mark({ class: "ll-frame-subtitle" });
 
 /** LaTeX's constructs for livePreview (the renderer: texRender's `rendererFor(root)`). */
 export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruct> {
-  // prepareMath tokenizes the formula: a document's thousand formulas at every keystroke's
-  // rebuild add up, and most of them never change.
+  // prepareMath tokenizes the formula, and a table's request is built from its cells' constructs:
+  // a document's thousand formulas and dozens of tables at every keystroke's rebuild add up, and
+  // most of them never change. Both memos start over when the refs change.
   let refs: LatexRefs | null = null;
   const memo = new Map<string, string>();
-  const prepared = (m: LatexMath): string => {
+  const tables = new Map<string, string | null>();
+  const currentRefs = (): LatexRefs => {
     const now = env.refs();
-    if (now !== refs || memo.size > MEMO_SIZE) {
+    if (now !== refs) {
       refs = now;
       memo.clear();
+      tables.clear();
     }
+    return now;
+  };
+  const prepared = (m: LatexMath): string => {
+    const now = currentRefs();
+    if (memo.size > MEMO_SIZE) memo.clear();
     const key = (m.display ? "D" : "I") + m.src;
     let src = memo.get(key);
     if (src === undefined) memo.set(key, (src = prepareMath(m.src, now.numbers, m.display, formulaRefs(now))));
@@ -240,17 +278,30 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
   /**
    * #23: a tabular as a table widget over its lines (a block, revealed over them as a crop is),
    * its cells' constructs rendered as in the running text; one the parse cannot follow stays source.
+   * Its request's source depends on its own text (the constructs in it are its text's, under the
+   * language's rules), the refs and whether it is centered: remembered by those, so a table the
+   * edit left alone costs a lookup.
    */
   const decorateTable = (c: LatexEnv, ctx: LiveContext): void => {
     const { doc } = ctx.state;
-    const layout = parseTabular(doc.sliceString(c.from, c.to));
-    if (!layout) return;
     const all = scanLatex(doc, env.rules);
-    const inside = all.filter((k) => k.from > c.from && k.to <= c.to);
-    const center = all.some((k) => k.kind === "center" && k.from <= c.from && k.to >= c.from);
-    const text = (from: number, to: number) => doc.sliceString(from, to);
-    const spec = tableSpec(layout, c.from, text, (from, to) => cellParts(inside, text, from, to, (k) => leaf(k, doc)), center);
-    renderConstruct(ctx, { from: c.from, to: c.to, block: true }, ctx.request("table", JSON.stringify(spec), true, c.from), { below: false });
+    const index = scanIndex(all);
+    const center = index.centers.some((k) => k.from <= c.from && k.to >= c.from);
+    const key = (center ? "C" : "L") + doc.sliceString(c.from, c.to);
+    currentRefs();
+    let src = tables.get(key);
+    if (src === undefined) {
+      if (tables.size > TABLE_MEMO_SIZE) tables.clear();
+      const layout = parseTabular(key.slice(1));
+      if (layout) {
+        index.sorted ??= all.filter((k) => k.kind !== "center").sort((a, b) => a.from - b.from);
+        const inside = constructsIn(index.sorted, c.from, c.to);
+        const text = (from: number, to: number) => doc.sliceString(from, to);
+        src = JSON.stringify(tableSpec(layout, c.from, text, (from, to) => cellParts(inside, text, from, to, (k) => leaf(k, doc)), center));
+      } else src = null;
+      tables.set(key, src);
+    }
+    if (src !== null) renderConstruct(ctx, { from: c.from, to: c.to, block: true }, ctx.request("table", src, true, c.from), { below: false });
   };
   return {
     scan: (doc) => scanLatex(doc, env.rules),
