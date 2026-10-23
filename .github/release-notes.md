@@ -1,11 +1,17 @@
-LaTeX Live 0.1.7 fixes blurred PDF previews after moving between displays with different pixel densities and removes the runtime stylesheet fallback rejected in the 0.1.6 community review.
+LaTeX Live 0.2.0 makes the live editor read your project: its own environments and layout commands, beamer decks and tables, with references that jump to their labels and TikZ crops placed from where TeX actually put each picture.
 
-- Display-density changes redraw PDF backing pixels even when the preview pane's width is unchanged. Zoom, scroll position and text selection are retained, without recompiling or reopening the document.
-- Preview styling uses the standard styles.css release asset. If the stylesheet was not downloaded or loaded, a delayed notice explains how to update and restart Obsidian, or reinstall after backing up settings. Normal and startup-delayed loading produce no warning; closed previews cancel the check and popouts inspect their own window.
-- Runtime style-element creation and bundled CSS text are removed. CI and releases now enforce every error-level rule in the official Obsidian recommended configuration, including forbidden elements, plus the SDL unsafe-HTML rule.
-- The community review fixes from the successfully reviewed 0.1.5 release remain included.
+- **Live editor rules.** Formula aliases (an environment rendered as `equation`), wrapper environments whose `\begin`/`\end` lines fold, and hidden layout commands (`\centering`, `\vspace{…}`, a deck's own layout macros). Rules come from your settings, then from the project's `\newcommand`/`\newenvironment` definitions, then from built-in defaults; edit them under **Settings → LaTeX Live → Live editor rules**. `\caption` shows as "Figure n: …" with the number from the `.aux`. The PDF and exports are unchanged.
+- **References jump.** A `\ref`/`\eqref`/`\cref` chip goes to its `\label` on click, in the same file or another, including tabs Obsidian restored in the background, and flashes the formula it lands on.
+- **Beamer decks.** Frames show as cards with their title and their PDF page (click to turn the preview); overlays, `columns` and font-size commands are hidden; section banners, image and layout macros are detected from their definitions; TikZ pictures and the title page fold to one line. Inverse search inside a frame lands on the clicked word instead of `\end{frame}`.
+- **Tables are drawn.** `tabular`, `tabular*`, `tabularx` and `longtable` render as tables, with column specs, rules (`\hline`, booktabs, `\cline`), `\multicolumn`, `\multirow` and formulas, references and styles in cells. A click shows the source.
+- **Accurate TikZ crops.** Fast compiles record where each TikZ picture lands in the PDF and crop from that box, falling back to SyncTeX. The recorder changes no page of the output, leaves a project's `latexmkrc` to full builds and takes a write stream only when one is free.
+- **LaTeX Suite snippets** expand in the LaTeX editor.
+- **SyncTeX.** Forward search is corrected by the cursor line's words in the PDF; inverse search places the cursor on the double-clicked word and flashes the target.
+- **Custom templates.** Configurable template visualization profiles, inherited theorem rendering and ElegantBook proof and example heads.
+- **Exports and integrations.** HTML exports stage local classes and packages; the kgdistiller export anchors `\kn[NAME]{TEXT}` knowledge markers; other plugins can add CodeMirror extensions to the TeX editor (`registerTexEditorExtension`).
+- **Appearance and platforms.** LaTeX source uses the theme's code size and the preview sits on the note background; Windows TeX paths are fixed.
 
-Validated with 855 passing tests, 18 real pdf.js reading/layout browser checks and 31 editor browser checks. Coverage includes missing/delayed stylesheet loading, light/dark themes, 375/800px panes, Retina density changes, a 65-page bilingual PDF and native English/Chinese copying. Production build and the expanded blocking community-review lint gate pass.
+Typing stays within a frame on long documents: tables, formula cells and rule detection are cached, and a browser check types in a 6,000-line chapter with 66 tables (keystroke p95 under 16 ms). Validated with 957 passing tests against a real TeX distribution and 52 editor browser checks.
 
 Requires desktop Obsidian 1.13.7 or later and a separately installed TeX distribution.
 

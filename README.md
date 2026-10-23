@@ -84,7 +84,7 @@ The AMS / IEEE clips contain actual edits. PLOS / REVTeX show prepared complete 
 
 ### Customization: create your own template's visual editing mode
 
-> Available in the current development build on `main`; not included in the [0.1.7 release](https://github.com/qiulinfan/obsidian-latex-live/releases/tag/0.1.7).
+> Available since [0.2.0](https://github.com/qiulinfan/obsidian-latex-live/releases/tag/0.2.0).
 
 #### Why a universal visual rule set is difficult
 
@@ -319,7 +319,7 @@ AMS / IEEE 片段包含实际修改；PLOS / REVTeX 展示完成全文构建后�
 
 ### 自定义：创造你自己的模板可视化编辑模式
 
-> 当前开发版（`main` 分支）已提供此功能；[0.1.7 发布版](https://github.com/qiulinfan/obsidian-latex-live/releases/tag/0.1.7)尚未包含。
+> 自 [0.2.0](https://github.com/qiulinfan/obsidian-latex-live/releases/tag/0.2.0) 起提供。
 
 #### 为什么很难有一套覆盖所有模板的可视化规则？
 
