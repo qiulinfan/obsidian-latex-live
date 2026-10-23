@@ -11,6 +11,11 @@
 //             wrapper; a \newcommand whose body is only layout commands and uses every
 //             argument is hidden, unless the sources assign the name while typesetting
 //             (runtimeAssigned). Anything else is not guessed.
+//   Beamer    when the root's class is beamer (docs/beamer.md): font sizes and \pause hide too;
+//             layout detection also reads \setlength, \addtolength, \addvspace, font sizes,
+//             \renewcommand{\arraystretch}{..} and \csname P#n\endcsname over hidden commands named
+//             P...; a command whose body has \begin{frame} is a banner (a section frame) and one
+//             whose body is exactly \includegraphics[..]{#k} an image macro.
 
 /** How many arguments a hidden command takes: `optional` when the first is `[..]`. */
 export interface Arity {
@@ -25,6 +30,16 @@ export interface EnvRules {
   readonly wrappers: ReadonlySet<string>;
   /** Commands (no backslash) hidden with their arguments; null arity: the `[..]`/`{..}` right after it. */
   readonly hidden: ReadonlyMap<string, Arity | null>;
+  /** The root document's class is beamer: frames are cards (docs/beamer.md). */
+  readonly beamer: boolean;
+  /** Commands whose body has a frame (beamer only): section banners. */
+  readonly banners: ReadonlyMap<string, Arity>;
+  /** Commands whose body is \includegraphics of argument `path` (1-based; beamer only). */
+  readonly images: ReadonlyMap<string, ImageMacro>;
+}
+
+export interface ImageMacro extends Arity {
+  readonly path: number;
 }
 
 /** What the user saves (settings.envRules): only additions to the defaults, and names kept as source. */
@@ -56,6 +71,7 @@ export const DEFAULT_WRAPPERS: readonly string[] = [
   "itemize", "enumerate", "description", "problemset", "center",
   "figure", "figure*", "table", "table*",
   "subequations", "minipage", "flushleft", "flushright",
+  "columns", "column",
 ];
 
 /** The built-in hidden commands and their arities. */
@@ -65,6 +81,22 @@ export const DEFAULT_HIDDEN: ReadonlyMap<string, Arity> = new Map([
   ...["vspace", "hspace"].map((n): [string, Arity] => [n, { args: 1, optional: false }]),
 ]);
 
+const FONT_SIZES = ["tiny", "scriptsize", "footnotesize", "small", "normalsize", "large", "Large", "LARGE", "huge", "Huge"];
+const zero = (n: string): [string, Arity] => [n, { args: 0, optional: false }];
+
+/** Hidden in beamer on top of DEFAULT_HIDDEN. */
+export const BEAMER_HIDDEN: ReadonlyMap<string, Arity> = new Map([...FONT_SIZES, "pause"].map(zero));
+
+/** What else a layout-only body may use in beamer (detection only: they are not hidden themselves). */
+const BEAMER_LAYOUT: ReadonlyMap<string, Arity> = new Map([
+  ...FONT_SIZES.map(zero),
+  ...["setlength", "addtolength"].map((n): [string, Arity] => [n, { args: 2, optional: false }]),
+  ["addvspace", { args: 1, optional: false }],
+]);
+
+/** Length parameters a layout-only body may redefine (`\renewcommand{\arraystretch}{1.2}`). */
+const LAYOUT_PARAMETERS = new Set(["arraystretch", "baselinestretch"]);
+
 /** Commands a layout-only body may also use: they typeset nothing. */
 const NEUTRAL = new Set(["relax", "ignorespaces", "ignorespacesafterend", "unskip"]);
 
@@ -72,6 +104,9 @@ export const DEFAULT_RULES: EnvRules = Object.freeze({
   math: new Map(DEFAULT_MATH_ENVS.map((e) => [e, e])),
   wrappers: new Set(DEFAULT_WRAPPERS),
   hidden: new Map<string, Arity | null>(DEFAULT_HIDDEN),
+  beamer: false,
+  banners: new Map(),
+  images: new Map(),
 });
 
 const ENV_NAME = /^[^\s{}\\%#!]{1,120}$/;
@@ -128,14 +163,20 @@ export function parseNameList(value: unknown, kind: "environment" | "command"): 
   });
 }
 
-/** What detection found in a project's sources (see Detection). */
+/** What detection found in a project's sources (see Detection and Beamer). */
 export interface DetectedRules {
   readonly math: ReadonlyMap<string, string>;
   readonly wrappers: ReadonlySet<string>;
   readonly hidden: ReadonlyMap<string, Arity>;
+  readonly beamer: boolean;
+  readonly banners: ReadonlyMap<string, Arity>;
+  readonly images: ReadonlyMap<string, ImageMacro>;
 }
 
-export const NO_DETECTED: DetectedRules = { math: new Map(), wrappers: new Set(), hidden: new Map() };
+export const NO_DETECTED: DetectedRules = { math: new Map(), wrappers: new Set(), hidden: new Map(), beamer: false, banners: new Map(), images: new Map() };
+
+/** Whether a (comment-stripped) root source's class is beamer. */
+export const isBeamer = (root: string): boolean => /\\documentclass\s*(?:\[[^\]]*\])?\s*\{\s*beamer\s*\}/.test(root);
 
 /** Index after blanks and line breaks from s[i]. */
 const skipSpace = (s: string, i: number): number => {
@@ -161,17 +202,25 @@ function group(s: string, i: number): { text: string; end: number } | null {
 
 /**
  * Whether `code` typesets nothing but wrapper environments and layout commands (`hidden`'s
- * arities consumed; `#n` only inside their arguments).
+ * arities consumed; `#n` only inside their arguments). `beamer`: also BEAMER_LAYOUT, the
+ * LAYOUT_PARAMETERS' redefinitions, bare braces, and `\csname P#n\endcsname` when some hidden command is named
+ * P... and every one so named is hidden (`project`: the names the project defines).
  */
-export function onlyLayout(code: string, wrappers: ReadonlySet<string>, hidden: ReadonlyMap<string, Arity | null>): boolean {
+export function onlyLayout(
+  code: string,
+  wrappers: ReadonlySet<string>,
+  hidden: ReadonlyMap<string, Arity | null>,
+  beamer?: { project: ReadonlySet<string> },
+): boolean {
   const re = /\\([A-Za-z@]+\*?)|(\S)/y;
   for (let i = skipSpace(code, 0); i < code.length; i = skipSpace(code, i)) {
     re.lastIndex = i;
     const m = re.exec(code);
-    if (!m || m[2] !== undefined) return false;
+    if (!m || (m[2] !== undefined && !(beamer && (m[2] === "{" || m[2] === "}")))) return false;
+    i = re.lastIndex;
+    if (m[2] !== undefined) continue; // a bare group typesets nothing itself
     const name = m[1];
     const base = name.endsWith("*") ? name.slice(0, -1) : name;
-    i = re.lastIndex;
     if (base === "begin" || base === "end") {
       const env = group(code, skipSpace(code, i));
       if (!env || !wrappers.has(env.text.trim())) return false;
@@ -179,8 +228,20 @@ export function onlyLayout(code: string, wrappers: ReadonlySet<string>, hidden: 
       if (base === "begin") for (let g; (g = group(code, skipSpace(code, i))); ) i = g.end;
     } else if (NEUTRAL.has(name)) {
       continue;
-    } else if (hidden.has(base)) {
-      const arity = hidden.get(base) ?? null;
+    } else if (beamer && (name === "renewcommand" || name === "def")) {
+      const p = /^\s*(?:\{\s*\\([A-Za-z]+)\s*\}|\\([A-Za-z]+))\s*/.exec(code.slice(i));
+      const param = p && (p[1] ?? p[2]);
+      const value = p && group(code, i + p[0].length);
+      if (!param || !LAYOUT_PARAMETERS.has(param) || !value || value.text.includes("\\")) return false;
+      i = value.end;
+    } else if (beamer && name === "csname") {
+      const m2 = /^\s*([A-Za-z@]+)#\d\s*\\endcsname/.exec(code.slice(i));
+      if (!m2) return false;
+      const family = [...beamer.project].filter((n) => n.startsWith(m2[1]));
+      if (!family.length || !family.every((n) => hidden.has(n))) return false;
+      i += m2[0].length;
+    } else if (hidden.has(base) || (beamer && BEAMER_LAYOUT.has(base))) {
+      const arity = hidden.has(base) ? (hidden.get(base) ?? null) : BEAMER_LAYOUT.get(base)!;
       const end = commandEnd(code, i, arity, true);
       if (end < 0) return false;
       i = end;
@@ -239,6 +300,7 @@ export function detectEnvRules(sources: readonly string[]): DetectedRules {
   const math = new Map<string, string>();
   const wrappers = new Set<string>();
   const hidden = new Map<string, Arity>();
+  const beamer = sources.length > 0 && isBeamer(sources[0]);
   const commands = new Map<string, { arity: Arity; body: string }>();
   const layoutWrappers = DEFAULT_RULES.wrappers;
   const layoutHidden = DEFAULT_RULES.hidden;
@@ -293,14 +355,90 @@ export function detectEnvRules(sources: readonly string[]): DetectedRules {
       const body = s[i] === "{" ? group(s, i) : null;
       if (!body) continue;
       hidden.delete(name);
+      commands.delete(name); // keep source order for the last definition
       commands.set(name, { arity: { args, optional }, body: body.text });
-      // An argument the body never uses is typed text that would vanish with the command.
-      const usesAll = Array.from({ length: args }, (_, k) => new RegExp(`#${k + 1}(?!\\d)`)).every((re) => re.test(body.text));
-      if (usesAll && onlyLayout(body.text, layoutWrappers, layoutHidden)) hidden.set(name, { args, optional });
+      if (!beamer && usesAll(body.text, args) && onlyLayout(body.text, layoutWrappers, layoutHidden)) hidden.set(name, { args, optional });
     }
   }
-  for (const name of runtimeAssigned(sources, commands)) hidden.delete(name);
-  return { math, wrappers, hidden };
+  const runtime = runtimeAssigned(sources, commands);
+  for (const name of runtime) hidden.delete(name);
+  if (!beamer) return { math, wrappers, hidden, beamer, banners: new Map(), images: new Map() };
+  // Beamer: a layout command may use the project's other layout commands, so repeat until
+  // nothing new is found (\DeckLayout uses \DeckNormal and \DeckFamily@...).
+  const banners = new Map<string, Arity>();
+  const images = new Map<string, ImageMacro>();
+  const project = { project: new Set(commands.keys()) };
+  const known = new Map<string, Arity | null>([...layoutHidden, ...BEAMER_HIDDEN]);
+  for (const [name, c] of commands) {
+    if (/\\begin\s*\{\s*frame\s*\}/.test(c.body)) banners.set(name, c.arity);
+  }
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [name, c] of commands) {
+      if (hidden.has(name) || images.has(name) || banners.has(name)) continue;
+      if (!runtime.has(name) && usesAll(c.body, c.arity.args) && onlyLayout(c.body, layoutWrappers, known, project)) {
+        hidden.set(name, c.arity);
+        known.set(name, c.arity);
+        changed = true;
+        continue;
+      }
+      const path = imagePath(c.body, images, layoutWrappers, known, project);
+      if (path > 0 && path <= c.arity.args) {
+        images.set(name, { ...c.arity, path });
+        changed = true;
+      }
+    }
+  }
+  return { math, wrappers, hidden, beamer, banners, images };
+}
+
+/**
+ * The argument number k when `code` is essentially one image: `\includegraphics[..]{#k}` or a
+ * known image macro whose path is `#k`, with only braces and layout commands (onlyLayout's) around
+ * it. 0 otherwise.
+ */
+function imagePath(
+  code: string,
+  images: ReadonlyMap<string, ImageMacro>,
+  wrappers: ReadonlySet<string>,
+  hidden: ReadonlyMap<string, Arity | null>,
+  beamer: { project: ReadonlySet<string> },
+): number {
+  const re = /\\([A-Za-z@]+)\*?/g;
+  let path = 0;
+  let rest = "";
+  let last = 0;
+  for (let m; (m = re.exec(code)); ) {
+    const macro = images.get(m[1]);
+    if (m[1] !== "includegraphics" && !macro) continue;
+    if (path) return 0;
+    const arity: Arity = macro ?? { args: 2, optional: true };
+    let i = skipSpace(code, re.lastIndex);
+    const groups: string[] = [];
+    if (arity.optional && code[i] === "[") {
+      const g = group(code, i);
+      if (!g) return 0;
+      i = skipSpace(code, g.end);
+    }
+    for (let n = arity.optional ? 1 : 0; n < arity.args; n++) {
+      const g = code[i] === "{" ? group(code, i) : null;
+      if (!g) return 0;
+      groups.push(g.text);
+      i = skipSpace(code, g.end);
+    }
+    const p = /^\s*#(\d)\s*$/.exec(groups[(macro?.path ?? 2) - (arity.optional ? 2 : 1)] ?? "");
+    if (!p) return 0;
+    path = Number(p[1]);
+    rest += code.slice(last, m.index);
+    last = re.lastIndex = i;
+  }
+  rest += code.slice(last);
+  return path && onlyLayout(rest, wrappers, hidden, beamer) ? path : 0;
+}
+
+/** Whether a body of `args` arguments uses each one: an unused one is typed text that would vanish with the command. */
+function usesAll(body: string, args: number): boolean {
+  return Array.from({ length: args }, (_, k) => new RegExp(`#${k + 1}(?!\\d)`)).every((re) => re.test(body));
 }
 
 /** Primitives and etoolbox/LaTeX helpers that change the macro named right after them. */
@@ -371,11 +509,12 @@ function runtimeAssigned(sources: readonly string[], commands: ReadonlyMap<strin
 
 /** A key that is equal exactly when two rule sets are. */
 export function rulesKey(r: EnvRules): string {
-  return JSON.stringify([[...r.math].sort(), [...r.wrappers].sort(), [...r.hidden].sort((a, b) => (a[0] < b[0] ? -1 : 1))]);
+  const sorted = <T>(m: ReadonlyMap<string, T>) => [...m].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  return JSON.stringify([[...r.math].sort(), [...r.wrappers].sort(), sorted(r.hidden), r.beamer, sorted(r.banners), sorted(r.images)]);
 }
 
 /**
- * The rules in force: the defaults, then the detected rules, then the user's (each later layer
+ * The rules in force: the defaults (with BEAMER_HIDDEN in beamer), then the detected rules, then the user's (each later layer
  * replacing what an earlier one says about a name), then `profiled` environments (a template
  * profile's box or source) taken out of the formula and wrapper rules. `arity` gives a user's
  * hidden command its arguments (the project's \newcommand), else the built-in table's, else
@@ -390,6 +529,7 @@ export function mergeEnvRules(
   const math = new Map(DEFAULT_RULES.math);
   const wrappers = new Set(DEFAULT_RULES.wrappers);
   const hidden = new Map(DEFAULT_RULES.hidden);
+  if (detected.beamer) for (const [name, a] of BEAMER_HIDDEN) hidden.set(name, a);
   const setEnv = (name: string, kind: "math" | "wrapper" | "source", target?: string) => {
     math.delete(name);
     wrappers.delete(name);
@@ -408,11 +548,28 @@ export function mergeEnvRules(
   }
   for (const raw of user.hidden) {
     if (raw.startsWith("!")) hidden.delete(raw.slice(1));
-    else hidden.set(raw, arity(raw) ?? detected.hidden.get(raw) ?? DEFAULT_HIDDEN.get(raw) ?? null);
+    else hidden.set(raw, arity(raw) ?? detected.hidden.get(raw) ?? DEFAULT_HIDDEN.get(raw) ?? BEAMER_HIDDEN.get(raw) ?? null);
   }
   for (const name of profiled) {
     math.delete(name);
     wrappers.delete(name);
   }
-  return { math, wrappers, hidden };
+  return { math, wrappers, hidden, beamer: detected.beamer, banners: detected.banners, images: detected.images };
+}
+
+/**
+ * Where each beamer frame starts in `text` (a file's source; comments skipped): `\begin{frame}`
+ * and the calls of the banner commands, in order. A root counts from its \begin{document} (its
+ * preamble defines the banners). Each is one entry of the .nav's \beamer@framepages.
+ */
+export function frameStarts(text: string, banners: ReadonlyMap<string, Arity>, root = false): number[] {
+  const masked = text.replace(/(^|[^\\])(%.*)$/gm, (_m, p: string, c: string) => p + " ".repeat(c.length));
+  const names = [...banners.keys()].map((n) => n.replace(/[@*]/g, (ch) => `\\${ch}`));
+  const re = new RegExp(`\\\\begin\\s*\\{frame\\}${names.length ? `|\\\\(?:${names.join("|")})(?![A-Za-z@])` : ""}`, "g");
+  const start = root ? masked.search(/\\begin\s*\{document\}/) : 0;
+  if (start < 0) return [];
+  re.lastIndex = start;
+  const out: number[] = [];
+  for (let m = re.exec(masked); m; m = re.exec(masked)) out.push(m.index);
+  return out;
 }

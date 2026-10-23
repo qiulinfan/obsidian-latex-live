@@ -621,6 +621,121 @@ SOFTWARE.
 .ll-editor-content .cm-line.ll-qed-line {
   text-align: right;
 }
+/* \centering and center (latexLive #17): the lines stay text. */
+.ll-editor-content .cm-line.lsp-lp-center {
+  text-align: center;
+}
+/* Beamer (latexLive #18-#22, docs/beamer.md). A frame card: its title bar on the \begin line.
+   No margins on the cards or the title page: CodeMirror's line heights would miss them. */
+.ll-editor-content .lsp-lp-box.ll-frame {
+  --lp-box-color: var(--interactive-accent);
+  border-left-width: 1px;
+  border-radius: var(--radius-m, 6px);
+  background: transparent;
+}
+.ll-editor-content .cm-line.ll-frame-head {
+  position: relative;
+  padding-right: 3.5em;
+  font-family: var(--font-text);
+  background: color-mix(in srgb, var(--lp-box-color, var(--interactive-accent)) 10%, transparent);
+}
+/* On the line, not the title's mark: CodeMirror draws the title's math outside the mark. */
+.ll-editor-content .cm-line.ll-frame-head,
+.ll-editor-content .cm-line.ll-frame-head.is-frametitle {
+  font-size: 1.15em;
+  font-weight: 600;
+  color: var(--text-accent);
+}
+.ll-editor-content .ll-frame-subtitle {
+  margin-left: 0.6em;
+  font-size: 0.87em;
+  font-weight: normal;
+  color: var(--text-muted);
+}
+.ll-editor-content .cm-line.ll-frame-head.is-framesubtitle {
+  color: var(--text-muted);
+}
+.ll-editor-content .ll-frame-page {
+  position: absolute;
+  top: 0.15em;
+  right: 0.4em;
+  padding: 0 0.4em;
+  border-radius: var(--radius-s, 4px);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller, 12px);
+  font-weight: normal;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  cursor: pointer;
+}
+.ll-editor-content .ll-frame-page:hover {
+  color: var(--text-accent);
+}
+/* A banner command's call (\sectionframe): its arguments one under the other, centered. */
+.ll-editor-content .lsp-lp-box.ll-banner {
+  border-left-width: 1px;
+  border-radius: var(--radius-m, 6px);
+  background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+.ll-editor-content .lsp-lp-box.ll-banner .cm-line {
+  position: relative;
+  padding: 0.3em 3.5em;
+  text-align: center;
+  font-family: var(--font-text);
+}
+.ll-editor-content .ll-banner-break {
+  display: block;
+}
+.ll-editor-content .ll-banner-arg.is-arg1 {
+  font-size: 0.8em;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.ll-editor-content .ll-banner-arg.is-arg2 {
+  font-size: 1.4em;
+  font-weight: 700;
+  color: var(--text-accent);
+}
+.ll-editor-content .ll-banner-arg.is-arg3 {
+  color: var(--text-muted);
+}
+/* \titlepage: the preamble's title page, not editable (a click opens \title). */
+.ll-editor-content .ll-titlepage {
+  padding: 1em;
+  text-align: center;
+  white-space: pre-line;
+  font-family: var(--font-text);
+  cursor: pointer;
+}
+.ll-editor-content .ll-titlepage-title {
+  font-size: 1.5em;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-accent);
+}
+.ll-editor-content .ll-titlepage-subtitle {
+  font-size: 1.15em;
+  color: var(--text-muted);
+}
+.ll-editor-content .ll-titlepage-author {
+  margin-top: 0.8em;
+  font-size: 1.1em;
+}
+.ll-editor-content .ll-titlepage-institute,
+.ll-editor-content .ll-titlepage-date {
+  margin-top: 0.4em;
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+/* A TikZ picture in beamer without crops: one line until the cursor enters it. */
+.ll-editor-content .ll-tikz-fold {
+  display: block;
+  padding: 0 0.4em;
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small, 13px);
+  color: var(--text-muted);
+  cursor: text;
+}
 /* PDF crops (blockCrop.ts): a paper card around the crop, scaled down in a narrow pane. */
 .ll-editor-content .lsp-lp-paper.ll-crop {
   vertical-align: top;

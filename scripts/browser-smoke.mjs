@@ -30,6 +30,10 @@
 //       with Cmd/Ctrl, scrolls to the rendered formula holding the \label 60 lines down and
 //       flashes it, the cursor on the line above; a click 2 px beside it or ArrowRight onto it reveals its source; a chip whose \label is in
 //       another file calls `elsewhere` once per click, 5 of 5
+//   B10 a beamer deck (docs/beamer.md) with the plugin's styles: a frame card's title bar, its
+//       page in the corner, a \sectionframe banner, the title page and the TikZ fold; every
+//       gutter number sits on its line (±1 px); ArrowDown visits each shown line of the card in
+//       order; a real click on the page number shows that page, one on the fold opens its source
 // The page bundles the real shared modules (keyArbiter first, live preview in its
 // compartment) with a LaTeX-like test language. Formulas render with MathJax 3.2.2 when the
 // `mathjax` dev dependency is installed (LaTeX Live, Obsidian's configuration; its glyph CSS
@@ -78,7 +82,7 @@ import { cursorPreview } from "./src/editor/shared/renderHover";
 import { latexLiveLanguage } from "./src/editor/latexLive";
 import { DEFAULT_REF_NAMES } from "./src/editor/latexRefs";
 import { labelJump } from "./src/editor/labelJump";
-import { EMPTY_USER_RULES, NO_DETECTED, mergeEnvRules } from "./src/tex/envRules";
+import { EMPTY_USER_RULES, NO_DETECTED, detectEnvRules, mergeEnvRules } from "./src/tex/envRules";
 
 /** B9: the rules of a deck whose preamble defines \DeckLayout[1] (the user hides it), and its refs. */
 const rules = mergeEnvRules({ ...EMPTY_USER_RULES, hidden: ["DeckLayout"] }, NO_DETECTED, (n) => (n === "DeckLayout" ? { args: 1, optional: false } : undefined));
@@ -92,6 +96,21 @@ const refs = {
   checkpoints: new Map(),
 };
 const latex = latexLiveLanguage({ refs: () => refs, rules });
+/** B10: a deck's rules (beamer, a banner, a layout macro), its pages and title page. */
+const deckRules = mergeEnvRules(EMPTY_USER_RULES, detectEnvRules([[
+  "\\documentclass{beamer}",
+  "\\newcommand{\\sectionframe}[2]{\\begin{frame}\\centering{\\Huge #1}\\\\#2\\end{frame}}",
+  "\\newcommand{\\DeckGap}{\\par\\vspace{2mm}}",
+].join("\n")]));
+window.__pages = [];
+const deck = latexLiveLanguage({
+  refs: () => refs,
+  rules: deckRules,
+  framePage: (doc, pos) => { const n = doc.lineAt(pos).number; return { first: n, last: n + 1 }; },
+  showPage: (page) => window.__pages.push(page),
+  titlePage: () => ({ title: "A Talk", subtitle: "", author: "A. Author", institute: "Uni", date: "2026" }),
+  beamerCrops: () => false,
+});
 window.__jumpedElsewhere = [];
 
 const MATH = /\\begin\{(align\*?|equation\*?|gather\*?)\}[\s\S]*?\\end\{\1\}|\$\$([\s\S]*?)\$\$|\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)|\$([^$\n]+)\$/g;
@@ -173,6 +192,7 @@ const preview = cursorPreview({
 window.__smoke = {
   mount(doc, height = 700, o = {}) {
     const host = document.getElementById("host");
+    host.parentElement.classList.toggle("ll-editor-content", !!o.deck);
     host.style.height = height + "px";
     host.style.width = (o.width ?? 900) + "px";
     if (window.__view) window.__view.destroy();
@@ -188,7 +208,7 @@ window.__smoke = {
           lineNumbers(),
           EditorView.lineWrapping,
           liveInput(),
-          livePreviewCompartment.of(o.live === false ? [] : livePreview({ language: o.latex ? latex : language, renderer })),
+          livePreviewCompartment.of(o.live === false ? [] : livePreview({ language: o.deck ? deck : o.latex ? latex : language, renderer })),
           o.latex ? labelJump((key) => window.__jumpedElsewhere.push(key)) : [],
           o.preview ? preview : [],
           keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -234,7 +254,14 @@ async function writePage() {
     logLevel: "warning",
   });
   writeFileSync(join(work, "bundle.js"), out.outputFiles[0].text);
-  const css = readFileSync(join(ROOT, "src/editor/shared/editor.css"), "utf8");
+  // The plugin's own rules (styles.css under .ll-editor-content), for B10's host only: the rest
+  // of styles.css restyles every editor.
+  const own = readFileSync(join(ROOT, "styles.css"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .match(/[^{}]+\{[^{}]*\}/g)
+    .filter((rule) => rule.split("{")[0].split(",").every((sel) => sel.trim().startsWith(".ll-editor-content")))
+    .join("\n");
+  const css = readFileSync(join(ROOT, "src/editor/shared/editor.css"), "utf8") + own;
   const mathjax = useMathJax
     ? `<script>${OBSIDIAN_CONFIG}</script><script src="/mathjax/tex-chtml-full.js"></script>`
     : "";
@@ -852,6 +879,86 @@ async function b9({ page, evaluate }) {
   await evaluate("document.getElementById('b9-styles').remove(), true");
 }
 
+const B10_DOC = [
+  "Before the deck.", // 1
+  "\\begin{frame}{Title page}", // 2
+  "\\titlepage",
+  "\\end{frame}",
+  "\\begin{frame}[t]{Motion $v = \\dot x$}{A subtitle}", // 5
+  "\\DeckGap",
+  "\\begin{itemize}",
+  "\\item<2-> First point", // 8
+  "\\item<3-> Second point",
+  "\\end{itemize}",
+  "\\begin{tikzpicture}", // 11
+  "  \\draw (0,0) -- (1,1);",
+  "  \\node at (1,1) {x};",
+  "\\end{tikzpicture}",
+  "\\end{frame}", // 15
+  "\\sectionframe{Part two}{More}", // 16
+  "After the deck.",
+].join("\n");
+
+async function b10({ page, evaluate }) {
+  await mount(evaluate, B10_DOC, 700, { deck: true });
+  const shown = await evaluate(`(() => {
+    const v = __view;
+    const gutter = new Map();
+    for (const el of v.dom.querySelectorAll(".cm-lineNumbers .cm-gutterElement")) {
+      if (/^\\d+$/.test(el.textContent)) gutter.set(+el.textContent, el.getBoundingClientRect().top);
+    }
+    const rows = [];
+    for (const el of v.contentDOM.querySelectorAll(".cm-line, .lsp-lp-render.is-block, .ll-titlepage, .ll-tikz-fold")) {
+      const n = v.state.doc.lineAt(v.lineBlockAt(v.posAtDOM(el)).from).number;
+      if (gutter.has(n)) rows.push([n, Math.round(el.getBoundingClientRect().top - gutter.get(n))]);
+    }
+    const q = (s) => v.contentDOM.querySelector(s);
+    return {
+      frames: v.contentDOM.querySelectorAll(".lsp-lp-box.ll-frame").length,
+      head: [...v.contentDOM.querySelectorAll(".ll-frame-head")].map((e) => e.textContent),
+      math: !!q(".ll-frame-head .lsp-lp-math"),
+      pages: [...v.contentDOM.querySelectorAll(".ll-frame-page")].map((e) => e.textContent),
+      banner: !!q(".lsp-lp-box.ll-banner"),
+      title: q(".ll-titlepage-title")?.textContent,
+      fold: q(".ll-tikz-fold")?.textContent,
+      text: v.contentDOM.textContent,
+      worst: Math.max(...rows.map((r) => Math.abs(r[1]))), off: rows.filter((r) => Math.abs(r[1]) > 1),
+    };
+  })()`);
+  check("B10", "two frame cards, the title bar (math rendered), pages in the corners, a banner, the title page and the fold",
+    shown.frames === 2 && shown.math && shown.banner && shown.title === "A Talk" && shown.fold === "▸ TikZ (4 lines)" &&
+      JSON.stringify(shown.pages) === JSON.stringify(["2–3", "5–6", "16–17"]) && !/\\begin\{frame|<2->|DeckGap|\\end\{frame/.test(shown.text),
+    { head: shown.head, pages: shown.pages, fold: shown.fold, text: shown.text });
+  check("B10", "gutter numbers sit on their lines (±1 px)", shown.worst <= 1, shown.off);
+  // ArrowDown from line 1 through the second card: each shown line once, in order (the \\end
+  // lines collapse, the fold opens once the cursor enters the picture).
+  await evaluate("__view.focus(), __view.dispatch({ selection: { anchor: __view.state.doc.line(4).to } }), true");
+  await sleep(200);
+  const visited = [];
+  for (let k = 0; k < 14; k++) {
+    await press(page, "ArrowDown");
+    await sleep(60);
+    visited.push(await evaluate("__view.state.doc.lineAt(__view.state.selection.main.head).number"));
+  }
+  const ordered = visited.every((n, i) => i === 0 || n >= visited[i - 1]) && [5, 6, 8, 9, 11, 12, 13, 16].every((n) => visited.includes(n));
+  check("B10", "ArrowDown walks the card in order: head, body, the picture's lines, on to the banner", ordered, visited);
+  // Clicks: the page number shows its page; the fold opens its source.
+  await evaluate("__view.dispatch({ selection: { anchor: __view.state.doc.length } }), __view.scrollDOM.scrollTop = 0, true");
+  await sleep(300);
+  const clickAt = async (p) => {
+    for (const type of ["mousePressed", "mouseReleased"]) await page("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button: "left", clickCount: 1 });
+    await sleep(300);
+  };
+  const badge = await evaluate(`(() => { const r = __view.contentDOM.querySelectorAll(".ll-frame-page")[1].getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await clickAt(badge);
+  const afterBadge = await evaluate("({ pages: __pages, line: __view.state.doc.lineAt(__view.state.selection.main.head).number })");
+  check("B10", "a click on the page number shows page 5 and leaves the cursor", JSON.stringify(afterBadge.pages) === "[5]" && afterBadge.line === 17, afterBadge);
+  const fold = await evaluate(`(() => { const r = __view.contentDOM.querySelector(".ll-tikz-fold").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await clickAt(fold);
+  const opened = await evaluate("({ fold: !!__view.contentDOM.querySelector('.ll-tikz-fold'), source: __view.contentDOM.textContent.includes('\\\\draw (0,0)') })");
+  check("B10", "a click on the fold opens the picture's source", !opened.fold && opened.source, opened);
+}
+
 async function b8({ page, evaluate }) {
   const terms = Array.from({ length: 24 }, (_, i) => `a_{${i + 1}}`).join(" + ");
   const doc = ["A formula that wraps: $" + terms + "$ and text after it.", "The next line."].join("\n");
@@ -942,6 +1049,7 @@ try {
   if (run("B7")) await b7(cdp);
   if (run("B8")) await b8(cdp);
   if (run("B9")) await b9(cdp);
+  if (run("B10")) await b10(cdp);
 } catch (e) {
   check("--", "smoke run", false, e instanceof Error ? e.message : String(e));
 } finally {

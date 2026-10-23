@@ -127,6 +127,8 @@ This first version customizes **theorem-like environments**. It controls the liv
 
 **Settings → LaTeX Live → Live editor rules** has three lists, each edited as JSON: formula environments (`{ "myeq": "equation" }` renders `myeq` as an equation), wrapper environments (`["subequations"]` collapses only the `\begin`/`\end` lines and keeps the formulas inside rendered) and hidden commands (`["centering", "DeckLayout"]` hides a layout command and its arguments until the cursor touches it). Built-in defaults and rules detected from the preamble's `\newenvironment`/`\newcommand` apply without configuration; a template profile naming the same environment wins. In the live editor, `\caption{…}` reads `Figure n: …` once compiled, and a reference chip works like a link: click it to jump to its `\label` (in this file or another project file); click just beside it, or move in with the arrow keys, to edit its source. These rules change the live editor only. See [live editor rules](./docs/live-rules.md).
 
+When the root document is a `beamer` deck, each frame shows as a card: a title bar with rendered math, the frame's PDF page in the corner (a click turns the open PDF preview to it), a title-page card, and hidden overlay specs and `\pause`. Section-frame, image and layout macros of the deck are detected from their `\newcommand`. Tabular and TikZ blocks stay as source in a deck (TikZ folds to one line) unless **Crop tabular/TikZ in beamer** is on (default off). See [beamer decks](./docs/beamer.md).
+
 ### Share a portable reading edition
 
 Export a self-contained HTML page with math, theorem blocks, references, bibliography, images and supported SVG graphics. Follow its references and table of contents without Obsidian; inspect the export report for unsupported content.
@@ -359,6 +361,8 @@ LaTeX 的命令和环境由文档类、宏包和项目自己的宏共同定义�
 #### 环境和命令的处理规则
 
 **设置 → LaTeX Live → Live editor rules** 有三个列表，各用一段 JSON 编辑：公式别名（`{ "myeq": "equation" }` 把 `myeq` 当作 equation 渲染）、外壳环境（`["subequations"]` 只折叠 `\begin`/`\end` 两行，里面的公式照常渲染）、隐藏命令（`["centering", "DeckLayout"]` 把排版命令连同参数藏起来，光标碰到时显示）。内置默认值和从导言区 `\newenvironment`/`\newcommand` 自动识别的规则无需配置；同名环境以模板方案为准。实时编辑中，编译后的 `\caption{…}` 显示为 `Figure n: …`，引用标记像链接一样，单击跳到对应的 `\label`（当前文件或项目的其他文件）；点在标记旁边或用方向键移进去，可编辑源码。这些规则只影响实时编辑视图。详见[实时编辑规则](./docs/live-rules.md)。
+
+根文件是 `beamer` 幻灯片时，每一帧显示为卡片：标题栏（公式照常渲染）、角上是这一帧的 PDF 页码（点击让打开的 PDF 预览翻到该页）、标题页卡片，overlay 规格和 `\pause` 隐藏。幻灯片里的横幅宏、图片宏和排版宏从 `\newcommand` 自动识别。幻灯片里的表格和 TikZ 默认显示源码（TikZ 折叠成一行），打开 **Crop tabular/TikZ in beamer**（默认关）后才裁剪。详见 [Beamer 幻灯片](./docs/beamer.md)。
 
 ### 分享可独立阅读的 HTML
 

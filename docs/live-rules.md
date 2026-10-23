@@ -54,9 +54,11 @@ HTML 导出（`src/export/`）仍按 TeX 本身处理，不读这些规则。
 - 公式环境：`equation`、`align`、`gather`、`multline`、`flalign`、`alignat`、`eqnarray` 及其带 `*` 的形式，
   `displaymath`、`math`、`xalignat`、`xalignat*`、`xxalignat`。
 - 外壳环境：`itemize`、`enumerate`、`description`、`problemset`、`center`、`figure`、`figure*`、`table`、
-  `table*`、`subequations`、`minipage`、`flushleft`、`flushright`。
+  `table*`、`subequations`、`minipage`、`flushleft`、`flushright`；beamer 里另有 `columns`、`column`。
 - 隐藏命令：`centering`、`raggedright`、`raggedleft`、`vfill`、`hfill`、`medskip`、`smallskip`、`bigskip`、
-  `noindent`、`par`、`newpage`、`clearpage`（0 个参数），`vspace`、`hspace`（1 个参数）。
+  `noindent`、`par`、`newpage`、`clearpage`（0 个参数），`vspace`、`hspace`（1 个参数）；beamer 里另有
+  `\tiny` … `\Huge` 和 `\pause`（0 个参数）。
+- `\centering` 之后和 `center` 环境里的行居中显示。
 
 ## 同一处的另外两项
 
@@ -67,7 +69,14 @@ HTML 导出（`src/export/`）仍按 TeX 本身处理，不读这些规则。
   要修改引用本身，点在标记紧旁边（左侧或右侧），或用方向键移进去，就会显示源码；Shift-点击和 Alt-点击也不跳转。
   `\cite` 不跳转。
 
-## 例子：幻灯片的布局宏
+## Beamer
 
-导言区定义 `\newcommand{\DeckLayout}[1]{\def\decklayout{#1}}` 时，宏体不是排版命令，自动识别不会隐藏它。
-在 Hidden commands 里写 `["DeckLayout"]`，参数个数 1 从 `\newcommand` 读出，`\DeckLayout{two}` 整体隐藏。
+根文件是 beamer 时另有一组显示（帧卡片、页码、标题页、overlay、横幅宏和图片宏），外壳多 `columns`、`column`，
+隐藏命令多字体大小命令和 `\pause`，排版宏的自动识别也更宽：`\setlength`、`\csname…\endcsname` 组合出的
+布局宏（如 `\DeckLayout`）会被隐藏。见 [Beamer 幻灯片的实时编辑](./beamer.md)。
+
+## 例子：自动识别不了的布局宏
+
+导言区定义 `\newcommand{\DeckLayout}[1]{\def\decklayout{#1}}` 时，宏体不是排版命令，自动识别不会隐藏它
+（beamer 里也不会）。在 Hidden commands 里写 `["DeckLayout"]`，参数个数 1 从 `\newcommand` 读出，
+`\DeckLayout{two}` 整体隐藏。

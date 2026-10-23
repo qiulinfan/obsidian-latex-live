@@ -382,6 +382,14 @@ export class TexView extends TextFileView {
           image: (path) => render.imageOf(root, path),
           crop: (doc, from, to, kind) => render.cropOf(root, abs, doc, from, to, kind),
           rules,
+          framePage: (doc, pos) => render.framePageOf(root, resolve(abs), doc, pos),
+          showPage: (page) => this.plugin.showPdfPage(root, page),
+          titlePage: () => render.titlePageOf(root)?.fields ?? null,
+          openTitle: () => {
+            const at = render.titlePageOf(root);
+            if (at) void this.plugin.openLocation(at.file, at.line + 1);
+          },
+          beamerCrops: () => this.plugin.settings.beamerCrops,
         });
     return livePreview({ language, renderer: render.rendererFor(root) });
   }

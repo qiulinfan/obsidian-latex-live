@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import { EditorSelection, EditorState, SelectionRange } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { latexLiveLanguage } from "../src/editor/latexLive";
+import { EMPTY_USER_RULES, detectEnvRules, mergeEnvRules } from "../src/tex/envRules";
 import { DEFAULT_REF_NAMES, LatexRefs, refNames } from "../src/editor/latexRefs";
 import { livePreview, renderStats } from "../src/editor/shared/livePreview";
 import { showTexDiagnostics, texEditorExtensions } from "../src/editor/texExtensions";
@@ -1283,6 +1284,101 @@ test("P5 a new compile's crop replaces the last one when it lands; a crop that f
     await waitFor(() => cropCards(view).length === 1 && cropCards(view)[0]!.startsWith("crop 3|"), 3000);
     assert.ok(lines(view).includes("  \\begin{tabular}{ll}"));
     assert.ok(errors(view).includes("\\begin{equation*}"));
+  } finally {
+    p.done();
+  }
+});
+
+// ---- Beamer (#17-#22, docs/beamer.md) ------------------------------------------------------
+
+test("beamer: frame cards with their title bar and page, banners, the title page, overlays, the TikZ fold; papers keep crops", async () => {
+  const p = await project();
+  try {
+    const rules = mergeEnvRules(
+      EMPTY_USER_RULES,
+      detectEnvRules([
+        [
+          "\\documentclass{beamer}",
+          "\\newcommand{\\sectionframe}[2]{\\begin{frame}\\centering#1\\\\#2\\end{frame}}",
+          "\\newcommand{\\DeckGap}{\\vspace{2mm}}",
+        ].join("\n"),
+      ]),
+    );
+    const shownPages: number[] = [];
+    let opened = 0;
+    const doc = [
+      "\\begin{frame}[t]{Title $x$}", // 1
+      "\\DeckGap", // 2
+      "\\titlepage", // 3
+      "\\begin{itemize}", // 4
+      "\\item<2-> one",
+      "\\end{itemize}",
+      "\\begin{tikzpicture}", // 7
+      "  \\draw (0,0) -- (1,1);",
+      "\\end{tikzpicture}",
+      "\\end{frame}", // 10
+      "\\sectionframe{Part}{Two}", // 11
+      "end",
+    ].join("\n");
+    const make = (beamerCrops: boolean) =>
+      new EditorView({
+        parent: document.body,
+        state: EditorState.create({
+          doc,
+          selection: { anchor: doc.length },
+          extensions: texEditorExtensions({
+            text: doc,
+            diagnostics: true,
+            live: livePreview({
+              language: latexLiveLanguage({
+                rules,
+                refs: () => p.render.refsOf(p.root),
+                framePage: (d, pos) => (d.lineAt(pos).number === 1 ? { first: 2, last: 3 } : { first: 4, last: 4 }),
+                showPage: (page) => shownPages.push(page),
+                titlePage: () => ({ title: "Big", subtitle: "", author: "A\nB", institute: "Uni", date: "2026" }),
+                openTitle: () => opened++,
+                beamerCrops: () => beamerCrops,
+                crop: () => null,
+              }),
+              renderer: p.render.rendererFor(p.root),
+            }),
+          }),
+        }),
+      });
+    const view = make(false);
+    view.focus();
+    await sleep(40);
+    await rendered(view);
+    const frame = view.contentDOM.querySelector(".lsp-lp-box.ll-frame");
+    assert.ok(frame, "the frame is a card");
+    const head = frame.querySelector(".cm-line.ll-frame-head");
+    assert.equal(head?.querySelector(".ll-frame-title")?.textContent, "Title ", "the title in the bar");
+    assert.ok(head?.querySelector(".lsp-lp-math"), "its math renders (beside the mark: the line carries the title's font)");
+    assert.equal(head?.textContent?.includes("\\begin"), false, "\\begin{frame}[t]{ and } hidden");
+    const pages = [...view.contentDOM.querySelectorAll<HTMLElement>(".ll-frame-page")];
+    assert.deepEqual(pages.map((e) => e.textContent), ["2–3", "4"], "the frame's pages and the banner's");
+    pages[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    assert.deepEqual(shownPages, [2], "a click shows the first page");
+    const tp = view.contentDOM.querySelector<HTMLElement>(".ll-titlepage");
+    assert.equal(tp?.querySelector(".ll-titlepage-title")?.textContent, "Big");
+    tp!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    assert.equal(opened, 1, "a click opens \\title");
+    assert.equal(view.contentDOM.querySelector(".ll-tikz-fold")?.textContent, "▸ TikZ (3 lines)");
+    const text = view.contentDOM.textContent ?? "";
+    assert.ok(!text.includes("<2->") && !text.includes("\\DeckGap") && !text.includes("\\end{frame}"), text);
+    const banner = view.contentDOM.querySelector(".lsp-lp-box.ll-banner");
+    assert.deepEqual([...(banner?.querySelectorAll(".ll-banner-arg") ?? [])].map((a) => a.textContent), ["Part", "Two"]);
+    // The cursor in the picture: its source.
+    cursorAt(view, view.state.doc.line(8).from + 2);
+    await rendered(view);
+    assert.equal(view.contentDOM.querySelector(".ll-tikz-fold"), null);
+    assert.ok((view.contentDOM.textContent ?? "").includes("\\draw (0,0)"));
+    view.destroy();
+    // The setting on: the picture is a crop request, as in a paper (no crop here: its source).
+    const cropped = make(true);
+    await rendered(cropped);
+    assert.equal(cropped.contentDOM.querySelector(".ll-tikz-fold"), null);
+    cropped.destroy();
   } finally {
     p.done();
   }

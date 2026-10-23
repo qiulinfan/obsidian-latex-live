@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Text } from "@codemirror/state";
 import { LatexConstruct, LatexEnv, LatexMath, blockAt, blocks, blocksAround, formulas, mathAt, scanLatex } from "../src/editor/latexScan";
+import { EMPTY_USER_RULES, detectEnvRules, mergeEnvRules } from "../src/tex/envRules";
 
 const BOOK = resolve("tests/fixtures/elegantbook");
 const doc = (s: string) => Text.of(s.split("\n"));
@@ -163,6 +164,16 @@ function describe(s: string, c: LatexConstruct): string {
       return `command ${c.name}${c.block ? " (block)" : ""}`;
     case "caption":
       return `caption ${c.float ?? "-"} ${s.slice(c.contentFrom, c.contentTo)}${c.label === null ? "" : ` #${c.label}`}`;
+    case "center":
+      return `center ${JSON.stringify(s.slice(c.from, c.to))}`;
+    case "frametitle":
+      return `${c.sub ? "framesubtitle" : "frametitle"} ${s.slice(c.contentFrom, c.contentTo)}`;
+    case "titlepage":
+      return `titlepage${c.block ? " (block)" : ""}`;
+    case "overlay":
+      return `overlay ${c.hide.map((h) => s.slice(h.from, h.to)).join(" ")}`;
+    case "banner":
+      return `banner ${c.name}${c.args.map((a) => (a.optional ? `[${s.slice(a.from, a.to)}]` : `{${s.slice(a.from, a.to)}}`)).join("")}`;
   }
 }
 const constructs = (s: string) => scanLatex(doc(s)).map((c) => describe(s, c));
@@ -259,7 +270,7 @@ test("scanLatex: items carry the marker LaTeX typesets, by depth, short form, en
 test("scanLatex: \\begin/\\end lines of lists, center, figure and table alone on their lines (options included)", () => {
   assert.deepEqual(
     constructs("\\begin{enumerate}[label=(\\alph*)] % note\n\\item a\n  \\end{enumerate}\n\\begin{center}\nc\n\\end{center}"),
-    ["begin \\begin{enumerate}[label=(\\alph*)]", "item (a)", "end \\end{enumerate}", "begin \\begin{center}", "end \\end{center}"],
+    ["begin \\begin{enumerate}[label=(\\alph*)]", "item (a)", "end \\end{enumerate}", "begin \\begin{center}", "center \"c\"", "end \\end{center}"],
   );
   assert.deepEqual(constructs("text \\begin{itemize} \\item a\n\\end{itemize} text"), ["item •"], "not alone: the list still counts");
   assert.deepEqual(
@@ -610,4 +621,49 @@ test("blocks and blockAt: environments and floats around a position, the innermo
   const picture = blocks(d)[0];
   assert.deepEqual(blocksAround(d, picture.from, picture.to).map((b) => b.env), ["figure"]);
   assert.equal(blocks(d), blocks(d), "memoized per document");
+});
+
+test("scanLatex in beamer: frames, \\frametitle, \\titlepage, overlays, banners, image macros and centered lines", () => {
+  const rules = mergeEnvRules(
+    EMPTY_USER_RULES,
+    detectEnvRules([
+      [
+        "\\documentclass{beamer}",
+        "\\newcommand{\\sectionframe}[3]{\\begin{frame}\\centering{#1}\\\\{#2}\\\\{#3}\\end{frame}}",
+        "\\newcommand{\\DeckFigure}[2][]{\\includegraphics[#1]{#2}}",
+      ].join("\n"),
+    ]),
+  );
+  const s = [
+    "\\begin{document}",
+    "\\begin{frame}[t]{Title $x$}{Sub}",
+    "\\frametitle{Other}",
+    "\\titlepage",
+    "\\begin{itemize}",
+    "\\item<2-> one \\pause",
+    "\\end{itemize}",
+    "\\only<3>{text}",
+    "\\DeckFigure[height=1cm]{img/a.png}",
+    "\\begin{center}",
+    "middle",
+    "\\end{center}",
+    "\\end{frame}",
+    "\\sectionframe{A}{B}{C}",
+    "\\end{document}",
+  ].join("\n");
+  const got = scanLatex(doc(s), rules).map((c) => describe(s, c)).filter((d) => !d.startsWith("item") && !d.startsWith("begin") && !d.startsWith("end"));
+  assert.ok(got.includes("env frame[t]{Title $x$}{Sub}"), got.join("\n"));
+  assert.ok(got.includes("frametitle Other"));
+  assert.ok(got.includes("titlepage (block)"));
+  assert.ok(got.includes("overlay <2->"), "the spec on \\item");
+  assert.ok(got.includes("command pause"), "\\pause: a hidden command in beamer");
+  assert.ok(got.includes("overlay \\only<3>{ }"), "\\only's markup hides; its argument stays");
+  assert.ok(got.includes("image img/a.png"), "an image macro alone on its line");
+  assert.ok(got.includes("banner sectionframe{A}{B}{C}"));
+  assert.ok(got.some((d) => d === `center ${JSON.stringify("middle")}`), "a line inside center");
+  // A paper: no frame cards, no overlays, but \\centering still centers.
+  const paper = "\\begin{document}\n\\begin{figure}\n\\centering\nx\n\\end{figure}\n\\only<3>{t}\n\\end{document}";
+  const p = scanLatex(doc(paper)).map((c) => describe(paper, c));
+  assert.ok(p.some((d) => d.startsWith("center ") && d.includes("x")), p.join("\n"));
+  assert.ok(!p.some((d) => d.startsWith("overlay")));
 });

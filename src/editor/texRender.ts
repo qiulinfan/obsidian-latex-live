@@ -1,11 +1,12 @@
 import type { ChangeSet, Text } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import { readFileSync } from "fs";
-import { dirname, extname } from "path";
+import { existsSync, readFileSync } from "fs";
+import { basename, dirname, extname, join } from "path";
 import { CropKind, CropLocation, NOTE_CHANGED } from "../preview/blockCrop";
 import { AuxCheckpoint, AuxLabel, readAuxCheckpoints, readAuxLabels } from "../tex/auxData";
 import { BibEntry, bibFiles, readBib } from "../tex/bib";
-import { DetectedRules, EMPTY_USER_RULES, EnvRules, UserEnvRules, detectEnvRules, mergeEnvRules, rulesKey } from "../tex/envRules";
+import { DeckFrames, DeckTitle, FramePages, deckFrames, deckTitle, readNavPages } from "../tex/beamer";
+import { DetectedRules, EMPTY_USER_RULES, EnvRules, UserEnvRules, detectEnvRules, frameStarts, mergeEnvRules, rulesKey } from "../tex/envRules";
 import { IMAGE_FORMATS, findGraphics, graphicsPaths } from "../tex/graphics";
 import { projectDefinitions, type Definitions } from "../tex/macros";
 import { includeName, stripComments } from "../tex/project";
@@ -80,9 +81,9 @@ import { applyTemplateVisualization, parseTemplateProfiles, type TemplateVisuali
 //             #14; `cropOf` gives their source) render through the crops (async until drawn); the views
 //             rebuild when a compile ends or the preview closes (`cropsChanged`).
 
-/** An edit touching such a line may change the bibliography, the reference names or the theorem map. */
+/** An edit touching such a line may change the bibliography, the reference names, the theorem map or a deck's title page. */
 const REFS_LINE =
-  /\\(?:addbibresource|addglobalbib|addsectionbib|(?:no)?bibliography\s*\{|documentclass|ProvidesClass|LoadClass|PassOptionsToClass|RequirePackage|[cC]refname|(?:elegant)?newtheorem|graphicspath|usepackage)|autorefname|cleveref/;
+  /\\(?:addbibresource|(?:title|subtitle|author|institute|date)\s*[[{]|addglobalbib|addsectionbib|(?:no)?bibliography\s*\{|documentclass|ProvidesClass|LoadClass|PassOptionsToClass|RequirePackage|[cC]refname|(?:elegant)?newtheorem|graphicspath|usepackage)|autorefname|cleveref/;
 /** An edit touching such a line may change what the project defines. */
 const DEFINITION_LINE =
   /\\(?:(?:re|provide)?newcommand|[egx]?def|let|Declare|(?:New|Renew|Provide)DocumentCommand|(?:re)?newenvironment|input|include|usepackage|RequirePackage)/;
@@ -216,6 +217,17 @@ interface RootRefs {
   timer: number | null;
   /** The pending re-read covers the sources, not only the labels. */
   full: boolean;
+  /** A beamer root's frames, pages and title page (readDeck), else null. */
+  deck: Deck | null;
+}
+
+/** A beamer deck as live preview shows it (src/tex/beamer.ts). */
+interface Deck {
+  pages: FramePages[];
+  frames: DeckFrames;
+  title: DeckTitle | null;
+  /** Equal exactly when two decks are. */
+  key: string;
 }
 
 export class TexRender {
@@ -232,6 +244,9 @@ export class TexRender {
   private popoutSheets = new WeakMap<Document, { el: HTMLStyleElement; rules: number }>();
   /** Per root: \includegraphics paths -> what they show (see Images), and the file it read. */
   private images = new Map<string, Map<string, { found: { src: string } | { error: string } | null; file: string | null }>>();
+
+  /** frameStarts per document text (framePageOf), with the banners it counted. */
+  private frameStarts = new WeakMap<Text, { banners: DetectedRules["banners"]; starts: number[] }>();
 
   constructor(private host: TexRenderHost) {}
 
@@ -672,6 +687,7 @@ export class TexRender {
       const was = r.refs;
       let next: LatexRefs;
       let images = false;
+      let deck: Deck | null;
       if (r.full) {
         const read = this.readRefs(root, was);
         images = read.graphics.join("\n") !== r.graphics.join("\n");
@@ -681,7 +697,13 @@ export class TexRender {
           this.host.rulesChanged?.(root);
         }
         next = read.refs;
-      } else next = { ...was, ...this.readLabels(root, was) };
+        deck = read.deck;
+      } else {
+        next = { ...was, ...this.readLabels(root, was) };
+        deck = r.detected.beamer ? this.readDeck(root, r.detected, [...r.files]) : null;
+      }
+      const deckChanged = deck?.key !== r.deck?.key;
+      r.deck = deck;
       r.full = false;
       if (images) this.images.get(root)?.clear();
       const same =
@@ -694,12 +716,12 @@ export class TexRender {
         r.refs = next;
         this.roots.get(root)?.cache.clear(); // the hover's renders read the refs
       }
-      if (!same || images) this.renderers.get(root)?.changed();
+      if (!same || images || deckChanged) this.renderers.get(root)?.changed();
     }, ms);
   }
 
   /** The refs of `root` (see Refs); the maps of `was` are kept where nothing changed. */
-  private readRefs(root: string, was?: LatexRefs): { refs: LatexRefs; files: Set<string>; bibs: Set<string>; graphics: string[]; detected: DetectedRules; macros: Definitions["macros"] } {
+  private readRefs(root: string, was?: LatexRefs): { refs: LatexRefs; files: Set<string>; bibs: Set<string>; graphics: string[]; detected: DetectedRules; macros: Definitions["macros"]; deck: Deck | null } {
     const buffers = this.host.buffers();
     const defs = projectDefinitions(root, buffers);
     const files = defs.files;
@@ -716,7 +738,48 @@ export class TexRender {
       names: was && sameRefNames(names, was.names) ? was.names : names,
       theorems: was && sameTheorems(theorems, was.theorems) ? was.theorems : theorems,
     };
-    return { refs, files: new Set(files), bibs: new Set(bibs), graphics: graphicsPaths(sources), detected: detectEnvRules(sources), macros: defs.macros };
+    const detected = detectEnvRules(sources);
+    return { refs, files: new Set(files), bibs: new Set(bibs), graphics: graphicsPaths(sources), detected, macros: defs.macros, deck: this.readDeck(root, detected, files) };
+  }
+
+  /**
+   * A beamer root's deck: the last compile's .nav pages, the frames of the files its body reads
+   * (open editors' text counts) and the preamble's title page; null for a paper.
+   */
+  private readDeck(root: string, detected: DetectedRules, files: readonly string[]): Deck | null {
+    if (!detected.beamer) return null;
+    const buffers = this.host.buffers();
+    const text = (f: string) => buffers.get(f) ?? (existsSync(f) ? readText(f) : null);
+    const job = basename(root, extname(root));
+    const pages = readNavPages(join(this.host.outDirFor(root), `${job}.nav`));
+    const frames = deckFrames(root, detected.banners, text);
+    const title = deckTitle(files, text);
+    return { pages, frames, title, key: JSON.stringify([pages, [...frames.files], title]) };
+  }
+
+  /**
+   * The PDF pages of the frame at `pos` of `doc` (the file `file` under the beamer root `root`),
+   * or null: no .nav, or the .nav and the sources disagree on the frames (an edit since the
+   * compile that added or removed one in this file, or a deck the count misreads).
+   */
+  framePageOf(root: string, file: string, doc: Text, pos: number): FramePages | null {
+    const r = this.rootRefs(root);
+    const deck = r.deck;
+    const at = deck?.frames.files.get(file);
+    if (!deck || !at || deck.frames.total !== deck.pages.length) return null;
+    let local = this.frameStarts.get(doc);
+    if (!local || local.banners !== r.detected.banners) {
+      local = { banners: r.detected.banners, starts: frameStarts(doc.toString(), r.detected.banners, file === root) };
+      this.frameStarts.set(doc, local);
+    }
+    if (local.starts.length !== at.count) return null;
+    const k = local.starts.indexOf(pos);
+    return k < 0 ? null : deck.pages[at.offset + k];
+  }
+
+  /** A beamer root's title page: its fields and the \title line (file, 0-based line), or null. */
+  titlePageOf(root: string): DeckTitle | null {
+    return this.rootRefs(root).deck?.title ?? null;
   }
 
   /**

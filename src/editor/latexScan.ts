@@ -1,6 +1,6 @@
 import type { Text } from "@codemirror/state";
 import { texText } from "../tex/texText";
-import { DEFAULT_RULES, EnvRules, commandEnd } from "../tex/envRules";
+import { Arity, DEFAULT_RULES, EnvRules, commandEnd } from "../tex/envRules";
 import { CITE_COMMANDS, VERBATIM_ENVS, iffalseEnd, iffalseStarts } from "./latexHighlight";
 
 // The constructs a LaTeX document renders: pure, no CodeMirror view and no Obsidian, so the
@@ -44,6 +44,14 @@ import { CITE_COMMANDS, VERBATIM_ENVS, iffalseEnd, iffalseStarts } from "./latex
 //             (`myeq` -> equation) goes to MathJax as its target, a wrapper's \begin line takes
 //             its arguments, a hidden command its arity's arguments. A \caption in a figure or
 //             table is a `caption` (its content scanned on).
+//   Center    the lines after `\centering` (from its own line when text follows it there) up to
+//             the end of its group (an unmatched `}` or \end, a \raggedright or \raggedleft), and
+//             a center environment's lines, are a `center` construct (papers too).
+//   Beamer    with rules.beamer (docs/beamer.md): \frametitle and \framesubtitle (their titles
+//             scanned on), \titlepage and \maketitle, the `<..>` of \item and of \only, \onslide,
+//             \uncover, \visible and \alt (`overlay`: what hides; their arguments are scanned on),
+//             a banner command's call (its arguments scanned on), and an image macro's call alone
+//             on its line (after hidden commands there: `\centering\DeckFigure{..}`) as an `image`.
 // The highlighter keeps its own tokenizer; half-typed delimiters may differ there.
 
 /** A formula: `$..$`, `\(..\)`, `\[..\]`, `$$..$$` or a math environment. */
@@ -222,6 +230,49 @@ export interface LatexCaption {
   readonly label: string | null;
 }
 
+/** The lines from `from`'s to `to`'s are centered (see Center). */
+export interface LatexCenter {
+  readonly kind: "center";
+  readonly from: number;
+  readonly to: number;
+}
+
+/** `\frametitle{..}` or `\framesubtitle{..}` (beamer). */
+export interface LatexFrameTitle {
+  readonly kind: "frametitle";
+  readonly from: number;
+  readonly to: number;
+  readonly contentFrom: number;
+  readonly contentTo: number;
+  readonly sub: boolean;
+}
+
+/** `\titlepage`, or `\maketitle` in beamer. */
+export interface LatexTitlePage {
+  readonly kind: "titlepage";
+  readonly from: number;
+  readonly to: number;
+  readonly block: boolean;
+}
+
+/** An overlay's markup (beamer): `\pause` is a hidden command; this is `<2->` of `\item<2->`, or `\only<2>{` and `}`. */
+export interface LatexOverlay {
+  readonly kind: "overlay";
+  readonly from: number;
+  readonly to: number;
+  /** The ranges that hide, in order (the first starts at `from`, the last ends at `to`). */
+  readonly hide: readonly { readonly from: number; readonly to: number }[];
+}
+
+/** A call of a command whose body is a frame (beamer's `\sectionframe{..}{..}`): a section banner. */
+export interface LatexBanner {
+  readonly kind: "banner";
+  readonly from: number;
+  readonly to: number;
+  readonly name: string;
+  readonly args: readonly LatexArg[];
+}
+
 export type LatexConstruct =
   | LatexMath
   | LatexHeading
@@ -234,7 +285,12 @@ export type LatexConstruct =
   | LatexCite
   | LatexLabel
   | LatexCommand
-  | LatexCaption;
+  | LatexCaption
+  | LatexCenter
+  | LatexFrameTitle
+  | LatexTitlePage
+  | LatexOverlay
+  | LatexBanner;
 
 /** A math environment (or an `env`) closes within this many lines, or it is not one (half-typed). */
 const MAX_LINES = 200;
@@ -822,6 +878,55 @@ const note = (arg: string | undefined): string | null => (arg !== undefined && a
 /** A caption being scanned: its label is settled at its float's \end. */
 type OpenCaption = { -readonly [K in keyof LatexCaption]: LatexCaption[K] };
 
+/** beamer's overlay commands and how many arguments they take. */
+const OVERLAY_COMMANDS: Readonly<Record<string, number>> = { only: 1, onslide: 1, uncover: 1, visible: 1, alt: 2 };
+
+/** The index after an overlay spec `<..>` on its line at s[i], or -1. */
+function overlayEnd(s: string, i: number): number {
+  if (s[i] !== "<") return -1;
+  const m = /^<[^<>\n{}]*>/.exec(s.slice(i, i + 80));
+  return m ? i + m[0].length : -1;
+}
+
+/**
+ * Where a declaration's scope from s[i] ends: at an unmatched `}` or \end, a \raggedright or
+ * \raggedleft outside groups, or after MAX_LINES lines.
+ */
+function scopeEnd(s: string, i: number): number {
+  for (let j = i, depth = 0, envs = 0, lines = 0; j < s.length; j++) {
+    const c = s[j];
+    if (c === "%") j = lineEnd(s, j) - 1;
+    else if (c === "{") depth++;
+    else if (c === "}") {
+      if (depth-- === 0) return j;
+    } else if (c === "\n") {
+      if (++lines > MAX_LINES) return j;
+    } else if (c === "\\") {
+      COMMAND.lastIndex = j + 1;
+      const name = COMMAND.exec(s)?.[0];
+      if (!name) {
+        j++;
+        continue;
+      }
+      if (name === "begin") envs++;
+      else if (name === "end" && envs-- === 0) return j;
+      else if ((name === "raggedright" || name === "raggedleft") && !depth && !envs) return j;
+      j += name.length;
+    }
+  }
+  return s.length;
+}
+
+/** The centered lines from s[i] (after `\centering` or `\begin{center}`) to its scope's end, or null. */
+function centerFrom(s: string, i: number): LatexCenter | null {
+  const restBlank = /^\s*(%.*)?$/.test(s.slice(i, lineEnd(s, i)));
+  const from = restBlank ? lineEnd(s, i) + 1 : s.lastIndexOf("\n", i - 1) + 1;
+  const stop = scopeEnd(s, i);
+  const stopLine = s.lastIndexOf("\n", stop - 1) + 1;
+  const to = s.slice(stopLine, stop).trim() ? stop : stopLine - 1;
+  return to > from ? { kind: "center", from, to } : null;
+}
+
 function scanText(s: string, rules: EnvRules): LatexConstruct[] {
   // An `env` holds its place (null) from its \begin: constructs stay in document order.
   const out: (LatexConstruct | null)[] = [];
@@ -965,13 +1070,26 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
     }
     if (name === "item" && lists.length) {
       const list = lists[lists.length - 1];
-      const e = s[arg] === "[" ? argEnd(s, arg) : -1;
-      const label = e > 0 ? s.slice(arg + 1, e - 1) : null;
+      const spec = rules.beamer ? overlayEnd(s, arg) : -1;
+      if (spec > 0) {
+        const after = skipBlanks(s, spec);
+        if (s[after] !== "[") {
+          // `\item<2->`: the marker replaces \item, the spec hides.
+          out.push({ kind: "item", from: i, to: j, marker: itemMarker(list), term: list.kind === "description" });
+          out.push({ kind: "overlay", from: arg, to: spec, hide: [{ from: arg, to: spec }] });
+          i = spec;
+          continue;
+        }
+        j = spec; // `\item<2->[label]`: the label's item covers the spec
+      }
+      const lab = spec > 0 ? skipBlanks(s, spec) : arg;
+      const e = s[lab] === "[" ? argEnd(s, lab) : -1;
+      const label = e > 0 ? s.slice(lab + 1, e - 1) : null;
       const term = list.kind === "description";
       if (label !== null && hasConstructs(label)) {
         // `\item[` and `]` hide; the label's text and its formulas and references render in place.
-        out.push({ kind: "item", from: i, to: e, marker: "", term, labelFrom: arg + 1, labelTo: e - 1 });
-        i = arg + 1;
+        out.push({ kind: "item", from: i, to: e, marker: "", term, labelFrom: lab + 1, labelTo: e - 1 });
+        i = lab + 1;
         continue;
       }
       // \item[label] typesets its label and leaves the counter alone.
@@ -991,14 +1109,23 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
         continue;
       }
     }
+    if (rules.beamer) {
+      const hit = beamerConstruct(s, i, j, base, rules, out);
+      if (hit > 0) {
+        i = hit;
+        continue;
+      }
+    }
     if (rules.hidden.has(base)) {
       const e = commandEnd(s, j, rules.hidden.get(base) ?? null, false, (t, k) => argEnd(t, k));
       if (e > 0) {
         out.push({ kind: "command", from: i, to: e, name: base, block: aloneOnLines(s, i, e) });
+        if (base === "centering") pushCenter(out, centerFrom(s, e));
         i = e;
         continue;
       }
     }
+    if (base === "centering") pushCenter(out, centerFrom(s, j));
     if (base === "caption") {
       const short = s[arg] === "[" ? argEnd(s, arg, MAX_LINES) : arg;
       const open = short < 0 ? -1 : skipBlanks(s, short);
@@ -1128,6 +1255,7 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
           if (label && aloneOnLines(s, i, j + label[0].length)) j += label[0].length;
         }
         if (rules.wrappers.has(env) && aloneOnLines(s, i, j)) out.push({ kind: "envline", from: i, to: j, env, begin: true });
+        if (env === "center") pushCenter(out, centerFrom(s, j));
       } else if (env !== "document") {
         if (FLOATS.has(env)) floats.push({ env, captions: [] }); // a float kept as source
         // A theorem-like candidate (#12): the arguments and a \label on its line (scanned on
@@ -1149,4 +1277,112 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
     i = j;
   }
   return out.filter((c): c is LatexConstruct => c !== null);
+}
+
+/** A center construct, unless it is empty or an enclosing one already covers it. */
+function pushCenter(out: (LatexConstruct | null)[], c: LatexCenter | null): void {
+  if (!c) return;
+  for (let k = out.length - 1; k >= 0; k--) {
+    const o = out[k];
+    if (o?.kind === "center" && o.to >= c.to) return;
+    if (o?.kind === "center") break;
+  }
+  out.push(c);
+}
+
+/**
+ * A beamer construct at s[i] (`\name`, its name ending at j): pushed, and the index to scan on
+ * from; -1 when there is none.
+ */
+function beamerConstruct(s: string, i: number, j: number, base: string, rules: EnvRules, out: (LatexConstruct | null)[]): number {
+  const arg = skipBlanks(s, j);
+  if (base === "frametitle" || base === "framesubtitle") {
+    const short = s[arg] === "[" ? argEnd(s, arg) : arg;
+    const open = short < 0 ? -1 : skipBlanks(s, short);
+    const e = open >= 0 && s[open] === "{" ? argEnd(s, open, MAX_LINES) : -1;
+    if (e < 0) return -1;
+    out.push({ kind: "frametitle", from: i, to: e, contentFrom: open + 1, contentTo: e - 1, sub: base === "framesubtitle" });
+    return open + 1; // constructs in the title
+  }
+  if (base === "titlepage" || base === "maketitle") {
+    out.push({ kind: "titlepage", from: i, to: j, block: aloneOnLines(s, i, j) });
+    return j;
+  }
+  if (Object.hasOwn(OVERLAY_COMMANDS, base)) {
+    const spec = overlayEnd(s, arg);
+    if (spec < 0) return -1;
+    // `\only<2>{` and its `}` hide; the argument is scanned on.
+    const hide: { from: number; to: number }[] = [];
+    let k = skipBlanks(s, spec);
+    let start = i;
+    let firstContent = -1;
+    for (let a = 0; a < OVERLAY_COMMANDS[base] && s[k] === "{"; a++) {
+      const e = argEnd(s, k, MAX_LINES);
+      if (e < 0) break;
+      hide.push({ from: start, to: k + 1 });
+      if (firstContent < 0) firstContent = k + 1;
+      start = e - 1;
+      k = skipBlanks(s, e);
+      if (a === OVERLAY_COMMANDS[base] - 1 || s[k] !== "{") hide.push({ from: e - 1, to: e });
+    }
+    if (!hide.length) hide.push({ from: i, to: spec });
+    out.push({ kind: "overlay", from: i, to: hide[hide.length - 1].to, hide });
+    return firstContent > 0 ? firstContent : spec;
+  }
+  const banner = rules.banners.get(base);
+  if (banner) {
+    const args = callArgs(s, j, banner);
+    if (!args) return -1;
+    const to = args.length ? args[args.length - 1].to + 1 : j;
+    out.push({ kind: "banner", from: i, to, name: base, args });
+    return args.length ? args[0].from : j;
+  }
+  const image = rules.images.get(base);
+  if (image) {
+    const args = callArgs(s, j, image);
+    const path = args?.filter((a) => !a.optional)[image.path - (image.optional ? 2 : 1)];
+    const e = args?.length ? args[args.length - 1].to + 1 : -1;
+    if (!path || !/^[ \t]*(%.*)?$/.test(s.slice(e, lineEnd(s, e)))) return -1;
+    // Hidden commands before it on its line go with it (`\centering\DeckFigure{..}`).
+    const lineStart = s.lastIndexOf("\n", i - 1) + 1;
+    const keep: LatexConstruct[] = [];
+    let from = i;
+    while (out.length) {
+      const o = out[out.length - 1];
+      if (o?.kind === "center") keep.unshift(o);
+      else if (o?.kind === "command" && o.from >= lineStart && !s.slice(o.to, from).trim()) from = o.from;
+      else break;
+      out.pop();
+    }
+    if (s.slice(lineStart, from).trim()) {
+      out.push(...keep);
+      return -1;
+    }
+    out.push(...keep, { kind: "image", from, to: e, block: true, path: s.slice(path.from, path.to).trim() });
+    return e;
+  }
+  return -1;
+}
+
+/**
+ * The arguments of a call (an optional `[..]` when `arity` has one, then the mandatory `{..}`,
+ * on its line or wrapped), or null when a mandatory one is missing.
+ */
+function callArgs(s: string, j: number, arity: Arity): LatexArg[] | null {
+  const args: LatexArg[] = [];
+  let k = skipBlanks(s, j);
+  if (arity.optional && s[k] === "[") {
+    const e = argEnd(s, k, MAX_LINES);
+    if (e < 0) return null;
+    args.push({ optional: true, from: k + 1, to: e - 1 });
+    k = skipBlanks(s, e);
+  }
+  for (let n = arity.optional ? 1 : 0; n < arity.args; n++) {
+    if (s[k] !== "{") return null;
+    const e = argEnd(s, k, MAX_LINES);
+    if (e < 0) return null;
+    args.push({ optional: false, from: k + 1, to: e - 1 });
+    k = skipBlanks(s, e);
+  }
+  return args;
 }

@@ -27,6 +27,11 @@ export interface LatexLiveSettings {
   followCursor: boolean;
   /** Invert preview colors: never, or follow Obsidian's dark theme. */
   invertPreview: "never" | "dark-theme";
+  /**
+   * Live preview crops tables and TikZ pictures from the PDF in beamer too (SyncTeX gives a
+   * frame's whole page there); off, a table stays source and a picture folds to one line.
+   */
+  beamerCrops: boolean;
   /** texlab binary for completion and hover; empty means auto-detect. */
   texlabPath: string;
   /** Show the YOLO plugin's AI ghost-text completion in LaTeX files. */
@@ -65,6 +70,7 @@ export const DEFAULT_SETTINGS: LatexLiveSettings = {
   shellEscape: false,
   followCursor: true,
   invertPreview: "never",
+  beamerCrops: false,
   texlabPath: "",
   yoloTabCompletion: false,
   hoverRender: true,
@@ -141,6 +147,16 @@ export class LatexLiveSettingTab extends PluginSettingTab {
         .setDesc(`${desc} Live editor only; the preamble's own definitions are detected. (${count(n)})`)
         .addButton(button => button.setButtonText("Edit").onClick(() => this.plugin.openEnvRules(kind, () => this.display())));
     }
+    new Setting(containerEl)
+      .setName("Crop tabular/TikZ in beamer")
+      .setDesc("Show tables and TikZ pictures of beamer slides as crops of the PDF. SyncTeX locates a beamer frame only as a whole page, so the crops are often wrong; off, a table stays source and a TikZ picture folds to one line until the cursor enters it.")
+      .addToggle((t) =>
+        t.setValue(s.beamerCrops).onChange((v) => {
+          s.beamerCrops = v;
+          save();
+          this.plugin.texRender.cropsChanged();
+        }),
+      );
 
     new Setting(containerEl).setName("Compilation").setHeading();
 

@@ -144,6 +144,11 @@ export class LatexPreviewView extends ItemView {
     await super.setState(state, result);
   }
 
+  /** Scroll the PDF to a 1-based page (a beamer frame card's page; nothing before a PDF loads). */
+  goToPage(page: number): void {
+    this.renderer?.goToPage(page);
+  }
+
   /** Show the given root document, attaching to (or creating) its session. */
   setRoot(root: string | null): void {
     if (root === this.root) return;

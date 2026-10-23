@@ -1,11 +1,11 @@
 import type { Text } from "@codemirror/state";
-import { Decoration } from "@codemirror/view";
+import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 import type { CropKind } from "../preview/blockCrop";
 import type { EnvRules } from "../tex/envRules";
 import type { TheoremDef, TheoremMap } from "../tex/theorems";
 import { texText } from "../tex/texText";
 import { LatexRefs, citeText, formulaRefs, refText } from "./latexRefs";
-import { LatexArg, LatexConstruct, LatexEnv, LatexMath, TextStyle, blocksAround, hasConstructs, scanLatex } from "./latexScan";
+import { LatexArg, LatexBanner, LatexConstruct, LatexEnv, LatexMath, LatexTitlePage, TextStyle, blocksAround, hasConstructs, scanLatex } from "./latexScan";
 import { prepareMath } from "./mathjaxProject";
 import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } from "./shared/livePreview";
 
@@ -77,6 +77,26 @@ import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } 
 //       stays meanwhile); changed or without a crop, it is source (a table's formulas render).
 //       Nothing inside a tcolorbox (elegantbook's theorems) is cropped: SyncTeX places what
 //       pgf moved ~20 pt off (cropKindOf).
+//   #17 the lines after \centering and in a center environment are centered (a line class; papers
+//       too); they stay text.
+//   Beamer (env.rules.beamer; docs/beamer.md):
+//   #18 a frame whose \begin and \end are alone on their lines: a card over its lines (a
+//       BlockWrapper, as #12). Its \begin line is the title bar: `\begin{frame}`, `[options]` and
+//       the braces hide, the title and subtitle stay in place (their formulas rendered); a
+//       \frametitle or \framesubtitle line is styled the same, its command and braces hidden. The
+//       frame's PDF page (env.framePage: the .nav) sits in the bar's corner; a click shows it
+//       in the preview (env.showPage). The \end line collapses. Each line shows its source while
+//       the cursor is on it; the body is text.
+//   #19 a banner command's call (a \newcommand whose body is a frame: \sectionframe): a banner
+//       card, its arguments in place and the markup between them hidden; its page as #18.
+//   #20 \titlepage (\maketitle) alone on its line: a card of the preamble's \title, \subtitle,
+//       \author, \institute and \date (env.titlePage); a click opens the \title line
+//       (env.openTitle). Source while the cursor is on its line.
+//   #21 overlays: the `<..>` of \item and \only, \onslide, \uncover, \visible, \alt hides with
+//       their braces (the content stays); \pause is a hidden command (#15).
+//   #22 tables and TikZ pictures are not cropped unless env.beamerCrops() (SyncTeX places a
+//       beamer frame as a whole page): a table stays source, a TikZ picture folds to one line
+//       `▸ TikZ (n lines)` until the cursor enters it (a click on the line puts it there).
 // A construct with an error diagnostic on it stays source (the lint underline shows).
 // Numbers: a request carries the formula already prepared for MathJax (prepareMath: `\label`
 // -> `\tag{n}` from the root's last compile, a reference -> the chip's text), so a compile
@@ -111,10 +131,31 @@ export interface LatexLiveEnv {
    * until the new crop lands), or null. Without a resolver there are no crops.
    */
   crop?(doc: Text, from: number, to: number, kind: CropKind): { src: string; previous: string | null } | null;
+  /** Beamer: the PDF pages of the frame starting at `pos` of `doc` (#18, #19: the .nav), or null. */
+  framePage?(doc: Text, pos: number): { first: number; last: number } | null;
+  /** Beamer: show PDF page `page` in the root's open preview (nothing without one). */
+  showPage?(page: number): void;
+  /** Beamer: the title page's fields from the preamble (#20), or null (it stays source). */
+  titlePage?(): TitlePage | null;
+  /** Beamer: open the \title line (#20). */
+  openTitle?(): void;
+  /** Beamer: crop tables and TikZ pictures as in a paper (the "Crop tabular/TikZ in beamer" setting). */
+  beamerCrops?(): boolean;
+}
+
+/** A beamer title page's fields as text (`\\` a line break); empty when the preamble has none. */
+export interface TitlePage {
+  readonly title: string;
+  readonly subtitle: string;
+  readonly author: string;
+  readonly institute: string;
+  readonly date: string;
 }
 
 /** TikZ pictures and tables: PDF crops (#14). */
 export const CROP_ENVS = new Set(["tikzpicture", "tikzcd", "pgfpicture", "circuitikz", "tabular", "tabular*", "tabularx", "longtable"]);
+/** The pictures of CROP_ENVS: folded in beamer (#22). */
+const TIKZ_ENVS = new Set(["tikzpicture", "tikzcd", "pgfpicture", "circuitikz"]);
 
 /** LaTeX-only metadata for reference inspection; normal widget editing/drag events stay CM's. */
 class ReferenceWidget extends TextWidget {
@@ -171,6 +212,12 @@ const BOX_TITLE = "lsp-lp-box-title";
 const TITLE_MARK = Decoration.mark({ class: BOX_TITLE });
 /** The \end line of a proof ending in its mark, which sits at the right. */
 const QED_LINE = Decoration.line({ class: "ll-qed-line" });
+const CENTER_LINE = Decoration.line({ class: "lsp-lp-center" });
+const FRAME_HEAD_LINE = Decoration.line({ class: "ll-frame-head" });
+const FRAME_TITLE_LINE = Decoration.line({ class: "ll-frame-head is-frametitle" });
+const FRAME_SUBTITLE_LINE = Decoration.line({ class: "ll-frame-head is-framesubtitle" });
+const FRAME_TITLE = Decoration.mark({ class: "ll-frame-title" });
+const FRAME_SUBTITLE = Decoration.mark({ class: "ll-frame-subtitle" });
 
 /** LaTeX's constructs for livePreview (the renderer: texRender's `rendererFor(root)`). */
 export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruct> {
@@ -194,7 +241,8 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
     // A theorem box tests the selection on its \begin and \end lines only (decorateBox): a move
     // inside a long one leaves it be. Every environment but a crop (which reveals over its lines)
     // says so, since the scan this is memoized with cannot see which ones the theorem map boxes.
-    reveals: (c) => (c.kind === "env" && !CROP_ENVS.has(c.env) ? [[c.from, c.beginTo], [c.endFrom, c.endFrom]] : null),
+    // A centered run's line class never depends on the selection.
+    reveals: (c) => (c.kind === "env" && !CROP_ENVS.has(c.env) ? [[c.from, c.beginTo], [c.endFrom, c.endFrom]] : c.kind === "center" ? [] : null),
     decorate(c, ctx) {
       const { doc } = ctx.state;
       if ("env" in c && c.env && env.visualization?.().source.has(c.env)) return;
@@ -232,11 +280,40 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
         ctx.replace(c.labelTo, c.to, HIDDEN);
         return;
       }
+      if (c.kind === "center") {
+        for (let l = doc.lineAt(c.from).number, last = doc.lineAt(c.to).number; l <= last; l++) ctx.mark(doc.line(l).from, doc.line(l).from, CENTER_LINE);
+        return;
+      }
+      if (c.kind === "frametitle") {
+        const line = doc.lineAt(c.from);
+        ctx.mark(line.from, line.from, c.sub ? FRAME_SUBTITLE_LINE : FRAME_TITLE_LINE);
+        if (ctx.hasError(c.from, c.to) || ctx.touch(c.from, c.to)) return;
+        ctx.replace(c.from, c.contentFrom, HIDDEN);
+        ctx.replace(c.contentTo, c.to, HIDDEN);
+        return;
+      }
+      if (c.kind === "overlay") {
+        if (ctx.hasError(c.from, c.to) || ctx.touch(c.from, c.to)) return;
+        for (const h of c.hide) ctx.replace(h.from, h.to, HIDDEN);
+        return;
+      }
+      if (c.kind === "banner") {
+        decorateBanner(c, ctx, env);
+        return;
+      }
+      if (c.kind === "titlepage") {
+        decorateTitlePage(c, ctx, env);
+        return;
+      }
       if (c.kind === "env") {
         const refs = env.refs();
         const def = (env.visualization?.().theorems ?? refs.theorems).get(c.env);
-        if (def) decorateBox(c, def, ctx, refs, env.file);
-        else if (CROP_ENVS.has(c.env) && env.crop) {
+        const beamer = !!env.rules?.beamer;
+        if (beamer && c.env === "frame") decorateFrame(c, ctx, env);
+        else if (def) decorateBox(c, def, ctx, refs, env.file);
+        else if (beamer && CROP_ENVS.has(c.env) && !env.beamerCrops?.()) {
+          if (TIKZ_ENVS.has(c.env)) foldPicture(c, ctx);
+        } else if (CROP_ENVS.has(c.env) && env.crop) {
           const kind = cropKindOf(doc, c, c.env, refs.theorems);
           const crop = kind && env.crop(doc, c.from, c.to, kind);
           if (crop) decorateCrop(ctx, c, crop);
@@ -271,6 +348,7 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
         ctx.replace(c.from, c.to, HIDDEN);
         return;
       }
+      if (c.kind !== "item" && c.kind !== "label" && c.kind !== "ref" && c.kind !== "cite") return;
       if (ctx.hasError(c.from, c.to) || ctx.touch(c.from, c.to)) return;
       let widget: TextWidget;
       if (c.kind === "item") {
@@ -451,4 +529,132 @@ function decorateBox(c: LatexEnv, def: TheoremDef, ctx: LiveContext, refs: Latex
       ctx.replace(end.from, end.to, COLLAPSED);
     }
   }
+}
+
+/** A widget that runs `action` on a click and keeps the click from CodeMirror (no cursor move). */
+class ActionWidget extends WidgetType {
+  constructor(
+    readonly key: string,
+    readonly draw: (dom: HTMLElement) => void,
+    readonly action: (() => void) | undefined,
+    readonly block: boolean,
+    readonly cls: string,
+    readonly title?: string,
+  ) {
+    super();
+  }
+
+  eq(other: ActionWidget): boolean {
+    return other.key === this.key && other.cls === this.cls && other.block === this.block && other.title === this.title;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const dom = view.dom.ownerDocument.createElement(this.block ? "div" : "span");
+    dom.className = this.cls;
+    if (this.title) dom.title = this.title;
+    this.draw(dom);
+    dom.addEventListener("mousedown", (e) => {
+      if ((e as MouseEvent).button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.action?.();
+    });
+    return dom;
+  }
+
+  ignoreEvent(): boolean {
+    return true;
+  }
+}
+
+/** A frame's PDF page in the corner of its first line (#18, #19), when the .nav has it. */
+function pageCorner(ctx: LiveContext, env: LatexLiveEnv, pos: number, at: number): void {
+  const pages = env.framePage?.(ctx.state.doc, pos);
+  if (!pages) return;
+  const text = pages.first === pages.last ? `${pages.first}` : `${pages.first}–${pages.last}`;
+  const show = env.showPage;
+  const widget = new ActionWidget(`page:${text}`, (dom) => (dom.textContent = text), show && (() => show(pages.first)), false, "ll-frame-page", `PDF page ${text}`);
+  ctx.point(at, Decoration.widget({ widget, side: 1 }));
+}
+
+/**
+ * A beamer frame (#18): the card over its lines, the title bar on its \begin line (the title
+ * and subtitle in place), the page in its corner, the \end line collapsed.
+ */
+function decorateFrame(c: LatexEnv, ctx: LiveContext, env: LatexLiveEnv): void {
+  const { doc } = ctx.state;
+  const begin = doc.lineAt(c.from);
+  const headLast = doc.lineAt(c.beginTo);
+  const end = doc.lineAt(c.endFrom);
+  ctx.wrap(begin.from, end.to, { tagName: "div", attributes: { class: "lsp-lp-box ll-frame" } });
+  ctx.mark(begin.from, begin.from, FRAME_HEAD_LINE);
+  const titles = c.args.filter((a) => !a.optional);
+  if (!ctx.touchLines(begin.from, headLast.to) && !ctx.hasError(begin.from, headLast.to)) {
+    // `\begin{frame}[t]{` title `}{` subtitle `}`: everything but the two hides.
+    let at = c.from;
+    titles.slice(0, 2).forEach((a, k) => {
+      ctx.replace(at, a.from, HIDDEN);
+      ctx.mark(a.from, a.to, k ? FRAME_SUBTITLE : FRAME_TITLE);
+      at = a.to;
+    });
+    if (at < headLast.to) ctx.replace(at, headLast.to, HIDDEN);
+  }
+  pageCorner(ctx, env, c.from, headLast.to);
+  if (!ctx.touchLines(end.from, end.from) && !ctx.hasError(end.from, end.to)) ctx.replace(end.from, end.to, COLLAPSED);
+}
+
+/** A banner command's call (#19): a banner card, its arguments in place, the markup hidden. */
+function decorateBanner(c: LatexBanner, ctx: LiveContext, env: LatexLiveEnv): void {
+  const { doc } = ctx.state;
+  const first = doc.lineAt(c.from);
+  const last = doc.lineAt(c.to);
+  ctx.wrap(first.from, last.to, { tagName: "div", attributes: { class: "lsp-lp-box ll-banner" } });
+  const shown = c.args.filter((a) => !a.optional);
+  if (!ctx.touch(c.from, c.to) && !ctx.hasError(c.from, c.to)) {
+    let at = c.from;
+    shown.forEach((a, k) => {
+      ctx.replace(at, a.from, k ? Decoration.replace({ widget: new TextWidget("", "ll-banner-break") }) : HIDDEN);
+      ctx.mark(a.from, a.to, Decoration.mark({ class: `ll-banner-arg is-arg${k + 1}` }));
+      at = a.to;
+    });
+    if (at < c.to) ctx.replace(at, c.to, HIDDEN);
+  }
+  pageCorner(ctx, env, c.from, last.to);
+}
+
+/** \titlepage alone on its line (#20): the title page's card, a click opening the \title line. */
+function decorateTitlePage(c: LatexTitlePage, ctx: LiveContext, env: LatexLiveEnv): void {
+  const page = c.block ? env.titlePage?.() : null;
+  if (!page) return;
+  const { doc } = ctx.state;
+  const line = doc.lineAt(c.from);
+  if (ctx.touchLines(line.from, line.to) || ctx.hasError(line.from, line.to)) return;
+  const draw = (dom: HTMLElement) => {
+    const part = (text: string, cls: string) => {
+      if (!text) return;
+      const el = dom.ownerDocument.createElement("div");
+      el.className = cls;
+      el.textContent = text;
+      dom.appendChild(el);
+    };
+    part(page.title, "ll-titlepage-title");
+    part(page.subtitle, "ll-titlepage-subtitle");
+    part(page.author, "ll-titlepage-author");
+    part(page.institute, "ll-titlepage-institute");
+    part(page.date, "ll-titlepage-date");
+  };
+  const key = JSON.stringify(page);
+  const widget = new ActionWidget(key, draw, env.openTitle, true, "ll-titlepage", "Open \\title");
+  ctx.replace(line.from, line.to, Decoration.replace({ widget, block: true }));
+}
+
+/** A TikZ picture in beamer without crops (#22): one line until the cursor enters it. */
+function foldPicture(c: LatexEnv, ctx: LiveContext): void {
+  const { doc } = ctx.state;
+  const first = doc.lineAt(c.from);
+  const last = doc.lineAt(c.to);
+  if (ctx.touchLines(first.from, last.to) || ctx.hasError(first.from, last.to)) return;
+  const n = last.number - first.number + 1;
+  const widget = new TextWidget(`▸ TikZ (${n} lines)`, "ll-tikz-fold", doc.sliceString(first.from, Math.min(first.to, first.from + 200)));
+  ctx.replace(first.from, last.to, Decoration.replace({ widget, block: true }));
 }
