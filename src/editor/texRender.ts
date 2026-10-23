@@ -5,6 +5,7 @@ import { dirname, extname } from "path";
 import { CropKind, CropLocation, NOTE_CHANGED } from "../preview/blockCrop";
 import { AuxCheckpoint, AuxLabel, readAuxCheckpoints, readAuxLabels } from "../tex/auxData";
 import { BibEntry, bibFiles, readBib } from "../tex/bib";
+import { DetectedRules, EMPTY_USER_RULES, EnvRules, UserEnvRules, detectEnvRules, mergeEnvRules, rulesKey } from "../tex/envRules";
 import { IMAGE_FORMATS, findGraphics, graphicsPaths } from "../tex/graphics";
 import { projectDefinitions, type Definitions } from "../tex/macros";
 import { includeName, stripComments } from "../tex/project";
@@ -15,7 +16,7 @@ import { LatexBlock, LatexEnv, LatexMath, blockAt, formulas, mathAt, scanLatex }
 import { MathError, MathJaxLike, ProjectMath, ProjectMathInput, inputEpoch, numberedEnv, tagLabels } from "./mathjaxProject";
 import type { FragmentRenderer, RenderRequest, RenderResult } from "./shared/livePreview";
 import { hoverError } from "./shared/renderHover";
-import { applyTemplateVisualization, type TemplateVisualization, type TemplateVisualizationProfile } from "./templateVisualization";
+import { applyTemplateVisualization, parseTemplateProfiles, type TemplateVisualization, type TemplateVisualizationProfile } from "./templateVisualization";
 
 // Rendering for LaTeX editors (design 4.1, 4.8): one ProjectMath per root document over
 // Obsidian's MathJax, PDF crops (the host's `crops`, blockCrop.ts), the render hover's chain and
@@ -96,6 +97,10 @@ const BRACE_ERROR = /^(?:Missing|Extra) (?:open|close) brace/;
 export interface TexRenderHost {
   /** Explicit editor visualization selected for this root; never used by native TeX or refs. */
   visualization?(root: string): TemplateVisualizationProfile | null;
+  /** The user's live editor rules (settings.envRules; a new object when they change). */
+  envRules?(): UserEnvRules;
+  /** `root`'s rules (rulesOf) may have changed: the views under it reconfigure. */
+  rulesChanged?(root: string): void;
   /** The build folder of a root document (its .aux files hold the label numbers). */
   outDirFor(root: string): string;
   /** Text of the open LaTeX editors by absolute path (unsaved edits count). */
@@ -205,6 +210,9 @@ interface RootRefs {
   bibs: Set<string>;
   /** The sources' \graphicspath prefixes (see Images). */
   graphics: string[];
+  /** The rules the sources imply (envRules' detectEnvRules), and the macros' arities. */
+  detected: DetectedRules;
+  macros: Definitions["macros"];
   timer: number | null;
   /** The pending re-read covers the sources, not only the labels. */
   full: boolean;
@@ -320,6 +328,39 @@ export class TexRender {
     for (const renderer of this.renderers.values()) renderer.changed();
   }
 
+  private rules = new Map<string, { user: UserEnvRules; detected: DetectedRules; profile: TemplateVisualizationProfile | null; value: EnvRules; key: string }>();
+
+  /**
+   * The live editor's rules for documents under `root` (src/tex/envRules.ts): the user's over the
+   * detected over the defaults, without the environments the root's template profile names. The
+   * same object while nothing changed (the live language and the highlighter rebuild on a new one).
+   */
+  rulesOf(root: string): EnvRules {
+    const r = this.rootRefs(root);
+    const user = this.host.envRules?.() ?? EMPTY_USER_RULES;
+    const profile = this.host.visualization?.(root) ?? null;
+    const cached = this.rules.get(root);
+    if (cached && cached.user === user && cached.detected === r.detected && cached.profile === profile) return cached.value;
+    let profiled: string[] = [];
+    try { profiled = profile ? parseTemplateProfiles([profile])[0].environments.map((e) => e.environment) : []; }
+    catch { profiled = []; }
+    const merged = mergeEnvRules(user, r.detected, (name) => r.macros.get(name), profiled);
+    const key = rulesKey(merged);
+    const value = cached && cached.key === key ? cached.value : merged;
+    this.rules.set(root, { user, detected: r.detected, profile, value, key });
+    return value;
+  }
+
+  /** Where `\label{key}` is in `root`'s project sources (unsaved edits count), or null. */
+  labelLocation(root: string, key: string): { file: string; line: number; column: number } | null {
+    const buffers = this.host.buffers();
+    for (const file of this.rootRefs(root).files) {
+      const at = labelLine(buffers.get(file) ?? readText(file), key);
+      if (at) return { file, ...at };
+    }
+    return null;
+  }
+
   private rootRefs(root: string): RootRefs {
     let r = this.refs.get(root);
     if (!r) {
@@ -336,10 +377,11 @@ export class TexRender {
 
   /** What the render hover shows at `pos` of a document under `root` (see Hover). */
   hoverTarget(doc: Text, pos: number, root: string): LatexMath | LatexBlock | null {
-    const math = mathAt(doc, pos);
+    const rules = this.rulesOf(root);
+    const math = mathAt(doc, pos, rules);
     if (math) return math;
     const { theorems } = this.refsOf(root);
-    return blockAt(doc, pos, (b) => cropKindOf(doc, b, b.env, theorems) !== null);
+    return blockAt(doc, pos, (b) => cropKindOf(doc, b, b.env, theorems) !== null, rules);
   }
 
   /**
@@ -633,7 +675,11 @@ export class TexRender {
       if (r.full) {
         const read = this.readRefs(root, was);
         images = read.graphics.join("\n") !== r.graphics.join("\n");
-        ({ files: r.files, bibs: r.bibs, graphics: r.graphics } = read);
+        ({ files: r.files, bibs: r.bibs, graphics: r.graphics, macros: r.macros } = read);
+        if (rulesKey(read.detected as EnvRules) !== rulesKey(r.detected as EnvRules)) {
+          r.detected = read.detected;
+          this.host.rulesChanged?.(root);
+        }
         next = read.refs;
       } else next = { ...was, ...this.readLabels(root, was) };
       r.full = false;
@@ -653,9 +699,10 @@ export class TexRender {
   }
 
   /** The refs of `root` (see Refs); the maps of `was` are kept where nothing changed. */
-  private readRefs(root: string, was?: LatexRefs): { refs: LatexRefs; files: Set<string>; bibs: Set<string>; graphics: string[] } {
+  private readRefs(root: string, was?: LatexRefs): { refs: LatexRefs; files: Set<string>; bibs: Set<string>; graphics: string[]; detected: DetectedRules; macros: Definitions["macros"] } {
     const buffers = this.host.buffers();
-    const files = projectDefinitions(root, buffers).files;
+    const defs = projectDefinitions(root, buffers);
+    const files = defs.files;
     const texts = files.map((f) => buffers.get(f) ?? readText(f));
     const bibs = bibFiles(texts, dirname(root));
     const cites = new Map<string, BibEntry>();
@@ -669,7 +716,7 @@ export class TexRender {
       names: was && sameRefNames(names, was.names) ? was.names : names,
       theorems: was && sameTheorems(theorems, was.theorems) ? was.theorems : theorems,
     };
-    return { refs, files: new Set(files), bibs: new Set(bibs), graphics: graphicsPaths(sources) };
+    return { refs, files: new Set(files), bibs: new Set(bibs), graphics: graphicsPaths(sources), detected: detectEnvRules(sources), macros: defs.macros };
   }
 
   /**
@@ -818,4 +865,15 @@ function readText(path: string): string {
 /** The whole lines of `doc` that [from, to] touches. */
 function lines(doc: Text, from: number, to: number): string {
   return doc.sliceString(doc.lineAt(from).from, doc.lineAt(to).to);
+}
+
+/** The (0-based) line and column of `\label{key}` in `text` outside comments, or null. */
+function labelLine(text: string, key: string): { line: number; column: number } | null {
+  const needle = `\\label{${key}}`;
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const column = stripComments(lines[i]).indexOf(needle);
+    if (column >= 0) return { line: i, column };
+  }
+  return null;
 }

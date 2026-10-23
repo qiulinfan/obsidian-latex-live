@@ -123,6 +123,10 @@ To display a number, use a compiled label and the **Numbered** setting; profiles
 
 This first version customizes **theorem-like environments**. It controls the live editing view; PDF layout, native reference names and HTML export continue to use the original TeX template. See the [rule format, supported argument forms and limits](./docs/template-visualization.md).
 
+#### Environment and command rules
+
+**Settings → LaTeX Live → Live editor rules** has three lists, each edited as JSON: formula environments (`{ "myeq": "equation" }` renders `myeq` as an equation), wrapper environments (`["subequations"]` collapses only the `\begin`/`\end` lines and keeps the formulas inside rendered) and hidden commands (`["centering", "DeckLayout"]` hides a layout command and its arguments until the cursor touches it). Built-in defaults and rules detected from the preamble's `\newenvironment`/`\newcommand` apply without configuration; a template profile naming the same environment wins. In the live editor, `\caption{…}` reads `Figure n: …` once compiled, and a reference chip works like a link: click it to jump to its `\label` (in this file or another project file); click just beside it, or move in with the arrow keys, to edit its source. These rules change the live editor only. See [live editor rules](./docs/live-rules.md).
+
 ### Share a portable reading edition
 
 Export a self-contained HTML page with math, theorem blocks, references, bibliography, images and supported SVG graphics. Follow its references and table of contents without Obsidian; inspect the export report for unsupported content.
@@ -351,6 +355,10 @@ LaTeX 的命令和环境由文档类、宏包和项目自己的宏共同定义�
 需要显示编号时，使用已编译的标签并配置 **Numbered**；方案不会创建 TeX 计数器。你还可以调整标题位置和结束符，或保留某个环境的标记源码。修改先保留在草稿中，保存后才生效，**Cancel** 可以放弃。方案在同一 vault 内共享，修改一个方案会更新所有使用它的项目；JSON 面板可复制、导入方案，方便复用。
 
 首版支持**定理类环境**的自定义。规则控制实时编辑视图；PDF 版式、原生引用名称和 HTML 导出继续遵循原来的 TeX 模板。详见[规则格式、参数形式与支持边界](./docs/template-visualization.md)。
+
+#### 环境和命令的处理规则
+
+**设置 → LaTeX Live → Live editor rules** 有三个列表，各用一段 JSON 编辑：公式别名（`{ "myeq": "equation" }` 把 `myeq` 当作 equation 渲染）、外壳环境（`["subequations"]` 只折叠 `\begin`/`\end` 两行，里面的公式照常渲染）、隐藏命令（`["centering", "DeckLayout"]` 把排版命令连同参数藏起来，光标碰到时显示）。内置默认值和从导言区 `\newenvironment`/`\newcommand` 自动识别的规则无需配置；同名环境以模板方案为准。实时编辑中，编译后的 `\caption{…}` 显示为 `Figure n: …`，引用标记像链接一样，单击跳到对应的 `\label`（当前文件或项目的其他文件）；点在标记旁边或用方向键移进去，可编辑源码。这些规则只影响实时编辑视图。详见[实时编辑规则](./docs/live-rules.md)。
 
 ### 分享可独立阅读的 HTML
 

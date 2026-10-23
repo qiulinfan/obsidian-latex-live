@@ -42,7 +42,7 @@ import {
   TEXT_COMMANDS,
   snippetText,
 } from "./latexCommands";
-import { TokState, tokenizeLine } from "./latexHighlight";
+import { TokState, envRulesFacet, tokenizeLine } from "./latexHighlight";
 import type { IndexedCitation } from "./bibliographies";
 import {
   InfoRenderer,
@@ -137,6 +137,7 @@ function analyze(state: EditorState, pos: number, project: Definitions): Analysi
   const textUses = new Map<string, number>();
   const mathUses = new Map<string, number>();
   const s: TokState = { math: null, verbatim: null };
+  const { math } = state.facet(envRulesFacet);
   const cursorLine = doc.lineAt(pos);
   let inMath = false;
   let quiet = false;
@@ -148,7 +149,7 @@ function analyze(state: EditorState, pos: number, project: Definitions): Analysi
       let last = "";
       tokenizeLine(upTo, 0, probe, (_from, to, cls) => {
         if (to === upTo.length) last = cls;
-      });
+      }, math);
       inMath = probe.math !== null;
       quiet = probe.verbatim !== null || last === "ll-comment";
     }
@@ -163,7 +164,7 @@ function analyze(state: EditorState, pos: number, project: Definitions): Analysi
       }
       defining = DEFINING.test(name);
       bump(cls.includes("ll-in-math") ? mathUses : textUses, name);
-    });
+    }, math);
     // Inline math never spans a paragraph break (as in the highlighter).
     if (!line.text.trim() && (s.math === "$" || s.math === "\\)")) s.math = null;
   }

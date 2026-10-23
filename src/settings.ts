@@ -2,6 +2,7 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import type LatexLivePlugin from "./main";
 import type { EngineSetting } from "./tex/project";
 import type { TemplateVisualizationProfile } from "./editor/templateVisualization";
+import { EMPTY_USER_RULES, type UserEnvRules } from "./tex/envRules";
 
 /** Source text, or live preview (编辑模式): formulas render in place, source under the cursor. */
 export type EditingMode = "source" | "live";
@@ -10,6 +11,8 @@ export interface LatexLiveSettings {
   templateVisualizations: TemplateVisualizationProfile[];
   /** Root paths relative to this vault; missing means native automatic visualization. */
   templateAssignments: Record<string, string>;
+  /** The live editor's formula aliases, wrapper environments and hidden commands (src/tex/envRules.ts). */
+  envRules: UserEnvRules;
   /** Directory with pdflatex, latexmk, synctex; empty means auto-detect. */
   texBinDir: string;
   /** Engine when the document has no `% !TEX program` comment. */
@@ -54,6 +57,7 @@ export interface LatexLiveSettings {
 export const DEFAULT_SETTINGS: LatexLiveSettings = {
   templateVisualizations: [],
   templateAssignments: {},
+  envRules: EMPTY_USER_RULES,
   texBinDir: "",
   engine: "auto",
   debounceMs: 400,
@@ -123,6 +127,20 @@ export class LatexLiveSettingTab extends PluginSettingTab {
       .setName("Custom template profiles")
       .setDesc("Configure environment headings, colors and title arguments. Choose a saved profile per LaTeX project; applies in live preview only.")
       .addButton(button => button.setButtonText("Manage / choose profiles").onClick(() => this.plugin.openTemplateVisualizations()));
+
+    new Setting(containerEl).setName("Live editor rules").setHeading();
+    const rules = this.plugin.settings.envRules;
+    const count = (n: number) => (n ? `${n} added` : "defaults only");
+    for (const [kind, name, desc, n] of [
+      ["formulas", "Formula environments", "Environments rendered as a known formula environment, e.g. { \"myeq\": \"equation\" }.", Object.keys(rules.formulas).length],
+      ["wrappers", "Wrapper environments", "Environments whose \\begin/\\end lines collapse while the content renders, e.g. [\"subequations\"].", rules.wrappers.length],
+      ["hidden", "Hidden commands", "Layout commands hidden with their arguments until touched, e.g. [\"centering\", \"DeckLayout\"].", rules.hidden.length],
+    ] as const) {
+      new Setting(containerEl)
+        .setName(name)
+        .setDesc(`${desc} Live editor only; the preamble's own definitions are detected. (${count(n)})`)
+        .addButton(button => button.setButtonText("Edit").onClick(() => this.plugin.openEnvRules(kind, () => this.display())));
+    }
 
     new Setting(containerEl).setName("Compilation").setHeading();
 

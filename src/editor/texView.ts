@@ -25,6 +25,9 @@ import { ClickText, flashLine, locateClick } from "./reveal";
 import { proseSpelling } from "./proseTools";
 import { invalidateProjectOutline } from "./projectOutline";
 import { latexLiveLanguage } from "./latexLive";
+import { labelJump } from "./labelJump";
+import { envRulesFacet } from "./latexHighlight";
+import { DEFAULT_RULES, type EnvRules } from "../tex/envRules";
 import { latexTooltipPortal, refreshLatexTooltipAppearance, theoremGraphHover } from "./theoremGraphView";
 import {
   EditorEphemeralState,
@@ -86,6 +89,9 @@ export class TexView extends TextFileView {
   private preloading = false;
   private appearanceAfterComposition = false;
   private readonly appearanceCompartment = new Compartment();
+  /** envRulesFacet's value: the rules the live language was built with (refreshRules). */
+  private readonly envRulesCompartment = new Compartment();
+  private envRules: EnvRules = DEFAULT_RULES;
   private appearanceTheme = 0;
 
   constructor(
@@ -352,6 +358,8 @@ export class TexView extends TextFileView {
       if (ext) editor.dispatch({ effects: livePreviewCompartment.reconfigure(ext) });
       else this.preload();
     }
+    // The facet was built before MathJax (and so the root's rules) was ready.
+    this.refreshRules();
     const shown = isLive(editor.state);
     this.contentEl.toggleClass("is-live-preview", shown);
     if (shown) this.plugin.texRender.stylesFor(editor.dom.ownerDocument);
@@ -364,6 +372,7 @@ export class TexView extends TextFileView {
     if (!project || !render.ready) return null;
     const { root, abs } = project;
     const code = DATA_EXTENSIONS.has(this.file?.extension ?? "") || preambleFiles(root).has(resolve(abs));
+    const rules = render.rulesOf(root);
     const language = code
       ? NO_CONSTRUCTS
       : latexLiveLanguage({
@@ -372,8 +381,32 @@ export class TexView extends TextFileView {
           file: includeName(root, abs),
           image: (path) => render.imageOf(root, path),
           crop: (doc, from, to, kind) => render.cropOf(root, abs, doc, from, to, kind),
+          rules,
         });
     return livePreview({ language, renderer: render.rendererFor(root) });
+  }
+
+  /** The live editor rules for this file's root (the defaults until the project is known). */
+  private currentRules(): EnvRules {
+    const root = this.projectInfo()?.root;
+    const render = this.plugin.texRender;
+    return root && render.ready && !DATA_EXTENSIONS.has(this.file?.extension ?? "") ? render.rulesOf(root) : DEFAULT_RULES;
+  }
+
+  /**
+   * The root's live editor rules changed (settings, a template profile, the preamble): the live
+   * language is rebuilt with them, so the scan and decorations follow (src/tex/envRules.ts).
+   */
+  refreshRules(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const rules = this.currentRules();
+    if (rules === this.envRules) return;
+    this.envRules = rules;
+    const effects = [this.envRulesCompartment.reconfigure(envRulesFacet.of(rules))];
+    const live = isLive(editor.state) ? this.liveExtension() : null;
+    if (live) effects.push(livePreviewCompartment.reconfigure(live));
+    editor.dispatch({ effects });
   }
 
   /**
@@ -483,6 +516,13 @@ export class TexView extends TextFileView {
         proseSpelling,
         this.appearanceCompartment.of(APPEARANCE_THEMES[this.appearanceTheme]),
         latexTooltipPortal(),
+        this.envRulesCompartment.of(envRulesFacet.of((this.envRules = this.currentRules()))),
+        labelJump((key) => {
+          const root = this.projectInfo()?.root;
+          const at = root ? plugin.texRender.labelLocation(root, key) : null;
+          if (at) void plugin.openLocation(at.file, at.line + 1, at.column);
+          else new Notice(`LaTeX Live: no \\label{${key}} in this project.`);
+        }),
         theoremGraphHover({
           load: (view, key, signal) => {
             const project = this.projectInfo();

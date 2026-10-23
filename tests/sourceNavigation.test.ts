@@ -22,6 +22,38 @@ test("vault paths match Obsidian's NFC keys, including Chinese compatibility cha
   assert.equal(path(base + "/folder\\..\\..\\外部.tex"), null, "host separator normalization cannot escape the vault");
 });
 
+test("a background tab still deferred is matched by its file and brought to the front, not opened elsewhere", async () => {
+  const base = "/vault", file = new TFile("章节/b.tex"), opened: unknown[] = [], calls: string[] = [];
+  const loaded = Object.create(TexView.prototype) as TexView;
+  Object.defineProperty(loaded, "file", { value: new TFile("章节/a.tex") });
+  const view = Object.create(TexView.prototype) as TexView;
+  Object.defineProperty(view, "file", { value: file });
+  view.revealLine = (line, column) => { opened.push([line, column]); };
+  // Obsidian restores background tabs with a placeholder view until they are shown; revealLeaf
+  // returns before the real view has loaded its file, loadIfDeferred waits for it.
+  const deferred = {
+    view: {} as unknown,
+    getViewState: () => ({ state: { file: file.path } }),
+    loadIfDeferred: async () => { calls.push("load deferred"); deferred.view = view; },
+  };
+  const other = { view: loaded, getViewState: () => ({ state: { file: "章节/a.tex" } }), openFile: async () => { calls.push("openFile"); }, loadIfDeferred: async () => {} };
+  const host = {
+    vaultBase: () => base,
+    vaultPath: (absolute: string) => LatexLivePlugin.prototype.vaultPath.call(host as unknown as LatexLivePlugin, absolute),
+    app: {
+      vault: { getAbstractFileByPath: (path: string) => (path === file.path ? file : null) },
+      workspace: {
+        getLeavesOfType: () => [other, deferred],
+        revealLeaf: async (leaf: unknown) => { calls.push(leaf === deferred ? "reveal deferred" : "reveal other"); },
+        setActiveLeaf: (leaf: unknown) => { calls.push(leaf === deferred ? "activate deferred" : "activate other"); },
+      },
+    },
+  };
+  await LatexLivePlugin.prototype.openLocation.call(host as unknown as LatexLivePlugin, base + "/章节/b.tex", 7, 2);
+  assert.deepEqual(calls, ["load deferred", "reveal deferred", "activate deferred"]);
+  assert.deepEqual(opened, [[7, 2]]);
+});
+
 const binDir = process.env.TEXBIN ?? resolveTexBinDir("");
 for (const engine of ["pdflatex", "xelatex", "lualatex"] as const) for (const mode of ["fast", "full"] as const) {
   test(`${engine} ${mode}: Chinese Unicode source paths reach the exact vault file after inverse SyncTeX`, { skip: !binDir && "no TeX installation found", timeout: 90_000 }, async () => {
@@ -59,11 +91,11 @@ for (const engine of ["pdflatex", "xelatex", "lualatex"] as const) for (const mo
       const view = Object.create(TexView.prototype) as TexView;
       Object.defineProperty(view, "file", { value: file });
       view.revealLine = (line, column) => { opened.push([line, column]); };
-      const leaf = { view };
+      const leaf = { view, loadIfDeferred: async () => {} };
       const host = {
         vaultBase: () => base,
         vaultPath: (absolute: string) => LatexLivePlugin.prototype.vaultPath.call(host as unknown as LatexLivePlugin, absolute),
-        app: { vault: { getAbstractFileByPath: (path: string) => { lookups.push(path); return path === key ? file : null; } }, workspace: { getLeavesOfType: () => [leaf], setActiveLeaf: (value: unknown) => focused.push(value) } },
+        app: { vault: { getAbstractFileByPath: (path: string) => { lookups.push(path); return path === key ? file : null; } }, workspace: { getLeavesOfType: () => [leaf], revealLeaf: async () => {}, setActiveLeaf: (value: unknown) => focused.push(value) } },
       };
       await LatexLivePlugin.prototype.openLocation.call(host as unknown as LatexLivePlugin, loc.file, loc.line);
       assert.deepEqual(lookups, [key]);

@@ -1,6 +1,7 @@
 import type { Text } from "@codemirror/state";
 import { texText } from "../tex/texText";
-import { CITE_COMMANDS, MATH_ENVS, VERBATIM_ENVS, iffalseEnd, iffalseStarts } from "./latexHighlight";
+import { DEFAULT_RULES, EnvRules, commandEnd } from "../tex/envRules";
+import { CITE_COMMANDS, VERBATIM_ENVS, iffalseEnd, iffalseStarts } from "./latexHighlight";
 
 // The constructs a LaTeX document renders: pure, no CodeMirror view and no Obsidian, so the
 // hover and live preview share one scan and tests run it directly (design 4.3, 4.4).
@@ -37,6 +38,12 @@ import { CITE_COMMANDS, MATH_ENVS, VERBATIM_ENVS, iffalseEnd, iffalseStarts } fr
 //             argument reads as math), so no document overflows the stack; where a text argument
 //             ends is found once per position and nesting in a scan, so unclosed ones
 //             (`\text{$\text{$..`) cost a few passes over their paragraph, not exponentially many.
+//   Rules     which environments are formulas and wrappers (collapsed \begin/\end lines) and
+//             which commands hide come from an EnvRules (src/tex/envRules.ts; the built-in
+//             defaults unless the caller passes the project's): an alias formula environment
+//             (`myeq` -> equation) goes to MathJax as its target, a wrapper's \begin line takes
+//             its arguments, a hidden command its arity's arguments. A \caption in a figure or
+//             table is a `caption` (its content scanned on).
 // The highlighter keeps its own tokenizer; half-typed delimiters may differ there.
 
 /** A formula: `$..$`, `\(..\)`, `\[..\]`, `$$..$$` or a math environment. */
@@ -50,7 +57,7 @@ export interface LatexMath {
    * first and last line. Inline math (`$x$` alone on a line too) is never a block.
    */
   readonly block: boolean;
-  /** The math environment (`align*`), or null for delimiters. */
+  /** The math environment as written (`align*`, an alias `myeq`), or null for delimiters. */
   readonly env: string | null;
   /** MathJax input: the text between the delimiters, or the whole environment. */
   readonly src: string;
@@ -100,7 +107,7 @@ export interface LatexItem {
   readonly labelTo?: number;
 }
 
-/** A `\begin` or `\end` line of a list, center, figure or table, alone on its line (#8). */
+/** A wrapper's `\begin` (with its arguments) or `\end`, alone on its lines (#8; a list, center, figure, table, subequations, minipage, ...). */
 export interface LatexEnvLine {
   readonly kind: "envline";
   readonly from: number;
@@ -192,6 +199,29 @@ export interface LatexBlock {
   readonly env: string;
 }
 
+/** A hidden layout command with its arguments (`\centering`, `\vspace{1em}`, a user's `\DeckLayout{..}`). */
+export interface LatexCommand {
+  readonly kind: "command";
+  readonly from: number;
+  readonly to: number;
+  /** The command without its star. */
+  readonly name: string;
+  /** Alone on its lines: the line collapses with it. */
+  readonly block: boolean;
+}
+
+/** `\caption[short]{content}`: `float` is the figure or table it is in (null outside one). */
+export interface LatexCaption {
+  readonly kind: "caption";
+  readonly from: number;
+  readonly to: number;
+  readonly contentFrom: number;
+  readonly contentTo: number;
+  readonly float: "figure" | "table" | null;
+  /** The \label in the caption, else the first one after it in the float: the caption's number. */
+  readonly label: string | null;
+}
+
 export type LatexConstruct =
   | LatexMath
   | LatexHeading
@@ -202,34 +232,46 @@ export type LatexConstruct =
   | LatexImage
   | LatexRef
   | LatexCite
-  | LatexLabel;
+  | LatexLabel
+  | LatexCommand
+  | LatexCaption;
 
 /** A math environment (or an `env`) closes within this many lines, or it is not one (half-typed). */
 const MAX_LINES = 200;
 /** Formulas in text arguments in formulas nest this deep at most (see Cost). */
 const MAX_NESTING = 8;
 
-const cache = new WeakMap<Text, readonly LatexConstruct[]>();
-const mathCache = new WeakMap<Text, readonly LatexMath[]>();
-const blockCache = new WeakMap<Text, readonly LatexBlock[]>();
+interface Caches {
+  all: WeakMap<Text, readonly LatexConstruct[]>;
+  math: WeakMap<Text, readonly LatexMath[]>;
+  blocks: WeakMap<Text, readonly LatexBlock[]>;
+}
+const caches = new WeakMap<EnvRules, Caches>();
+const cachesOf = (rules: EnvRules): Caches => {
+  let hit = caches.get(rules);
+  if (!hit) caches.set(rules, (hit = { all: new WeakMap(), math: new WeakMap(), blocks: new WeakMap() }));
+  return hit;
+};
 
-/** The constructs of a document in document order (nested ones after their parent; memoized per Text). */
-export function scanLatex(doc: Text): readonly LatexConstruct[] {
-  let hit = cache.get(doc);
-  if (!hit) cache.set(doc, (hit = scanText(doc.toString())));
+/** The constructs of a document in document order (nested ones after their parent; memoized per Text and rules). */
+export function scanLatex(doc: Text, rules: EnvRules = DEFAULT_RULES): readonly LatexConstruct[] {
+  const { all } = cachesOf(rules);
+  let hit = all.get(doc);
+  if (!hit) all.set(doc, (hit = scanText(doc.toString(), rules)));
   return hit;
 }
 
-/** The formulas of a document in order (they never nest; memoized per Text). */
-export function formulas(doc: Text): readonly LatexMath[] {
-  let hit = mathCache.get(doc);
-  if (!hit) mathCache.set(doc, (hit = scanLatex(doc).filter((c): c is LatexMath => c.kind === "math")));
+/** The formulas of a document in order (they never nest; memoized per Text and rules). */
+export function formulas(doc: Text, rules: EnvRules = DEFAULT_RULES): readonly LatexMath[] {
+  const { math } = cachesOf(rules);
+  let hit = math.get(doc);
+  if (!hit) math.set(doc, (hit = scanLatex(doc, rules).filter((c): c is LatexMath => c.kind === "math")));
   return hit;
 }
 
 /** The formula containing `pos` (its delimiters included), or null. */
-export function mathAt(doc: Text, pos: number): LatexMath | null {
-  const all = formulas(doc);
+export function mathAt(doc: Text, pos: number, rules: EnvRules = DEFAULT_RULES): LatexMath | null {
+  const all = formulas(doc, rules);
   let lo = 0;
   let hi = all.length - 1;
   while (lo <= hi) {
@@ -242,13 +284,14 @@ export function mathAt(doc: Text, pos: number): LatexMath | null {
   return null;
 }
 
-/** The environments and floats of a document (see LatexBlock; memoized per Text). */
-export function blocks(doc: Text): readonly LatexBlock[] {
-  let hit = blockCache.get(doc);
+/** The environments and floats of a document (see LatexBlock; memoized per Text and rules). */
+export function blocks(doc: Text, rules: EnvRules = DEFAULT_RULES): readonly LatexBlock[] {
+  const cache = cachesOf(rules).blocks;
+  let hit = cache.get(doc);
   if (hit) return hit;
   const out: LatexBlock[] = [];
   const open: LatexEnvLine[] = [];
-  for (const c of scanLatex(doc)) {
+  for (const c of scanLatex(doc, rules)) {
     if (c.kind === "env") out.push({ kind: "block", from: c.from, to: c.to, env: c.env });
     else if (c.kind === "envline" && FLOATS.has(c.env)) {
       if (c.begin) open.push(c);
@@ -259,22 +302,22 @@ export function blocks(doc: Text): readonly LatexBlock[] {
       }
     }
   }
-  blockCache.set(doc, (hit = out));
+  cache.set(doc, (hit = out));
   return hit;
 }
 
 /** The innermost block around `pos` (its \begin and \end included) that `accept` takes, or null. */
-export function blockAt(doc: Text, pos: number, accept: (b: LatexBlock) => boolean): LatexBlock | null {
+export function blockAt(doc: Text, pos: number, accept: (b: LatexBlock) => boolean, rules: EnvRules = DEFAULT_RULES): LatexBlock | null {
   let best: LatexBlock | null = null;
-  for (const b of blocks(doc)) {
+  for (const b of blocks(doc, rules)) {
     if (b.from <= pos && pos <= b.to && (!best || b.to - b.from < best.to - best.from) && accept(b)) best = b;
   }
   return best;
 }
 
 /** The blocks around [from, to] (containing it, not equal to it). */
-export function blocksAround(doc: Text, from: number, to: number): LatexBlock[] {
-  return blocks(doc).filter((b) => b.from <= from && to <= b.to && (b.from !== from || b.to !== to));
+export function blocksAround(doc: Text, from: number, to: number, rules: EnvRules = DEFAULT_RULES): LatexBlock[] {
+  return blocks(doc, rules).filter((b) => b.from <= from && to <= b.to && (b.from !== from || b.to !== to));
 }
 
 const lineEnd = (s: string, i: number): number => {
@@ -484,7 +527,6 @@ const LIST_KINDS: Readonly<Record<string, ListKind>> = { itemize: "itemize", enu
 const LISTS = new Set(Object.keys(LIST_KINDS));
 const FLOATS = new Set(["figure", "figure*", "table", "table*"]);
 /** Environments whose \begin and \end lines collapse. */
-const COLLAPSED_ENVS = new Set([...LISTS, "center", ...FLOATS]);
 const REFS = new Set(["ref", "eqref", "pageref", "autoref", "cref", "Cref", "nameref"]);
 /** Commands whose arguments are code: a definition runs to its first line break outside braces. */
 const DEFINERS = new Set([
@@ -777,9 +819,14 @@ const keysOf = (arg: string): string[] =>
 /** An optional argument's text, or null when empty. */
 const note = (arg: string | undefined): string | null => (arg !== undefined && arg.trim() ? arg.trim() : null);
 
-function scanText(s: string): LatexConstruct[] {
+/** A caption being scanned: its label is settled at its float's \end. */
+type OpenCaption = { -readonly [K in keyof LatexCaption]: LatexCaption[K] };
+
+function scanText(s: string, rules: EnvRules): LatexConstruct[] {
   // An `env` holds its place (null) from its \begin: constructs stay in document order.
   const out: (LatexConstruct | null)[] = [];
+  /** The figures and tables open here, with their captions. */
+  const floats: { env: string; captions: OpenCaption[] }[] = [];
   const envs: OpenEnv[] = [];
   const ends: TextEnds = new Map();
   const math = (from: number, to: number, display: boolean, env: string | null, src: string) => {
@@ -944,6 +991,35 @@ function scanText(s: string): LatexConstruct[] {
         continue;
       }
     }
+    if (rules.hidden.has(base)) {
+      const e = commandEnd(s, j, rules.hidden.get(base) ?? null, false, (t, k) => argEnd(t, k));
+      if (e > 0) {
+        out.push({ kind: "command", from: i, to: e, name: base, block: aloneOnLines(s, i, e) });
+        i = e;
+        continue;
+      }
+    }
+    if (base === "caption") {
+      const short = s[arg] === "[" ? argEnd(s, arg, MAX_LINES) : arg;
+      const open = short < 0 ? -1 : skipBlanks(s, short);
+      const e = open >= 0 && s[open] === "{" ? argEnd(s, open, MAX_LINES) : -1;
+      if (e > 0) {
+        const float = floats[floats.length - 1];
+        const caption: OpenCaption = {
+          kind: "caption",
+          from: i,
+          to: e,
+          contentFrom: open + 1,
+          contentTo: e - 1,
+          float: float ? (float.env.startsWith("figure") ? "figure" : "table") : null,
+          label: labelsIn(s.slice(open + 1, e - 1))[0] ?? null,
+        };
+        out.push(caption);
+        float?.captions.push(caption);
+        i = open + 1; // constructs in the content
+        continue;
+      }
+    }
     if (name === "begin" || name === "end") {
       ENV_ARG.lastIndex = j;
       const env = ENV_ARG.exec(s)?.[1].trim();
@@ -969,9 +1045,19 @@ function scanText(s: string): LatexConstruct[] {
             }
           }
         }
-        if (COLLAPSED_ENVS.has(env)) {
+        if (FLOATS.has(env)) {
+          const at = floats.map((f) => f.env).lastIndexOf(env);
+          if (at >= 0) {
+            // A caption without a \label of its own is numbered by the next one in its float.
+            for (const c of floats[at].captions) {
+              c.label ??= labelsIn(s.slice(c.to, i))[0] ?? null;
+            }
+            floats.length = at;
+          }
+        }
+        if (rules.wrappers.has(env)) {
           if (aloneOnLines(s, i, j)) out.push({ kind: "envline", from: i, to: j, env, begin: false });
-        } else {
+        } else if (!LISTS.has(env)) {
           // Environments pair by name; those left open inside it never close.
           const at = envs.map((e) => e.env).lastIndexOf(env);
           const open = envs[at];
@@ -998,21 +1084,24 @@ function scanText(s: string): LatexConstruct[] {
           }
           j = to;
         }
-      } else if (MATH_ENVS.has(env)) {
+      } else if (rules.math.has(env)) {
         const endTag = `\\end{${env}}`;
         const e = findClose(s, j, endTag, ends);
         if (e >= 0) {
           const to = e + endTag.length;
           // `math` and `displaymath` are delimiters; MathJax reads the other environments whole.
-          if (env === "math" || env === "displaymath") math(i, to, env === "displaymath", env, s.slice(j, e));
-          else math(i, to, true, env, s.slice(i, to));
+          // An alias goes to MathJax as its target.
+          const target = rules.math.get(env)!;
+          if (target === "math" || target === "displaymath") math(i, to, target === "displaymath", env, s.slice(j, e));
+          else math(i, to, true, env, target === env ? s.slice(i, to) : `\\begin{${target}}${s.slice(j, e)}\\end{${target}}`);
           j = to;
         }
-      } else if (COLLAPSED_ENVS.has(env)) {
-        const optAt = skipBlanks(s, j);
-        const optEnd = s[optAt] === "[" ? argEnd(s, optAt) : -1;
-        if (optEnd > 0) j = optEnd;
+      } else if (rules.wrappers.has(env) || LISTS.has(env)) {
+        if (FLOATS.has(env)) floats.push({ env, captions: [] });
         if (LISTS.has(env)) {
+          const optAt = skipBlanks(s, j);
+          const optEnd = s[optAt] === "[" ? argEnd(s, optAt) : -1;
+          if (optEnd > 0) j = optEnd;
           const kind = LIST_KINDS[env];
           const o = listOptions(kind, optEnd > 0 && kind === env ? s.slice(optAt + 1, optEnd - 1) : null);
           // enumitem: `resume` continues the last list of this environment, `resume=s` a series,
@@ -1031,9 +1120,16 @@ function scanText(s: string): LatexConstruct[] {
             savesMarks: !(resume?.star && resume.series === null),
             saved: new Map(),
           });
+        } else {
+          // A wrapper's arguments collapse with its \begin line (`\begin{minipage}[t]{0.5\textwidth}`),
+          // and a \label right after it (`\begin{subequations}\label{eq:sys}`).
+          j = beginArgs(s, j).beginTo;
+          const label = /^[ \t]*\\label\s*\{[^{}\n]*\}/.exec(s.slice(j, j + 200));
+          if (label && aloneOnLines(s, i, j + label[0].length)) j += label[0].length;
         }
-        if (aloneOnLines(s, i, j)) out.push({ kind: "envline", from: i, to: j, env, begin: true });
+        if (rules.wrappers.has(env) && aloneOnLines(s, i, j)) out.push({ kind: "envline", from: i, to: j, env, begin: true });
       } else if (env !== "document") {
+        if (FLOATS.has(env)) floats.push({ env, captions: [] }); // a float kept as source
         // A theorem-like candidate (#12): the arguments and a \label on its line (scanned on
         // from `j`: a title's formulas are constructs), or a \label first on the next line.
         const found = beginArgs(s, j);

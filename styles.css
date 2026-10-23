@@ -56,7 +56,8 @@ SOFTWARE.
   background: transparent;
 }
 /* The line a jump (inverse SyncTeX) landed on, for FLASH_MS (src/editor/reveal.ts). */
-.ll-editor-content .cm-editor .cm-line.ll-reveal-flash {
+.ll-editor-content .cm-editor .cm-line.ll-reveal-flash,
+.ll-editor-content .cm-editor .lsp-lp-render.ll-reveal-flash {
   animation: ll-reveal-flash 1.5s ease-out;
 }
 @keyframes ll-reveal-flash {
@@ -344,6 +345,13 @@ SOFTWARE.
 }
 .lsp-cm-view .lsp-lp-chip.is-missing {
   color: var(--text-warning);
+}
+/* A reference chip jumps to its \label on click (labelJump.ts). */
+.lsp-cm-view .lsp-lp-chip.is-ref[data-ll-ref-key]:hover {
+  cursor: var(--cursor-link, pointer);
+  text-decoration: underline;
+  text-decoration-color: var(--text-accent-hover, currentColor);
+  text-underline-offset: 2px;
 }
 /* Headings (line classes). */
 .lsp-cm-view .cm-line.lsp-lp-h1,
@@ -669,6 +677,10 @@ SOFTWARE.
 .ll-ref {
   color: var(--color-cyan, #17a89a);
 }
+/* \caption{..} shown as "Figure n: " (latexLive.ts) */
+.ll-caption-head {
+  font-weight: 600;
+}
 .ll-math,
 .ll-math-delim {
   color: var(--color-yellow, #b8860b);
@@ -700,6 +712,8 @@ SOFTWARE.
 .ll-template-json textarea { width: 100%; box-sizing: border-box; font-family: var(--font-monospace); margin: 8px 0; }
 .ll-template-json button { margin: 4px 8px 4px 0; }
 .ll-template-error { color: var(--text-error); white-space: pre-wrap; }
+.ll-env-rules-defaults { color: var(--text-muted); font-size: var(--font-ui-small); }
+.ll-env-rules-json { width: 100%; box-sizing: border-box; font-family: var(--font-monospace); margin: 8px 0; }
 @media (max-width: 480px) { .ll-template-field { grid-template-columns: 1fr; gap: 4px; } }
 
 .ll-preview {

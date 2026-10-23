@@ -1085,9 +1085,10 @@ test("T-L9 #8 and #13: figure and table lines collapse; \\includegraphics shows 
     const view = await p.mount(doc, LABELS, doc.length);
     assert.deepEqual(shown(view), [
       "(collapsed)",
-      "  \\centering",
+      "(collapsed)", // \centering, a hidden command alone on its line
       "[img]",
-      "  \\caption{合成图片}[fig:grid]",
+      "  合成图片[fig:grid]", // no .aux entry: only \\caption hides (browser-smoke B9 has "Figure n: ")
+
       "(collapsed)",
       "[img]",
       "\\includegraphics{logo.svg}",
@@ -1233,8 +1234,8 @@ test("P5 #4 and #14: PDF crops for TikZ pictures, tables and rejected block form
     ]);
     assert.deepEqual(
       lines(view),
-      ["[w]", "[w]", "<>", "[w]", "  \\caption{T}", "<>", "$\\undefinedmacro$ inline", "<lsp-lp-box is-second>", "end"],
-      "the float's \\begin and \\end lines collapse around the crop, its caption stays",
+      ["[w]", "[w]", "<>", "[w]", "  T", "<>", "$\\undefinedmacro$ inline", "<lsp-lp-box is-second>", "end"],
+      "the float's \\begin and \\end lines collapse around the crop, its caption stays (no label: only \\caption hides)",
     );
     assert.match(view.contentDOM.querySelector(".lsp-lp-box")!.textContent!, /\\begin\{tikzpicture\}/, "inside elegantbook's tcolorbox: source");
     assert.deepEqual(errors(view), ["$\\undefinedmacro$"], "inline math never crops");

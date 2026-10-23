@@ -1,6 +1,7 @@
 import type { Text } from "@codemirror/state";
 import { Decoration } from "@codemirror/view";
 import type { CropKind } from "../preview/blockCrop";
+import type { EnvRules } from "../tex/envRules";
 import type { TheoremDef, TheoremMap } from "../tex/theorems";
 import { texText } from "../tex/texText";
 import { LatexRefs, citeText, formulaRefs, refText } from "./latexRefs";
@@ -31,8 +32,14 @@ import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } 
 //       description's bold term; only touching the token reveals it, so typing after it keeps
 //       the marker. A label with math or a reference stays in place (`\item[` and `]` hidden, a
 //       term's text bold, its formulas rendered): touching `\item[` or `]` reveals them.
-//   #8  the \begin and \end lines of lists, center, figure and table collapse (a block replace
-//       without a widget) until the cursor is on the line.
+//   #8  the \begin (with its arguments) and \end lines of the wrapper environments (env.rules:
+//       lists, center, figure, table, subequations, minipage, ... and the user's) collapse (a block
+//       replace without a widget) until the cursor is on them; the content renders as usual.
+//   #15 the hidden commands (env.rules: \centering, \vspace{..}, ... and the user's) hide with
+//       their arguments until the cursor touches them; one alone on its lines collapses them.
+//   #16 \caption{..} in a figure or table: `Figure n: ` / `Table n: ` for `\caption{` (its number
+//       from the caption's label in the .aux), the content in place; without a number only the
+//       command and braces hide. Touching either end reveals them.
 //   #9  \ref, \eqref, \pageref, \autoref, \cref, \Cref, \nameref: a chip with what the PDF prints
 //       from the last compile's .aux (latexRefs: `1.2`, `(1.2)`, hyperref's `section 1.2`,
 //       cleveref's `eqs. (1) and (2)`); `??` in the warning colour when a label is unknown. Its
@@ -81,6 +88,8 @@ import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } 
 // verbatim, `\iffalse` blocks, \footnote and unknown environments) stays source.
 
 export interface LatexLiveEnv {
+  /** The formula, wrapper and hidden-command rules (TexRender's `rulesOf`); the built-in defaults without. */
+  rules?: EnvRules;
   /** The root's references, read at every build (TexRender's `refsOf`); a new object when they change. */
   refs(): LatexRefs;
   /** Editor-only profile overrides, independent of the native reference/TeX definitions. */
@@ -181,7 +190,7 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
     return src;
   };
   return {
-    scan: scanLatex,
+    scan: (doc) => scanLatex(doc, env.rules),
     // A theorem box tests the selection on its \begin and \end lines only (decorateBox): a move
     // inside a long one leaves it be. Every environment but a crop (which reveals over its lines)
     // says so, since the scan this is memoized with cannot see which ones the theorem map boxes.
@@ -241,10 +250,25 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
         else ctx.mark(c.from, c.to, Decoration.mark({ class: "lsp-lp-error", attributes: { title: found.error } }));
         return;
       }
-      if (c.kind === "envline") {
-        const line = doc.lineAt(c.from);
-        if (ctx.hasError(line.from, line.to) || ctx.touch(line.from, line.to)) return;
-        ctx.replace(line.from, line.to, COLLAPSED);
+      if (c.kind === "envline" || (c.kind === "command" && c.block)) {
+        const from = doc.lineAt(c.from).from;
+        const to = doc.lineAt(c.to).to;
+        if (ctx.hasError(from, to) || ctx.touch(from, to)) return;
+        ctx.replace(from, to, COLLAPSED);
+        return;
+      }
+      if (c.kind === "caption") {
+        if (ctx.hasError(c.from, c.to) || ctx.touch(c.from, c.contentFrom) || ctx.touch(c.contentTo, c.to)) return;
+        const aux = c.float && c.label ? env.refs().labels.get(c.label) : undefined;
+        const number = aux && (!aux.kind || aux.kind === c.float) ? texText(aux.number) || aux.number : "";
+        const head = number ? `${c.float === "figure" ? "Figure" : "Table"} ${number}: ` : "";
+        ctx.replace(c.from, c.contentFrom, head ? Decoration.replace({ widget: new TextWidget(head, "ll-caption-head", doc.sliceString(c.from, c.contentFrom)) }) : HIDDEN);
+        ctx.replace(c.contentTo, c.to, HIDDEN);
+        return;
+      }
+      if (c.kind === "command") {
+        if (ctx.hasError(c.from, c.to) || ctx.touch(c.from, c.to)) return;
+        ctx.replace(c.from, c.to, HIDDEN);
         return;
       }
       if (ctx.hasError(c.from, c.to) || ctx.touch(c.from, c.to)) return;
@@ -259,9 +283,9 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
             ? { ...refText(c.command, c.keys, env.refs()), title: doc.sliceString(c.from, c.to) }
             : citeText(c.keys, c.prenote, c.postnote, env.refs());
         const cls = `lsp-lp-chip is-${c.kind}${chip.missing ? " is-missing" : ""}`;
-        const literal = c.kind === "ref" && c.command === "ref" ? /\\ref\*?\s*\{([^{}]*)\}/.exec(doc.sliceString(c.from, c.to))?.[1].trim() : undefined;
-        widget = literal !== undefined
-          ? new ReferenceWidget(chip.text, cls, chip.title, "ref", literal, c.from, c.to)
+        // A reference chip names its command and first key: the theorem graph and labelJump read them.
+        widget = c.kind === "ref"
+          ? new ReferenceWidget(chip.text, cls, chip.title, c.command, c.keys[0], c.from, c.to)
           : new TextWidget(chip.text, cls, chip.title);
       }
       ctx.replace(c.from, c.to, Decoration.replace({ widget }));

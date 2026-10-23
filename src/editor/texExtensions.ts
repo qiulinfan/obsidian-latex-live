@@ -25,7 +25,7 @@ import {
 import type { TexDiagnostic } from "../tex/logParser";
 import { opensArgumentList, typingCommand } from "./latexCompletion";
 import { latexEnterHooks, latexIndent } from "./latexEnter";
-import { latexHighlightPlugin } from "./latexHighlight";
+import { envRulesFacet, latexHighlightPlugin } from "./latexHighlight";
 import { revealFlash } from "./reveal";
 import { LatexBlock, LatexMath, mathAt } from "./latexScan";
 import { SuiteConfigSource, suiteSnippets, suiteTabFallback } from "./suiteSnippets";
@@ -180,7 +180,7 @@ export function texHover(o: TexHoverOptions): Extension[] {
   return [
     renderHover<LatexMath | LatexBlock>({
       enabled: o.enabled,
-      target: (state, pos) => (o.target ? o.target(state, pos) : mathAt(state.doc, pos)),
+      target: (state, pos) => (o.target ? o.target(state, pos) : mathAt(state.doc, pos, state.facet(envRulesFacet))),
       render: (t, view) => o.render(t, view),
     }),
     lsp
@@ -205,7 +205,7 @@ export function texCursorPreview(o: TexCursorOptions): Extension {
   return cursorPreview<LatexMath>({
     enabled: o.enabled,
     target: (state) => {
-      const m = mathAt(state.doc, state.selection.main.head);
+      const m = mathAt(state.doc, state.selection.main.head, state.facet(envRulesFacet));
       return m && !(m.block && liveActive(state)) ? m : null;
     },
     render: (m, view) => o.render(m, view),
@@ -214,7 +214,7 @@ export function texCursorPreview(o: TexCursorOptions): Extension {
 
 /** The pointer (at `pos`, on the character before it when side < 0) is on a formula. */
 function insideMath(state: EditorState, pos: number, side: -1 | 1): boolean {
-  const m = mathAt(state.doc, pos);
+  const m = mathAt(state.doc, pos, state.facet(envRulesFacet));
   return !!m && !(side < 0 && pos <= m.from) && !(side > 0 && pos >= m.to);
 }
 

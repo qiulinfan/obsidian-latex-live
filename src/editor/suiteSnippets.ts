@@ -12,6 +12,8 @@ import { snippet as cmSnippet } from "@codemirror/autocomplete";
 import { isolateHistory } from "@codemirror/commands";
 import { Extension, Prec, Text } from "@codemirror/state";
 import { Command, EditorView } from "@codemirror/view";
+import type { EnvRules } from "../tex/envRules";
+import { envRulesFacet } from "./latexHighlight";
 import { literalAt, mathAt } from "./latexScan";
 
 /** LaTeX Suite's Mode: where the cursor is. */
@@ -96,9 +98,9 @@ const NOWHERE: SuiteMode = {
   codeBlock: false, code: false, textEnv: false, snippetlessEnv: false,
 };
 
-export function suitePlace(doc: Text, pos: number, textMacros: SuiteConfig["textMacros"] = []): SuitePlace {
+export function suitePlace(doc: Text, pos: number, textMacros: SuiteConfig["textMacros"] = [], rules?: EnvRules): SuitePlace {
   if (literalAt(doc, pos)) return { mode: { ...NOWHERE }, env: null, macros: [] };
-  const math = innerMath(doc, pos);
+  const math = innerMath(doc, pos, rules);
   if (!math) return { mode: { ...NOWHERE, text: true }, env: null, macros: [] };
   const macros = macroStack(doc.sliceString(math.inner, pos));
   const kind = macros.length
@@ -118,8 +120,8 @@ export function suitePlace(doc: Text, pos: number, textMacros: SuiteConfig["text
 }
 
 /** The formula whose content holds `pos` (not its delimiters), with the start of that content. */
-function innerMath(doc: Text, pos: number): { inner: number; display: boolean; env: string | null } | null {
-  const m = mathAt(doc, pos);
+function innerMath(doc: Text, pos: number, rules?: EnvRules): { inner: number; display: boolean; env: string | null } | null {
+  const m = mathAt(doc, pos, rules);
   if (m) {
     const [open, close] = m.env
       ? [`\\begin{${m.env}}`.length, `\\end{${m.env}}`.length]
@@ -184,7 +186,7 @@ function runOnce(view: EditorView, cfg: SuiteConfig, snippets: readonly SuiteSni
   if (state.selection.ranges.length > 1) return false;
   const { from, to } = state.selection.main;
   const k = key ?? "";
-  const place = suitePlace(state.doc, from, cfg.textMacros);
+  const place = suitePlace(state.doc, from, cfg.textMacros, state.facet(envRulesFacet));
   const sel = state.sliceDoc(from, to);
   const effectiveLine = state.sliceDoc(0, to) + k;
   let after: string | null = null;

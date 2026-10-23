@@ -23,6 +23,13 @@
 //       hangs below the formula's last row, never over the row being typed, its left edge at the
 //       formula's start; near the window's bottom, a display's preview (source mode) flips above
 //       its first row, over none of its lines
+//   B9  LaTeX Live's own language (latexLive.ts) with the live editor rules (src/tex/envRules.ts):
+//       a subequations shell, a \centering line and a user-hidden \DeckLayout{..} collapse, a
+//       caption reads "Figure n: ", every gutter number sits on its line (±1 px); a reference
+//       chip (labelJump.ts) shows a pointer and an underline on hover; a click on it, plain or
+//       with Cmd/Ctrl, scrolls to the rendered formula holding the \label 60 lines down and
+//       flashes it, the cursor on the line above; a click 2 px beside it or ArrowRight onto it reveals its source; a chip whose \label is in
+//       another file calls `elsewhere` once per click, 5 of 5
 // The page bundles the real shared modules (keyArbiter first, live preview in its
 // compartment) with a LaTeX-like test language. Formulas render with MathJax 3.2.2 when the
 // `mathjax` dev dependency is installed (LaTeX Live, Obsidian's configuration; its glyph CSS
@@ -68,6 +75,24 @@ import { Decoration, EditorView, drawSelection, keymap, lineNumbers } from "@cod
 import { keyArbiter } from "./src/editor/shared/keyArbiter";
 import { TextWidget, liveInput, livePreview, livePreviewCompartment, renderConstruct, renderStats } from "./src/editor/shared/livePreview";
 import { cursorPreview } from "./src/editor/shared/renderHover";
+import { latexLiveLanguage } from "./src/editor/latexLive";
+import { DEFAULT_REF_NAMES } from "./src/editor/latexRefs";
+import { labelJump } from "./src/editor/labelJump";
+import { EMPTY_USER_RULES, NO_DETECTED, mergeEnvRules } from "./src/tex/envRules";
+
+/** B9: the rules of a deck whose preamble defines \DeckLayout[1] (the user hides it), and its refs. */
+const rules = mergeEnvRules({ ...EMPTY_USER_RULES, hidden: ["DeckLayout"] }, NO_DETECTED, (n) => (n === "DeckLayout" ? { args: 1, optional: false } : undefined));
+const aux = (number, anchor, kind) => ({ number, page: "1", title: "", anchor, kind, order: null });
+const refs = {
+  numbers: new Map([["eq:x", "1a"], ["eq:far", "2"], ["fig:a", "1"]]),
+  labels: new Map([["eq:x", aux("1a", "equation.1a", "equation")], ["eq:far", aux("2", "equation.2", "equation")], ["fig:a", aux("1", "figure.1", "figure")]]),
+  cites: new Map(),
+  names: DEFAULT_REF_NAMES,
+  theorems: new Map(),
+  checkpoints: new Map(),
+};
+const latex = latexLiveLanguage({ refs: () => refs, rules });
+window.__jumpedElsewhere = [];
 
 const MATH = /\\begin\{(align\*?|equation\*?|gather\*?)\}[\s\S]*?\\end\{\1\}|\$\$([\s\S]*?)\$\$|\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)|\$([^$\n]+)\$/g;
 
@@ -163,7 +188,8 @@ window.__smoke = {
           lineNumbers(),
           EditorView.lineWrapping,
           liveInput(),
-          livePreviewCompartment.of(o.live === false ? [] : livePreview({ language, renderer })),
+          livePreviewCompartment.of(o.live === false ? [] : livePreview({ language: o.latex ? latex : language, renderer })),
+          o.latex ? labelJump((key) => window.__jumpedElsewhere.push(key)) : [],
           o.preview ? preview : [],
           keymap.of([...defaultKeymap, ...historyKeymap]),
         ],
@@ -202,6 +228,8 @@ async function writePage() {
     format: "iife",
     platform: "browser",
     target: "es2022",
+    // latexRefs reaches bib.ts and auxData.ts, whose file readers the page never calls.
+    plugins: [{ name: "no-node", setup: (b) => { b.onResolve({ filter: /^(fs|path)$/ }, () => ({ path: "node-builtin", namespace: "no-node" })); b.onLoad({ filter: /.*/, namespace: "no-node" }, () => ({ contents: "module.exports = {};", loader: "js" })); } }],
     write: false,
     logLevel: "warning",
   });
@@ -319,7 +347,7 @@ function check(id, name, pass, detail) {
   console.log(`${pass ? "ok  " : "FAIL"} ${id} ${name}${detail === undefined ? "" : `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`}`);
 }
 
-const KEYS = { ArrowDown: [40, "ArrowDown"], ArrowUp: [38, "ArrowUp"], Escape: [27, "Escape"], a: [65, "KeyA"] };
+const KEYS = { ArrowDown: [40, "ArrowDown"], ArrowUp: [38, "ArrowUp"], ArrowRight: [39, "ArrowRight"], Escape: [27, "Escape"], a: [65, "KeyA"] };
 /** A key press; modifiers: 4 Meta (Cmd), 8 Shift. */
 async function press(page, key, modifiers = 0) {
   const [code, name] = KEYS[key];
@@ -724,6 +752,106 @@ async function b7({ page, evaluate }) {
   check("B7", "ArrowDown from line 36 stops on the block (line 37), not past the line after it", landed === 37, { ...before, landed });
 }
 
+const B9_DOC = [
+  "\\begin{subequations}\\label{eq:sys}", // 1
+  "\\begin{equation}",
+  "  x = 1 \\label{eq:x}",
+  "\\end{equation}",
+  "\\end{subequations}", // 5
+  "\\begin{figure}",
+  "  \\centering",
+  "  \\caption{A plot}\\label{fig:a}",
+  "\\end{figure}",
+  "\\DeckLayout{two} Deck text.", // 10
+  "See \\eqref{eq:far} below.", // 11
+  "Also \\eqref{eq:other} elsewhere.", // 12: its \\label is in another file
+  ...Array.from({ length: 60 }, (_, i) => `Filler line ${i + 1}.`),
+  "\\begin{equation}", // 73
+  "  y = 2 \\label{eq:far}",
+  "\\end{equation}",
+  "End.",
+].join("\n");
+
+async function b9({ page, evaluate }) {
+  await mount(evaluate, B9_DOC, 500, { latex: true });
+  const shown = await evaluate(`(() => {
+    const v = __view;
+    const gutter = new Map();
+    for (const el of v.dom.querySelectorAll(".cm-lineNumbers .cm-gutterElement")) {
+      if (/^\\d+$/.test(el.textContent)) gutter.set(+el.textContent, el.getBoundingClientRect().top);
+    }
+    const rows = [], text = [];
+    for (const el of v.contentDOM.children) {
+      if (!el.classList.contains("cm-line") && !el.classList.contains("lsp-lp-render")) continue;
+      const n = v.state.doc.lineAt(v.lineBlockAt(v.posAtDOM(el)).from).number;
+      if (n <= 11) text.push(n + ":" + el.textContent);
+      if (gutter.has(n)) rows.push([n, Math.round(el.getBoundingClientRect().top - gutter.get(n))]);
+    }
+    return { text, worst: Math.max(...rows.map((r) => Math.abs(r[1]))), off: rows.filter((r) => Math.abs(r[1]) > 1) };
+  })()`);
+  const lines = shown.text.map((t) => t.replace(/^\d+:/, ""));
+  check("B9", "the shell, \\centering and \\DeckLayout{..} hide; the caption reads Figure 1:", !lines.some((t) => /subequations|centering|DeckLayout|\\caption/.test(t)) && lines.some((t) => t.includes("Figure 1: A plot")) && lines.some((t) => t.trim() === "Deck text."), shown.text);
+  check("B9", "gutter numbers sit on their lines (±1 px)", shown.worst <= 1, shown);
+  // The plugin's chip styles (the hover underline); removed at the end.
+  await evaluate(`(() => { const s = document.createElement("style"); s.id = "b9-styles"; s.textContent = ${JSON.stringify(readFileSync(join(ROOT, "styles.css"), "utf8"))}; document.head.append(s); return true; })()`);
+  const chipAt = (key) => evaluate(`(() => { const el = __view.contentDOM.querySelector('[data-ll-ref-key="${key}"]'); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left, right: r.right }; })()`);
+  const state = () => evaluate(`(() => { const v = __view, h = v.state.selection.main.head, box = v.scrollDOM.getBoundingClientRect(), at = v.coordsAtPos(h);
+    return { line: v.state.doc.lineAt(h).number, visible: !!at && at.top >= box.top && at.bottom <= box.bottom, elsewhere: __jumpedElsewhere.length,
+      chips: v.contentDOM.querySelectorAll("[data-ll-ref-key]").length }; })()`);
+  const clickAt = async (x, y, modifiers = 0) => {
+    for (const type of ["mousePressed", "mouseReleased"]) await page("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1, modifiers });
+    await sleep(300);
+    return state();
+  };
+  // Back to the top with the cursor on the last line, so no construct near the chips is revealed.
+  const reset = async () => { await evaluate("__view.dispatch({ selection: { anchor: __view.state.doc.length } }), __view.scrollDOM.scrollTop = 0, true"); await sleep(300); };
+  await reset();
+  const far = await chipAt("eq:far");
+  await page("Input.dispatchMouseEvent", { type: "mouseMoved", x: far.x, y: far.y });
+  await sleep(100);
+  const hover = await evaluate(`(() => { const s = getComputedStyle(__view.contentDOM.querySelector('[data-ll-ref-key="eq:far"]')); return { cursor: s.cursor, line: s.textDecorationLine }; })()`);
+  check("B9", "hovering a reference chip shows a pointer and an underline", hover.cursor === "pointer" && hover.line.includes("underline"), hover);
+  // The \label is under a rendered display block: the cursor goes to the line above it (a cursor in
+  // it would turn the block back into source), the view scrolls to the block and it flashes.
+  const flashed = () => evaluate(`(() => { const v = __view, box = v.scrollDOM.getBoundingClientRect(), els = [...v.contentDOM.querySelectorAll(".ll-reveal-flash")];
+    const r = els[0]?.getBoundingClientRect(); return { count: els.length, rendered: els[0]?.classList.contains("lsp-lp-render") ?? false, visible: !!r && r.top >= box.top && r.bottom <= box.bottom, line: v.state.doc.lineAt(v.state.selection.main.head).number }; })()`);
+  const plain = await clickAt(far.x, far.y);
+  const plainFlash = await flashed();
+  check("B9", "a plain click on the \\eqref chip scrolls to the rendered formula and flashes it, the cursor sits on the line above it", plain.elsewhere === 0 && plainFlash.count === 1 && plainFlash.rendered && plainFlash.visible && plainFlash.line === 72 && plain.visible, { plain, plainFlash });
+  await sleep(1400);
+  const gone = await flashed();
+  check("B9", "the flash ends", gone.count === 0, gone);
+  await reset();
+  const mod = (await evaluate("/Mac|iPhone|iPad/.test(navigator.platform)")) ? 4 : 2; // Meta on macOS, else Ctrl
+  await clickAt(far.x, far.y, mod);
+  const modFlash = await flashed();
+  check("B9", "Cmd/Ctrl-click jumps too", modFlash.count === 1 && modFlash.rendered && modFlash.visible, modFlash);
+  // Editing the reference: a click just beside the chip, or the arrow keys, reveal its source.
+  for (const [side, dx] of [["right", 2], ["left", -2]]) {
+    await reset();
+    const chip = await chipAt("eq:far");
+    const beside = await clickAt(side === "right" ? chip.right + dx : chip.left + dx, chip.y);
+    const source = await evaluate("__view.state.doc.line(11).text.includes('\\\\eqref') && !__view.contentDOM.querySelector('[data-ll-ref-key=\"eq:far\"]')");
+    check("B9", `a click 2 px ${side} of the chip puts the cursor on line 11 and reveals \\eqref{eq:far}`, beside.line === 11 && source && beside.elsewhere === 0, beside);
+  }
+  await reset();
+  await evaluate(`(() => { const v = __view, line = v.state.doc.line(11); v.dispatch({ selection: { anchor: line.from + line.text.indexOf("\\\\eqref") - 1 } }); v.focus(); return true; })()`);
+  await press(page, "ArrowRight");
+  await sleep(200);
+  const arrow = await evaluate("!__view.contentDOM.querySelector('[data-ll-ref-key=\"eq:far\"]')");
+  check("B9", "ArrowRight onto the chip reveals its source", arrow, arrow);
+  // A label in another file: every click calls `elsewhere` once, the cursor stays put.
+  const before = (await state()).elsewhere;
+  const tries = [];
+  for (let i = 0; i < 5; i++) {
+    await reset();
+    const other = await chipAt("eq:other");
+    tries.push(other ? (await clickAt(other.x, other.y)).elsewhere - before : -1);
+  }
+  check("B9", "a click on a reference whose \\label is in another file opens it, 5 of 5", tries.join() === "1,2,3,4,5" && (await evaluate("__jumpedElsewhere.slice(-5).every((k) => k === 'eq:other')")), tries);
+  await evaluate("document.getElementById('b9-styles').remove(), true");
+}
+
 async function b8({ page, evaluate }) {
   const terms = Array.from({ length: 24 }, (_, i) => `a_{${i + 1}}`).join(" + ");
   const doc = ["A formula that wraps: $" + terms + "$ and text after it.", "The next line."].join("\n");
@@ -813,6 +941,7 @@ try {
   if (run("B6")) await b6(cdp);
   if (run("B7")) await b7(cdp);
   if (run("B8")) await b8(cdp);
+  if (run("B9")) await b9(cdp);
 } catch (e) {
   check("--", "smoke run", false, e instanceof Error ? e.message : String(e));
 } finally {

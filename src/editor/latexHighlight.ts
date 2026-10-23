@@ -1,4 +1,4 @@
-import { RangeSetBuilder } from "@codemirror/state";
+import { Facet, RangeSetBuilder } from "@codemirror/state";
 import {
   Decoration,
   DecorationSet,
@@ -6,6 +6,7 @@ import {
   ViewPlugin,
   ViewUpdate,
 } from "@codemirror/view";
+import { DEFAULT_RULES, EnvRules } from "../tex/envRules";
 
 /**
  * Obsidian inlines its own copy of the CM6 language plumbing, so
@@ -49,6 +50,13 @@ const ARG_REFS = new Set([
   "addbibresource", "usepackage", "documentclass", "url",
 ]);
 
+/**
+ * The live editor's environment rules (src/tex/envRules.ts) for this view: the highlighter, the
+ * formula hover and completion read their formula environments from it. The built-in defaults
+ * unless the view provides the project's.
+ */
+export const envRulesFacet = Facet.define<EnvRules, EnvRules>({ combine: (v) => v[0] ?? DEFAULT_RULES });
+
 const CMD_RE = /\\([A-Za-z@]+\*?|.)/y;
 const ENV_ARG_RE = /\s*\{([^}]*)\}/y;
 const REF_ARG_RE = /(\s*(?:\[[^\]]*\]\s*)*)\{([^}]*)\}/y;
@@ -83,6 +91,7 @@ export function tokenizeLine(
   base: number,
   s: TokState,
   push: Push,
+  mathEnvs: { has(env: string): boolean } = MATH_ENVS,
 ): void {
   const n = text.length;
   let i = 0;
@@ -140,7 +149,7 @@ export function tokenizeLine(
           const nameFrom = end + env[0].indexOf("{") + 1;
           push(base + nameFrom, base + nameFrom + env[1].length, "ll-env");
           i = end + env[0].length;
-          if (name === "begin" && !s.math && MATH_ENVS.has(env[1])) {
+          if (name === "begin" && !s.math && mathEnvs.has(env[1])) {
             s.math = `env:${env[1]}`;
           } else if (name === "end" && s.math === `env:${env[1]}`) {
             s.math = null;
@@ -206,6 +215,7 @@ function buildDecorations(view: EditorView): DecorationSet {
     : doc.length;
   const builder = new RangeSetBuilder<Decoration>();
   const state: TokState = { math: null, verbatim: null };
+  const { math } = view.state.facet(envRulesFacet);
   const marks = new Map<string, Decoration>();
   const mark = (cls: string) => {
     let d = marks.get(cls);
@@ -217,7 +227,7 @@ function buildDecorations(view: EditorView): DecorationSet {
     if (line.from > end) break;
     tokenizeLine(line.text, line.from, state, (from, to, cls) => {
       if (to > from) builder.add(from, to, mark(cls));
-    });
+    }, math);
     // Inline math never spans a paragraph break.
     if (!line.text.trim() && (state.math === "$" || state.math === "\\)")) {
       state.math = null;
@@ -235,7 +245,7 @@ export const latexHighlightPlugin = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate): void {
-      if (update.docChanged || update.viewportChanged) {
+      if (update.docChanged || update.viewportChanged || update.startState.facet(envRulesFacet) !== update.state.facet(envRulesFacet)) {
         this.decorations = buildDecorations(update.view);
       }
     }

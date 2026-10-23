@@ -159,6 +159,10 @@ function describe(s: string, c: LatexConstruct): string {
     }
     case "image":
       return `image ${c.path}`;
+    case "command":
+      return `command ${c.name}${c.block ? " (block)" : ""}`;
+    case "caption":
+      return `caption ${c.float ?? "-"} ${s.slice(c.contentFrom, c.contentTo)}${c.label === null ? "" : ` #${c.label}`}`;
   }
 }
 const constructs = (s: string) => scanLatex(doc(s)).map((c) => describe(s, c));
@@ -260,8 +264,8 @@ test("scanLatex: \\begin/\\end lines of lists, center, figure and table alone on
   assert.deepEqual(constructs("text \\begin{itemize} \\item a\n\\end{itemize} text"), ["item •"], "not alone: the list still counts");
   assert.deepEqual(
     constructs("\\begin{figure}[htbp]\n\\begin{theorem}\n\\end{theorem}\n\\end{figure}\n\\begin{table*}[t] \\centering\n\\end{table*}"),
-    ["begin \\begin{figure}[htbp]", "env theorem", "end \\end{figure}", "end \\end{table*}"],
-    "figure and table (P4); a \\begin line with more on it stays",
+    ["begin \\begin{figure}[htbp]", "env theorem", "end \\end{figure}", "command centering", "end \\end{table*}"],
+    "figure and table (P4); a \\begin line with more on it stays (its \\centering hides on its own)",
   );
 });
 

@@ -144,3 +144,15 @@ export function locateClick(doc: Text, line: number, click: ClickText): { line: 
   const at = doc.lineAt(best!.pos);
   return { line: at.number, column: best!.pos - at.from };
 }
+
+/**
+ * Flash a rendered block (a formula or other widget): a line decoration cannot reach it, since
+ * the widget replaces its lines. The class is taken off again after FLASH_MS.
+ */
+export function flashElement(view: EditorView, el: HTMLElement): void {
+  const win = view.dom.ownerDocument.defaultView ?? window;
+  el.classList.remove("ll-reveal-flash");
+  void el.offsetWidth; // restart the animation when the same block is flashed again
+  el.classList.add("ll-reveal-flash");
+  win.setTimeout(() => el.classList.remove("ll-reveal-flash"), FLASH_MS);
+}
