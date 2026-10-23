@@ -1,12 +1,12 @@
 import type { Text } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 import type { CropKind } from "../preview/blockCrop";
-import type { EnvRules } from "../tex/envRules";
+import { blockEnvKind, type EnvRules } from "../tex/envRules";
 import type { TheoremDef, TheoremMap } from "../tex/theorems";
 import { texText } from "../tex/texText";
 import { LatexRefs, citeText, formulaRefs, refText } from "./latexRefs";
 import { LatexArg, LatexBanner, LatexConstruct, LatexEnv, LatexMath, LatexTitlePage, TextStyle, blocksAround, hasConstructs, scanLatex } from "./latexScan";
-import { TABLE_ENVS, TablePart, cellParts, parseTabular, tableSpec } from "./latexTable";
+import { TablePart, cellParts, parseTabular, tableSpec } from "./latexTable";
 import { prepareMath } from "./mathjaxProject";
 import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } from "./shared/livePreview";
 
@@ -69,16 +69,14 @@ import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } 
 //       keeps the source with the dotted error underline (its tooltip says why); a path with a
 //       macro in it, or a bare name found nowhere (TeX may find it in its tree), stays source
 //       without it.
-//   #14 a TikZ picture (tikzpicture, tikzcd, pgfpicture, circuitikz) or a table (tabular,
-//       tabular*, tabularx, longtable) whose \begin and \end are alone on their lines: a block
-//       widget with its crop from the last compile's PDF (env.crop: blockCrop.ts, while a
-//       preview holds the root's session and the block's text is the one compiled), in a paper
-//       card; the source while the cursor is on its lines, with no preview below (the crop
-//       would be stale). A new result's crop replaces the last one when it lands (the old one
-//       stays meanwhile); changed or without a crop, a TikZ picture is source and a table is
-//       drawn from its source (#23).
-//       Nothing inside a tcolorbox (elegantbook's theorems) is cropped: SyncTeX places what
-//       pgf moved ~20 pt off (cropKindOf).
+//   #14 a TikZ picture (envRules' BLOCK_ENVS: tikzpicture, tikzcd, pgfpicture, circuitikz) whose
+//       \begin and \end are alone on their lines: a block widget with its crop from the last
+//       compile's PDF (env.crop: blockCrop.ts, while a preview holds the root's session and the
+//       block's text is the one compiled), in a paper card; the source while the cursor is on
+//       its lines, with no preview below (the crop would be stale). A new result's crop replaces
+//       the last one when it lands (the old one stays meanwhile); changed or without a crop, it
+//       is source. Nothing inside a tcolorbox (elegantbook's theorems) is cropped: SyncTeX
+//       places what pgf moved ~20 pt off (cropKindOf). Tables are never cropped (#23).
 //   #17 the lines after \centering and in a center environment are centered (a line class; papers
 //       too); they stay text.
 //   Beamer (env.rules.beamer; docs/beamer.md):
@@ -91,23 +89,25 @@ import { LiveContext, LiveLanguage, RenderWidget, TextWidget, renderConstruct } 
 //       the cursor is on it; the body is text.
 //   #19 a banner command's call (a \newcommand whose body is a frame: \sectionframe): a banner
 //       card, its arguments in place and the markup between them hidden; its page as #18.
-//   #20 \titlepage (\maketitle) alone on its line: a card of the preamble's \title, \subtitle,
-//       \author, \institute and \date (env.titlePage); a click opens the \title line
-//       (env.openTitle). Source while the cursor is on its line.
+//   #20 \titlepage (\maketitle) alone on its line: one line `▸ Title page`, as #22 folds a
+//       picture; source while the cursor is on its line (a click on the line puts it there).
 //   #21 overlays: the `<..>` of \item and \only, \onslide, \uncover, \visible, \alt hides with
 //       their braces (the content stays); \pause is a hidden command (#15).
-//   #22 tables and TikZ pictures are not cropped unless env.beamerCrops() (SyncTeX places a
-//       beamer frame as a whole page): a table is drawn from its source (#23), a TikZ picture
-//       folds to one line `▸ TikZ (n lines)` until the cursor enters it (a click on the line
-//       puts it there); longtable stays source.
-//   #23 a tabular, tabular* or tabularx without a crop (#14, #22) whose \begin and \end are
-//       alone on their lines (the \begin line may go on with \toprule or \hline, the \end line
-//       with a wrapper's \end): a table widget over its lines (latexTable: columns, rows, rules,
-//       \multicolumn spans), its cells' formulas, styles and chips as in the running text and
+//   #22 a TikZ picture is not cropped unless env.beamerCrops(): it folds to one line
+//       `▸ TikZ (n lines)` until the cursor enters it (a click on the line puts it there). With
+//       it, it crops as in a paper, from its position record (blockCrop's Positions; SyncTeX
+//       places a frame as a whole page, and answers only where the records do not).
+//   #23 a table (BLOCK_ENVS: tabular, tabular*, tabularx, longtable), in papers and in beamer,
+//       whose \begin and \end are alone on their lines (the \begin line may go on with \toprule
+//       or \hline, the \end line with a wrapper's \end or a shell's `}`): a table widget over its
+//       lines (latexTable: columns, rows, rules, \multicolumn and \multirow spans, a longtable's
+//       head once), its cells' formulas, styles and chips as in the running text and
 //       their other text as it prints (an unknown command as written); a cell with a formula
 //       MathJax rejects shows its source. Inside a center environment it is centered. The source
 //       while the cursor is on its lines, with nothing below; one the parse cannot follow
-//       (unbalanced braces, a tabular inside) stays source.
+//       (unbalanced braces, a tabular inside, rows that do not fit the columns) stays source. A
+//       \resizebox, \scalebox or \rotatebox around it is a shell (latexScan's tableShell): its
+//       lines collapse like a wrapper's, and the table shows at its normal size.
 // A construct with an error diagnostic on it stays source (the lint underline shows).
 // Numbers: a request carries the formula already prepared for MathJax (prepareMath: `\label`
 // -> `\tag{n}` from the root's last compile, a reference -> the chip's text), so a compile
@@ -146,27 +146,9 @@ export interface LatexLiveEnv {
   framePage?(doc: Text, pos: number): { first: number; last: number } | null;
   /** Beamer: show PDF page `page` in the root's open preview (nothing without one). */
   showPage?(page: number): void;
-  /** Beamer: the title page's fields from the preamble (#20), or null (it stays source). */
-  titlePage?(): TitlePage | null;
-  /** Beamer: open the \title line (#20). */
-  openTitle?(): void;
-  /** Beamer: crop tables and TikZ pictures as in a paper (the "Crop tabular/TikZ in beamer" setting). */
+  /** Beamer: crop TikZ pictures as in a paper (the "Crop TikZ in beamer" setting). */
   beamerCrops?(): boolean;
 }
-
-/** A beamer title page's fields as text (`\\` a line break); empty when the preamble has none. */
-export interface TitlePage {
-  readonly title: string;
-  readonly subtitle: string;
-  readonly author: string;
-  readonly institute: string;
-  readonly date: string;
-}
-
-/** TikZ pictures and tables: PDF crops (#14). */
-export const CROP_ENVS = new Set(["tikzpicture", "tikzcd", "pgfpicture", "circuitikz", "tabular", "tabular*", "tabularx", "longtable"]);
-/** The pictures of CROP_ENVS: folded in beamer (#22). */
-const TIKZ_ENVS = new Set(["tikzpicture", "tikzcd", "pgfpicture", "circuitikz"]);
 
 /** LaTeX-only metadata for reference inspection; normal widget editing/drag events stay CM's. */
 class ReferenceWidget extends TextWidget {
@@ -199,7 +181,7 @@ const movesContent = (env: string, theorems: TheoremMap): boolean => {
 export function cropKindOf(doc: Text, block: { from: number; to: number }, env: string | null, theorems: TheoremMap): CropKind | null {
   if (blocksAround(doc, block.from, block.to).some((b) => movesContent(b.env, theorems))) return null;
   if (env === null) return "math";
-  if (CROP_ENVS.has(env)) return "picture";
+  if (blockEnvKind(env) === "picture") return "picture";
   if (movesContent(env, theorems)) return "box";
   if (/^(?:figure|table)\*?$/.test(env)) return "float";
   return theorems.has(env) ? "block" : null;
@@ -273,10 +255,10 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
   return {
     scan: (doc) => scanLatex(doc, env.rules),
     // A theorem box tests the selection on its \begin and \end lines only (decorateBox): a move
-    // inside a long one leaves it be. Every environment but a crop (which reveals over its lines)
-    // says so, since the scan this is memoized with cannot see which ones the theorem map boxes.
+    // inside a long one leaves it be. Every environment but a table or picture (which reveals over
+    // its lines) says so, since the scan this is memoized with cannot see which ones the theorem map boxes.
     // A centered run's line class never depends on the selection.
-    reveals: (c) => (c.kind === "env" && !CROP_ENVS.has(c.env) ? [[c.from, c.beginTo], [c.endFrom, c.endFrom]] : c.kind === "center" ? [] : null),
+    reveals: (c) => (c.kind === "env" && !blockEnvKind(c.env) ? [[c.from, c.beginTo], [c.endFrom, c.endFrom]] : c.kind === "center" ? [] : null),
     decorate(c, ctx) {
       const { doc } = ctx.state;
       if ("env" in c && c.env && env.visualization?.().source.has(c.env)) return;
@@ -336,7 +318,7 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
         return;
       }
       if (c.kind === "titlepage") {
-        decorateTitlePage(c, ctx, env);
+        decorateTitlePage(c, ctx);
         return;
       }
       if (c.kind === "env") {
@@ -345,16 +327,14 @@ export function latexLiveLanguage(env: LatexLiveEnv): LiveLanguage<LatexConstruc
         const beamer = !!env.rules?.beamer;
         if (beamer && c.env === "frame") decorateFrame(c, ctx, env);
         else if (def) decorateBox(c, def, ctx, refs, env.file);
-        else if (beamer && CROP_ENVS.has(c.env) && !env.beamerCrops?.()) {
-          if (TIKZ_ENVS.has(c.env)) foldPicture(c, ctx);
-          else if (TABLE_ENVS.has(c.env)) decorateTable(c, ctx);
-        } else if (CROP_ENVS.has(c.env)) {
-          // #23: a table without a crop (or whose crop failed) is drawn from its source.
-          const table = TABLE_ENVS.has(c.env) ? () => decorateTable(c, ctx) : undefined;
-          const kind = env.crop ? cropKindOf(doc, c, c.env, refs.theorems) : null;
-          const crop = kind && env.crop!(doc, c.from, c.to, kind);
-          if (crop) decorateCrop(ctx, c, crop, table);
-          else table?.();
+        else if (blockEnvKind(c.env) === "table") decorateTable(c, ctx);
+        else if (blockEnvKind(c.env) === "picture") {
+          if (beamer && !env.beamerCrops?.()) foldPicture(c, ctx);
+          else {
+            const kind = env.crop ? cropKindOf(doc, c, c.env, refs.theorems) : null;
+            const crop = kind && env.crop!(doc, c.from, c.to, kind);
+            if (crop) decorateCrop(ctx, c, crop);
+          }
         }
         return;
       }
@@ -660,29 +640,12 @@ function decorateBanner(c: LatexBanner, ctx: LiveContext, env: LatexLiveEnv): vo
   pageCorner(ctx, env, c.from, last.to);
 }
 
-/** \titlepage alone on its line (#20): the title page's card, a click opening the \title line. */
-function decorateTitlePage(c: LatexTitlePage, ctx: LiveContext, env: LatexLiveEnv): void {
-  const page = c.block ? env.titlePage?.() : null;
-  if (!page) return;
-  const { doc } = ctx.state;
-  const line = doc.lineAt(c.from);
+/** \titlepage alone on its line (#20): one line until the cursor is on it. */
+function decorateTitlePage(c: LatexTitlePage, ctx: LiveContext): void {
+  if (!c.block) return;
+  const line = ctx.state.doc.lineAt(c.from);
   if (ctx.touchLines(line.from, line.to) || ctx.hasError(line.from, line.to)) return;
-  const draw = (dom: HTMLElement) => {
-    const part = (text: string, cls: string) => {
-      if (!text) return;
-      const el = dom.ownerDocument.createElement("div");
-      el.className = cls;
-      el.textContent = text;
-      dom.appendChild(el);
-    };
-    part(page.title, "ll-titlepage-title");
-    part(page.subtitle, "ll-titlepage-subtitle");
-    part(page.author, "ll-titlepage-author");
-    part(page.institute, "ll-titlepage-institute");
-    part(page.date, "ll-titlepage-date");
-  };
-  const key = JSON.stringify(page);
-  const widget = new ActionWidget(key, draw, env.openTitle, true, "ll-titlepage", "Open \\title");
+  const widget = new TextWidget("▸ Title page", "ll-titlepage", line.text.trim());
   ctx.replace(line.from, line.to, Decoration.replace({ widget, block: true }));
 }
 

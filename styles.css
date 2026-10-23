@@ -699,36 +699,9 @@ SOFTWARE.
 .ll-editor-content .ll-banner-arg.is-arg3 {
   color: var(--text-muted);
 }
-/* \titlepage: the preamble's title page, not editable (a click opens \title). */
+/* A TikZ picture in beamer without crops, and \titlepage: one line until the cursor enters it. */
+.ll-editor-content .ll-tikz-fold,
 .ll-editor-content .ll-titlepage {
-  padding: 1em;
-  text-align: center;
-  white-space: pre-line;
-  font-family: var(--font-text);
-  cursor: pointer;
-}
-.ll-editor-content .ll-titlepage-title {
-  font-size: 1.5em;
-  font-weight: 700;
-  line-height: 1.3;
-  color: var(--text-accent);
-}
-.ll-editor-content .ll-titlepage-subtitle {
-  font-size: 1.15em;
-  color: var(--text-muted);
-}
-.ll-editor-content .ll-titlepage-author {
-  margin-top: 0.8em;
-  font-size: 1.1em;
-}
-.ll-editor-content .ll-titlepage-institute,
-.ll-editor-content .ll-titlepage-date {
-  margin-top: 0.4em;
-  font-size: 0.9em;
-  color: var(--text-muted);
-}
-/* A TikZ picture in beamer without crops: one line until the cursor enters it. */
-.ll-editor-content .ll-tikz-fold {
   display: block;
   padding: 0 0.4em;
   font-family: var(--font-interface);
@@ -783,6 +756,13 @@ SOFTWARE.
 }
 .ll-editor-content .ll-table td.is-r {
   text-align: right;
+}
+/* A \multirow over its rows: centred unless `[t]`. */
+.ll-editor-content .ll-table td.v-c {
+  vertical-align: middle;
+}
+.ll-editor-content .ll-table td.v-b {
+  vertical-align: bottom;
 }
 /* Paragraph columns (p, m, b, X) wrap. */
 .ll-editor-content .ll-table td.is-p {

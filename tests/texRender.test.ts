@@ -507,12 +507,15 @@ test("TexRender hover: a block formula shows its PDF crop, else MathJax; a block
       "  Text with $y$.",
       "  \\[ z \\]",
       "\\end{theorem}",
-      "\\begin{tabular}{l}", // 9-11
-      "  a \\\\",
-      "\\end{tabular}",
+      "\\begin{tikzpicture}", // 9-11
+      "  \\draw (0,0) -- (1,1);",
+      "\\end{tikzpicture}",
       "\\begin{minipage}{3cm}", // 12-14: crops nothing
       "  m",
       "\\end{minipage}",
+      "\\begin{tabular}{l}", // 15-17: drawn by the live editor, never cropped
+      "  a \\\\",
+      "\\end{tabular}",
     ].join("\n");
     const state = EditorState.create({ doc });
     const view = { state, dom: { ownerDocument: t.mainDocument } } as unknown as EditorView;
@@ -537,7 +540,7 @@ test("TexRender hover: a block formula shows its PDF crop, else MathJax; a block
     assert.equal((await show(7, 5))!.nodeName, "MJX-CONTAINER");
     assert.deepEqual(asked, []);
 
-    // Text in a theorem box or a table: the block's crop (waiting for a running compile), or the note.
+    // Text in a theorem box or a TikZ picture: the block's crop (waiting for a running compile), or the note.
     assert.deepEqual(at(6, 3), { kind: "block", from: state.doc.line(5).from, to: state.doc.line(8).to, env: "theorem" });
     answer = card;
     assert.equal(await show(6, 3), card);
@@ -545,8 +548,9 @@ test("TexRender hover: a block formula shows its PDF crop, else MathJax; a block
     assert.equal((await show(10, 3))!.textContent, NOTE_CHANGED);
     answer = { note: NOTE_NO_PREVIEW };
     assert.equal(await show(10, 3), null, "no preview: no section (texlab's hover alone)");
-    assert.deepEqual(asked, ["ch1.tex:5:box:true:\\begin{theorem}{Title}{t}", "ch1.tex:9:picture:true:\\begin{tabular}{l}", "ch1.tex:9:picture:true:\\begin{tabular}{l}"]);
+    assert.deepEqual(asked, ["ch1.tex:5:box:true:\\begin{theorem}{Title}{t}", "ch1.tex:9:picture:true:\\begin{tikzpicture}", "ch1.tex:9:picture:true:\\begin{tikzpicture}"]);
     assert.equal(at(13, 1), null, "an environment without a crop");
+    assert.equal(at(16, 3), null, "a table");
     assert.equal(at(1, 2), null, "plain text");
   } finally {
     t.done();
@@ -577,9 +581,9 @@ test("TexRender hover: what MathJax rejects goes to a fragment compile (not an u
       "  a &= b \\label{eq:var-def} \\\\",
       "  \\intertext{so} c &= d \\eqref{eq:var-def}",
       "\\end{align}",
-      "\\begin{tabular}{l}", // 6-8
-      "  a \\\\",
-      "\\end{tabular}",
+      "\\begin{tikzpicture}", // 6-8
+      "  \\node {a};",
+      "\\end{tikzpicture}",
     ].join("\n");
     writeFileSync(join(t.outDir, "main.aux"), "\\newlabel{eq:var-def}{{1.2}{3}{}{equation.1.2}{}}\n");
     const state = EditorState.create({ doc });
@@ -627,9 +631,9 @@ test("TexRender hover: what MathJax rejects goes to a fragment compile (not an u
     const fragmentCard = t.mainDocument.createElement("div");
     answer = fragmentCard;
     assert.equal(await show(7, 3), fragmentCard);
-    assert.deepEqual(asked, [{ body: "\\begin{tabular}{l}\n  a \\\\\n\\end{tabular}", inline: false }]);
-    answer = { error: "Misplaced alignment tab character &." };
-    assert.equal(message(await show(7, 3)), "Misplaced alignment tab character &.");
+    assert.deepEqual(asked, [{ body: "\\begin{tikzpicture}\n  \\node {a};\n\\end{tikzpicture}", inline: false }]);
+    answer = { error: "Environment tikzpicture undefined." };
+    assert.equal(message(await show(7, 3)), "Environment tikzpicture undefined.");
     answer = null;
     assert.equal((await show(7, 3))!.textContent, NOTE_CHANGED);
     crop = { note: NOTE_NO_PREVIEW };

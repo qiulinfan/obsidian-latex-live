@@ -5,7 +5,7 @@ import { basename, dirname, extname, join } from "path";
 import { CropKind, CropLocation, NOTE_CHANGED } from "../preview/blockCrop";
 import { AuxCheckpoint, AuxLabel, readAuxCheckpoints, readAuxLabels } from "../tex/auxData";
 import { BibEntry, bibFiles, readBib } from "../tex/bib";
-import { DeckFrames, DeckTitle, FramePages, deckFrames, deckTitle, readNavPages } from "../tex/beamer";
+import { DeckFrames, FramePages, deckFrames, readNavPages } from "../tex/beamer";
 import { DetectedRules, EMPTY_USER_RULES, EnvRules, UserEnvRules, detectEnvRules, frameStarts, mergeEnvRules, rulesKey } from "../tex/envRules";
 import { IMAGE_FORMATS, findGraphics, graphicsPaths } from "../tex/graphics";
 import { projectDefinitions, type Definitions } from "../tex/macros";
@@ -25,7 +25,7 @@ import { applyTemplateVisualization, parseTemplateProfiles, type TemplateVisuali
 // live preview's renderer (`rendererFor`). Obsidian's MathJax functions come in through the
 // host, so tests run this on the same MathJax bundle.
 //   Hover     `hoverTarget`: the formula at the pointer, else the innermost block that crops
-//             (latexLive's cropKindOf: a TikZ picture, a table, a theorem-like box, a figure or
+//             (latexLive's cropKindOf: a TikZ picture, a theorem-like box, a figure or
 //             table float). A display formula owning its lines shows its crop from the last
 //             compile when its text is the one compiled, else MathJax (a formula inside a
 //             tcolorbox never crops; a compile running does not wait); inline math is MathJax.
@@ -82,9 +82,9 @@ import { applyTemplateVisualization, parseTemplateProfiles, type TemplateVisuali
 //             #14; `cropOf` gives their source) render through the crops (async until drawn); the views
 //             rebuild when a compile ends or the preview closes (`cropsChanged`).
 
-/** An edit touching such a line may change the bibliography, the reference names, the theorem map or a deck's title page. */
+/** An edit touching such a line may change the bibliography, the reference names or the theorem map. */
 const REFS_LINE =
-  /\\(?:addbibresource|(?:title|subtitle|author|institute|date)\s*[[{]|addglobalbib|addsectionbib|(?:no)?bibliography\s*\{|documentclass|ProvidesClass|LoadClass|PassOptionsToClass|RequirePackage|[cC]refname|(?:elegant)?newtheorem|graphicspath|usepackage)|autorefname|cleveref/;
+  /\\(?:addbibresource|addglobalbib|addsectionbib|(?:no)?bibliography\s*\{|documentclass|ProvidesClass|LoadClass|PassOptionsToClass|RequirePackage|[cC]refname|(?:elegant)?newtheorem|graphicspath|usepackage)|autorefname|cleveref/;
 /** An edit touching such a line may change what the project defines. */
 const DEFINITION_LINE =
   /\\(?:(?:re|provide)?newcommand|[egx]?def|let|Declare|(?:New|Renew|Provide)DocumentCommand|(?:re)?newenvironment|input|include|usepackage|RequirePackage)/;
@@ -218,7 +218,7 @@ interface RootRefs {
   timer: number | null;
   /** The pending re-read covers the sources, not only the labels. */
   full: boolean;
-  /** A beamer root's frames, pages and title page (readDeck), else null. */
+  /** A beamer root's frames and pages (readDeck), else null. */
   deck: Deck | null;
 }
 
@@ -226,7 +226,6 @@ interface RootRefs {
 interface Deck {
   pages: FramePages[];
   frames: DeckFrames;
-  title: DeckTitle | null;
   /** Equal exactly when two decks are. */
   key: string;
 }
@@ -706,7 +705,7 @@ export class TexRender {
         deck = read.deck;
       } else {
         next = { ...was, ...this.readLabels(root, was) };
-        deck = r.detected.beamer ? this.readDeck(root, r.detected, [...r.files]) : null;
+        deck = r.detected.beamer ? this.readDeck(root, r.detected) : null;
       }
       const deckChanged = deck?.key !== r.deck?.key;
       r.deck = deck;
@@ -745,22 +744,21 @@ export class TexRender {
       theorems: was && sameTheorems(theorems, was.theorems) ? was.theorems : theorems,
     };
     const detected = detectEnvRules(sources);
-    return { refs, files: new Set(files), bibs: new Set(bibs), graphics: graphicsPaths(sources), detected, macros: defs.macros, deck: this.readDeck(root, detected, files) };
+    return { refs, files: new Set(files), bibs: new Set(bibs), graphics: graphicsPaths(sources), detected, macros: defs.macros, deck: this.readDeck(root, detected) };
   }
 
   /**
    * A beamer root's deck: the last compile's .nav pages, the frames of the files its body reads
-   * (open editors' text counts) and the preamble's title page; null for a paper.
+   * (open editors' text counts); null for a paper.
    */
-  private readDeck(root: string, detected: DetectedRules, files: readonly string[]): Deck | null {
+  private readDeck(root: string, detected: DetectedRules): Deck | null {
     if (!detected.beamer) return null;
     const buffers = this.host.buffers();
     const text = (f: string) => buffers.get(f) ?? (existsSync(f) ? readText(f) : null);
     const job = basename(root, extname(root));
     const pages = readNavPages(join(this.host.outDirFor(root), `${job}.nav`));
     const frames = deckFrames(root, detected.banners, text);
-    const title = deckTitle(files, text);
-    return { pages, frames, title, key: JSON.stringify([pages, [...frames.files], title]) };
+    return { pages, frames, key: JSON.stringify([pages, [...frames.files]]) };
   }
 
   /**
@@ -781,11 +779,6 @@ export class TexRender {
     if (local.starts.length !== at.count) return null;
     const k = local.starts.indexOf(pos);
     return k < 0 ? null : deck.pages[at.offset + k];
-  }
-
-  /** A beamer root's title page: its fields and the \title line (file, 0-based line), or null. */
-  titlePageOf(root: string): DeckTitle | null {
-    return this.rootRefs(root).deck?.title ?? null;
   }
 
   /**

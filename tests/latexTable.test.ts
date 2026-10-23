@@ -1,5 +1,5 @@
 // The tabular parser of the live editor's tables (latexTable.ts, latexLive #23): column specs,
-// row and cell splitting, rules, \multicolumn and \multirow, the sources it gives up on, cell
+// row and cell splitting, rules, \multicolumn and \multirow, longtable's parts, the sources it gives up on, cell
 // text and the table node.
 import "./support/dom";
 import assert from "node:assert/strict";
@@ -74,17 +74,76 @@ test("rules: \\hline (twice: double), booktabs, \\cline and \\cmidrule over thei
   assert.deepEqual(cells(src, t), [["a", "b", "c"], ["d", "e", "f"], ["g", "h", "i"], ["j", "k", "l"]]);
 });
 
-test("\\multicolumn spans with its own spec; \\multirow shows its text", () => {
+test("\\multicolumn spans with its own spec; \\multirow spans its rows and takes the empty cells it covers", () => {
   const src = "\\begin{tabular}{|l|c|r|}\n\\multicolumn{2}{|c|}{\\textbf{Head}} & \\multirow[t]{2}{*}[1ex]{tall} \\\\\nx & y & \\\\\n\\end{tabular}";
   const t = parseTabular(src)!;
   const [head] = t.rows;
   assert.equal(head.cells[0].span, 2);
   assert.equal(head.cells[0].col?.align, "c");
   assert.equal(head.cells[0].col?.ruleLeft, 1);
-  assert.deepEqual(cells(src, t), [["\\textbf{Head}", "tall"], ["x", "y", ""]]);
+  assert.deepEqual(cells(src, t), [["\\textbf{Head}", "tall"], ["x", "y"]]);
+  assert.deepEqual(head.cells.map((c) => [c.column, c.rowSpan, c.vpos]), [[1, 1, "c"], [3, 2, "t"]]);
   const spec = tableSpec(t, 0, (a, b) => src.slice(a, b), (a, b) => [{ t: "text", s: src.slice(a, b) }], false);
-  assert.deepEqual(spec.rows[0].map((c) => [c.span, c.align, c.ruleLeft, c.ruleRight]), [[2, "c", 1, 1], [1, "r", 0, 1]]);
-  assert.deepEqual(spec.rows[1].map((c) => [c.align, c.ruleLeft, c.ruleRight]), [["l", 1, 1], ["c", 0, 1], ["r", 0, 1]]);
+  assert.deepEqual(spec.rows[0].map((c) => [c.span, c.rowSpan, c.align, c.ruleLeft, c.ruleRight]), [[2, 1, "c", 1, 1], [1, 2, "r", 0, 1]]);
+  assert.deepEqual(spec.rows[1].map((c) => [c.align, c.ruleLeft, c.ruleRight]), [["l", 1, 1], ["c", 0, 1]]);
+});
+
+test("a negative \\multirow spans the rows above it; the rule under a spanned cell is the one after its last row", () => {
+  const src = [
+    "\\begin{tabular}{lll}\\toprule",
+    "& a & 1 \\\\ \\cmidrule{2-3}",
+    "& b & 2 \\\\",
+    "\\multirow{-3}{*}{G} & c & 3 \\\\ \\midrule",
+    "H & d & 4 \\\\ \\bottomrule",
+    "\\end{tabular}",
+  ].join("\n");
+  const t = parseTabular(src)!;
+  assert.deepEqual(cells(src, t), [["G", "a", "1"], ["b", "2"], ["c", "3"], ["H", "d", "4"]]);
+  const spec = tableSpec(t, 0, (a, b) => src.slice(a, b), (a, b) => [{ t: "text", s: src.slice(a, b) }], false);
+  assert.deepEqual(spec.rows[0].map((c) => [c.rowSpan, c.top, c.bottom]), [[3, "heavy", "light"], [1, "heavy", "light"], [1, "heavy", "light"]]);
+  assert.deepEqual(spec.rows[1].map((c) => [c.top, c.bottom]), [["light", null], ["light", null]]);
+  const node = tableNode(JSON.stringify(spec), document, () => document.createElement("mjx-container"));
+  const first = node.querySelector("td")!;
+  assert.equal(first.rowSpan, 3);
+  assert.match(first.className, /\bv-c\b/);
+  assert.deepEqual([...node.querySelectorAll("tr")].map((tr) => tr.children.length), [3, 2, 2, 3]);
+});
+
+test("rows that do not fit the columns keep the source", () => {
+  for (const src of [
+    "\\begin{tabular}{ll}\na & b & c\n\\end{tabular}",
+    "\\begin{tabular}{ll}\n\\multicolumn{2}{c}{a} & b\n\\end{tabular}",
+    "\\begin{tabular}{ll}\n\\multirow{3}{*}{a} & b \\\\\n & c\n\\end{tabular}",
+    "\\begin{tabular}{ll}\n\\multirow{2}{*}{a} & b \\\\\nx & c\n\\end{tabular}",
+    "\\begin{tabular}{ll}\na & b \\\\\n\\multirow{-3}{*}{x} & c\n\\end{tabular}",
+    "\\begin{tabular}{lll}\n\\multirow{2}{*}{a} & b & c \\\\\n\\multicolumn{2}{c}{} & d\n\\end{tabular}",
+  ]) assert.equal(parseTabular(src), null, src);
+});
+
+test("a longtable shows its first head once, its body and its last foot; \\kill rows go, a \\caption row spans", () => {
+  const src = [
+    "\\begin{longtable}[c]{lr}",
+    "\\caption{Results}\\label{tab:r}\\\\",
+    "\\toprule A & B \\\\ \\midrule",
+    "\\endfirsthead",
+    "\\toprule A (cont.) & B \\\\ \\midrule",
+    "\\endhead",
+    "\\midrule \\multicolumn{2}{r}{continued} \\\\",
+    "\\endfoot",
+    "\\bottomrule",
+    "\\endlastfoot",
+    "wide entry & 000 \\kill",
+    "x & 1 \\\\",
+    "y & 2 \\\\",
+    "\\end{longtable}",
+  ].join("\n");
+  const t = parseTabular(src)!;
+  assert.deepEqual(cells(src, t), [["Results"], ["A", "B"], ["x", "1"], ["y", "2"]]);
+  assert.deepEqual([t.rows[0].cells[0].span, t.rows[0].cells[0].col?.align], [2, "c"]);
+  assert.deepEqual(t.rows[2].above.map((r) => r.weight), ["light"]);
+  assert.deepEqual(t.below.map((r) => r.weight), ["heavy"]);
+  const plain = "\\begin{longtable}{ll}\nA & B \\\\\n\\endhead\na & b\n\\end{longtable}";
+  assert.deepEqual(cells(plain, parseTabular(plain)), [["A", "B"], ["a", "b"]]);
 });
 
 test("the parse gives up: unbalanced braces or $, a tabular inside, an open environment, no \\end", () => {
@@ -97,7 +156,6 @@ test("the parse gives up: unbalanced braces or $, a tabular inside, an open envi
     "\\begin{tabular}{ll}\na & b\n",
     "\\begin{tabular}{}\na\n\\end{tabular}",
     "\\begin{tabular}\na\n\\end{tabular}",
-    "\\begin{longtable}{ll}\na & b\n\\end{longtable}",
   ]) assert.equal(parseTabular(src), null, src);
 });
 

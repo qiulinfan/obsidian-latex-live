@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { existsSync, promises as fsp } from "fs";
 import { basename, delimiter, dirname, extname, join, relative, resolve, sep } from "path";
 import { texEnv, texTool, workingBiber } from "./binaries";
+import { POS_RECORDER, POS_RECORDER_FILE, POS_RECORDER_VERSION, texInput } from "./llpos";
 import { ParsedLog, parseLog } from "./logParser";
 import { Engine, logicalMapper, preambleOf } from "./project";
 import { runTex, type TexRunResult } from "./run";
@@ -178,6 +179,7 @@ export class Compiler {
     // with the distribution's and project's normal rc files.
     const hookFile = join(o.outDir, "latex-live.latexmkrc");
     await fsp.writeFile(hookFile, logreqDependencyHook(await fsp.realpath(o.outDir), this.jobName));
+    const recorder = await this.writeRecorder(o.outDir);
     const args = [
       flag,
       "-interaction=nonstopmode",
@@ -194,6 +196,9 @@ export class Compiler {
       ...(biber && biber !== texTool(o.binDir, "biber")
         ? ["-e", `$biber = q{"${biber}" %O %S}`]
         : []),
+      // The position recorder before the root; latexmk would otherwise name the job after it.
+      `-usepretex=${texInput(recorder)}`,
+      `-jobname=${this.jobName}`,
       basename(this.root),
     ];
     await this.removeLog(o.outDir);
@@ -297,10 +302,14 @@ export class Compiler {
       ...(o.shellEscape ? ["-shell-escape"] : []),
       // By name, found through TEXFORMATS: an absolute -fmt path breaks the
       // -recorder temp file name (pdfTeX prefixes it with the output dir).
-      ...(fmtBase ? [`-fmt=${basename(fmtBase)}`] : []),
-      basename(this.root),
+      // A preamble format holds the position recorder (buildFormat); without one, the recorder is
+      // read first, and the job keeps the root's name.
+      ...(fmtBase
+        ? [`-fmt=${basename(fmtBase)}`, basename(this.root)]
+        : [`-jobname=${this.jobName}`, texInput(await this.writeRecorder(o.outDir)) + texInput(basename(this.root))]),
     ];
     await this.removeLog(o.outDir);
+    await this.removePositions(o.outDir);
     const executed = await this.exec(
       texTool(o.binDir, o.engine),
       args,
@@ -343,6 +352,11 @@ export class Compiler {
     try {
       // Other runs (fragment compiles) take the format only while its stamp says it is ready.
       await fsp.rm(stamp, { force: true });
+      // mylatexformat skips the first line a run reads up to \begin{document}, so the recorder
+      // cannot come first on the command line of a run with the format: it goes into the format,
+      // through a wrapper read in place of the root.
+      const wrapper = join(o.outDir, `${fmtJob}-wrap.tex`);
+      await fsp.writeFile(wrapper, texInput(await this.writeRecorder(o.outDir)) + texInput(basename(this.root)) + "\n");
       await this.exec(
         texTool(o.binDir, o.engine),
         [
@@ -354,7 +368,7 @@ export class Compiler {
           `-jobname=${fmtJob}`,
           `&${o.engine}`,
           "mylatexformat.ltx",
-          basename(this.root),
+          wrapper,
         ],
         o,
         this.logPath(o.outDir, fmtJob),
@@ -366,7 +380,8 @@ export class Compiler {
       }
       const fls = join(o.outDir, `${fmtJob}.fls`);
       for (const p of await readFls(fls, this.toLogical)) {
-        if (resolve(p) === resolve(this.root) || !isInside(p, this.rootDir)) {
+        // Not the recorder and the wrapper (outDir may lie in the root's folder): runs rewrite them.
+        if (resolve(p) === resolve(this.root) || !isInside(p, this.rootDir) || isInside(p, o.outDir)) {
           continue;
         }
         try {
@@ -398,6 +413,21 @@ export class Compiler {
         await fsp.mkdir(join(outDir, sub), { recursive: true });
       }
     }
+  }
+
+  /** The position recorder (llpos) in `outDir`; its path. */
+  private async writeRecorder(outDir: string): Promise<string> {
+    const path = join(outDir, POS_RECORDER_FILE);
+    await fsp.writeFile(path, POS_RECORDER);
+    return path;
+  }
+
+  /**
+   * A run that dies before \begin{document} must not leave the last run's positions (latexmk's
+   * keep theirs: a run it skips reuses the PDF they describe).
+   */
+  private async removePositions(outDir: string): Promise<void> {
+    await fsp.rm(join(outDir, `${this.jobName}.llpos`), { force: true });
   }
 
   private logPath(outDir: string, job: string): string {
@@ -585,9 +615,12 @@ interface FormatStamp {
   inputs: [string, number][];
 }
 
-/** The format cache key of a preamble (preambleOf) for an engine. */
-export function formatKey(engine: Engine, preamble: string): string {
-  return createHash("sha1").update(engine + "\0" + preamble).digest("hex");
+/**
+ * The format cache key of a preamble (preambleOf) for an engine. The format holds the position
+ * recorder: a new recorder version rebuilds it.
+ */
+export function formatKey(engine: Engine, preamble: string, recorder: number = POS_RECORDER_VERSION): string {
+  return createHash("sha1").update(`${engine}\0${preamble}\0llpos ${recorder}`).digest("hex");
 }
 
 /**

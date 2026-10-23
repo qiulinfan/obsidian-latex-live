@@ -176,7 +176,7 @@ function describe(s: string, c: LatexConstruct): string {
       return `banner ${c.name}${c.args.map((a) => (a.optional ? `[${s.slice(a.from, a.to)}]` : `{${s.slice(a.from, a.to)}}`)).join("")}`;
   }
 }
-const constructs = (s: string) => scanLatex(doc(s)).map((c) => describe(s, c));
+const constructs = (s: string, rules?: Parameters<typeof scanLatex>[1]) => scanLatex(doc(s), rules).map((c) => describe(s, c));
 
 test("scanLatex: ch1's text constructs in document order, around its formulas", () => {
   const text = readFileSync(resolve(BOOK, "chapters/ch1.tex"), "utf8");
@@ -275,9 +275,51 @@ test("scanLatex: \\begin/\\end lines of lists, center, figure and table alone on
   assert.deepEqual(constructs("text \\begin{itemize} \\item a\n\\end{itemize} text"), ["item •"], "not alone: the list still counts");
   assert.deepEqual(
     constructs("\\begin{figure}[htbp]\n\\begin{theorem}\n\\end{theorem}\n\\end{figure}\n\\begin{table*}[t] \\centering\n\\end{table*}"),
-    ["begin \\begin{figure}[htbp]", "env theorem", "end \\end{figure}", "command centering", "end \\end{table*}"],
-    "figure and table (P4); a \\begin line with more on it stays (its \\centering hides on its own)",
+    ["begin \\begin{figure}[htbp]", "env theorem", "end \\end{figure}", "begin \\begin{table*}[t] \\centering", "end \\end{table*}"],
+    "figure and table (P4); layout commands after a \\begin collapse with it",
   );
+  assert.deepEqual(
+    constructs("\\begin{table}[H] \\centering text\n\\end{table}"),
+    ["command centering", "center \"\\\\begin{table}[H] \\\\centering text\"", "end \\end{table}"],
+    "text after them: the line stays",
+  );
+});
+
+test("scanLatex: layout settings and the layout commands on a wrapper's \\begin line hide next to a table (#23)", () => {
+  // ARISE deck 06_rates.tex:197 and 08_supporting.tex:618, 02_model.tex:211 (beamer: \\footnotesize hides).
+  const deck = mergeEnvRules(EMPTY_USER_RULES, detectEnvRules(["\\documentclass{beamer}"]));
+  const table = "\\begin{tabular}{cl}\\toprule\na & b\\\\\\bottomrule\n\\end{tabular}";
+  assert.deepEqual(
+    constructs(`\\begin{center}\\renewcommand{\\arraystretch}{1.35}\n${table}\\end{center}`),
+    ["begin \\begin{center}\\renewcommand{\\arraystretch}{1.35}", "center " + JSON.stringify(table), "env tabular{cl}"],
+  );
+  assert.deepEqual(
+    constructs(`\\begin{center}\n\\renewcommand{\\arraystretch}{1.25}\n${table}\n\\end{center}`),
+    ["begin \\begin{center}", "center " + JSON.stringify(`\\renewcommand{\\arraystretch}{1.25}\n${table}`), "command renewcommand (block)", "env tabular{cl}", "end \\end{center}"],
+  );
+  assert.deepEqual(
+    constructs("\\begin{center}\\footnotesize \\setlength\\tabcolsep{4pt}\\def\\arraystretch{1.2}\nx\n\\end{center}", deck),
+    ["begin \\begin{center}\\footnotesize \\setlength\\tabcolsep{4pt}\\def\\arraystretch{1.2}", "center \"x\"", "end \\end{center}"],
+  );
+  assert.deepEqual(
+    constructs("\\begin{center}\\footnotesize\nx\n\\end{center}"),
+    ["center \"\\\\begin{center}\\\\footnotesize\\nx\"", "end \\end{center}"],
+    "papers do not hide font sizes: the line stays",
+  );
+  const boxed = mergeEnvRules({ ...EMPTY_USER_RULES, wrappers: ["mybox"] }, detectEnvRules(["\\documentclass{article}"]));
+  assert.deepEqual(
+    constructs(`\\begin{table}[h]\\centering\\setlength{\\tabcolsep}{4pt}\n${table}\n\\end{table}`),
+    ["center " + JSON.stringify(table), "begin \\begin{table}[h]\\centering\\setlength{\\tabcolsep}{4pt}", "env tabular{cl}", "end \\end{table}"],
+    "a float, \\centering among them",
+  );
+  assert.deepEqual(
+    constructs(`\\begin{mybox}\\vspace{2pt}\\renewcommand\\arraystretch{1.2}\n${table}\n\\end{mybox}`, boxed),
+    ["begin \\begin{mybox}\\vspace{2pt}\\renewcommand\\arraystretch{1.2}", "env tabular{cl}", "end \\end{mybox}"],
+    "a user's wrapper",
+  );
+  assert.deepEqual(constructs("\\renewcommand{\\foo}{1}\n\\renewcommand{\\arraystretch}{\\foo}"), [], "other definitions, and a parameter set to a command, are code");
+  assert.deepEqual(constructs("\\setlength{\\parindent}{0pt}"), ["command setlength (block)"], "any length setting");
+  assert.deepEqual(constructs("x\n\\vspace{2pt} \\setlength\\tabcolsep{4pt}\ny"), ["command vspace (block)"], "alone on their line: one block");
 });
 
 test("scanLatex: environments alone on their lines are `env` constructs with their arguments and label (T-L9)", () => {

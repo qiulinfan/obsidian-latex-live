@@ -1,29 +1,38 @@
 import { tableColumns, type RuleWeight, type TableColumn, type TableRule } from "../export/tables";
+import { blockEnvKind } from "../tex/envRules";
 import { texText } from "../tex/texText";
 import type { LatexConstruct, TextStyle } from "./latexScan";
 
 // A tabular as a simple table in the live editor (latexLive #23): the source of a tabular,
-// tabular* or tabularx parsed into rows, cells and rules with their offsets (parseTabular), each
+// tabular*, tabularx or longtable parsed into rows, cells and rules with their offsets (parseTabular), each
 // cell's constructs turned into the parts a table request carries (cellParts, as the JSON of a
 // TableSpec), and the request's node (tableNode). The column spec is export's (tableColumns:
 // `|`, `@{}`, `!{}`, `>{}`, `<{}`, `*{n}{..}`; p, m, b and X are paragraph columns). Rows split
 // at the body's own `\\` (its `[len]` skipped) and cells at its own `&`: not in a group, a
 // formula or an inner environment, and not `\&`. A row starts with its rules (\hline, booktabs'
 // rules, \cline and \cmidrule over their columns); \multicolumn spans with its own spec, and
-// \multirow shows its text in its own cell (no rowspan). A source the parse cannot follow
-// (unbalanced braces or `$`, a tabular inside, an inner environment left open) is null: it
+// \multirow spans its rows (a negative count the rows above), taking the empty cells it covers.
+// A longtable's \endfirsthead, \endhead, \endfoot and \endlastfoot end rows too: it shows its
+// first head (else its head) once, its body, then its last foot (else its foot); a `\kill` row
+// goes and a `\caption` row spans the table. A source the parse cannot follow (unbalanced braces
+// or `$`, a tabular inside, an inner environment left open) or whose rows do not fit the columns
+// (more cells than columns, a \multirow over a missing row or a cell with content) is null: it
 // stays source. Pure but for tableNode's DOM.
 
-/** The environments drawn as tables. */
-export const TABLE_ENVS = new Set(["tabular", "tabular*", "tabularx"]);
-
-/** A cell: its content's offsets in the parsed source, the columns it spans and their spec. */
+/** A cell: its content's offsets in the parsed source, the columns and rows it spans and their spec. */
 export interface TabularCell {
   from: number;
   to: number;
+  /** Its first column (1-based); a \multirow above may cover the columns before it. */
+  column: number;
   span: number;
   /** A \multicolumn's own spec. */
   col: TableColumn | null;
+  /** A \multirow's rows (down from this cell's row) and vertical position. */
+  rowSpan: number;
+  vpos: "t" | "c" | "b";
+  /** Its content is a `\caption`'s argument. */
+  caption?: boolean;
 }
 
 export interface TabularRow {
@@ -45,8 +54,6 @@ const RULES = new Map<string, RuleWeight>([
 ]);
 /** Commands between rows that draw nothing here (their arguments go with them). */
 const SPACING = new Set(["addlinespace", "morecmidrules", "noalign"]);
-/** Inner environments that make the parse give up. */
-const NESTED = new Set(["tabular", "tabular*", "tabularx", "longtable"]);
 
 /** The index after the brace group opened at s[i], or -1 when it never closes. */
 function groupEnd(s: string, i: number): number {
@@ -91,11 +98,11 @@ const commentEnd = (s: string, i: number): number => {
  * ignored), or null when the parse cannot follow it.
  */
 export function parseTabular(src: string): TabularLayout | null {
-  const head = /^\\begin\s*\{(tabular\*?|tabularx)\}/.exec(src);
+  const head = /^\\begin\s*\{(tabular\*?|tabularx|longtable)\}/.exec(src);
   if (!head) return null;
   const env = head[1];
   let i = head[0].length;
-  if (env !== "tabular") {
+  if (env === "tabular*" || env === "tabularx") {
     const width = arg(src, i);
     if (!width) return null;
     i = width.end;
@@ -118,6 +125,22 @@ export function parseTabular(src: string): TabularLayout | null {
   const inner: string[] = [];
   const endCell = (to: number) => {
     row.cells.push(cell(src, cellFrom, to));
+  };
+  /** A longtable's parts so far, by the command that ended them. */
+  const parts = new Map<string, Part>();
+  /** Ends the part so far (its last row, unless it holds nothing but rules) under `name`. */
+  const endPart = (name: string, at: number): Part | null => {
+    if (fresh) {
+      if (row.cells.length) return null;
+    } else {
+      endCell(at);
+      rows.push(row);
+    }
+    const part = { rows: rows.splice(0), below: fresh ? row.above : [] };
+    parts.set(name, part);
+    row = { above: [], cells: [] };
+    fresh = true;
+    return part;
   };
   for (i = spec.end; i < src.length; ) {
     const c = src[i];
@@ -171,19 +194,13 @@ export function parseTabular(src: string): TabularLayout | null {
       if (!e) return null;
       const which = src.slice(e.from, e.to).trim();
       if (name === "begin") {
-        if (math === null && NESTED.has(which)) return null;
+        if (math === null && blockEnvKind(which) === "table") return null;
         if (math === null) inner.push(which);
       } else if (math === null) {
         if (!inner.length) {
           // The tabular's own \end: the last row, unless it holds nothing but rules.
-          if (which !== env || depth) return null;
-          if (fresh) {
-            if (row.cells.length) return null;
-            return { columns, rows, below: row.above };
-          }
-          endCell(i);
-          rows.push(row);
-          return { columns, rows, below: [] };
+          if (which !== env || depth || !endPart("", i)) return null;
+          return grid(columns, joinParts(parts));
         }
         if (inner.pop() !== which) return null;
       }
@@ -195,10 +212,15 @@ export function parseTabular(src: string): TabularLayout | null {
       i = after;
       continue;
     }
-    if (name === "\\" || name === "tabularnewline") {
+    if (env === "longtable" && LONGTABLE_PARTS.includes(name)) {
+      if (!endPart(name, i)) return null;
+      i = cellFrom = after;
+      continue;
+    }
+    if (name === "\\" || name === "tabularnewline" || (name === "kill" && env === "longtable")) {
       endCell(i);
-      rows.push(row);
-      row = { above: [], cells: [] };
+      if (name !== "kill") rows.push(row);
+      row = { above: name === "kill" ? row.above : [], cells: [] };
       fresh = true;
       i = after;
       if (name === "\\") {
@@ -240,10 +262,81 @@ export function parseTabular(src: string): TabularLayout | null {
   return null; // no \end
 }
 
-/** The cell over [from, to] of `src`: its content trimmed, a \multicolumn's span and spec, a \multirow's text. */
+/** Rows and the rules after them. */
+interface Part {
+  rows: TabularRow[];
+  below: TableRule[];
+}
+
+/** The commands that end a longtable's head and foot parts. */
+const LONGTABLE_PARTS = ["endfirsthead", "endhead", "endfoot", "endlastfoot"];
+
+/** A longtable's parts as shown once: its first head (else head), body ("") and last foot (else foot). */
+function joinParts(parts: ReadonlyMap<string, Part>): Part {
+  const shown = [parts.get("endfirsthead") ?? parts.get("endhead"), parts.get(""), parts.get("endlastfoot") ?? parts.get("endfoot")];
+  const out: Part = { rows: [], below: [] };
+  for (const part of shown) {
+    if (!part) continue;
+    if (part.rows.length) {
+      const [first, ...rest] = part.rows;
+      out.rows.push({ above: [...out.below, ...first.above], cells: first.cells }, ...rest);
+      out.below = [];
+    }
+    out.below.push(...part.below);
+  }
+  return out;
+}
+
+/**
+ * The layout of `rows` over `columns`, or null when they do not fit: each cell's first column, a
+ * `\caption` row over the whole table, a \multirow moved to its top row and the cells it covers
+ * taken out (they must be empty).
+ */
+function grid(columns: TableColumn[], { rows, below }: Part): TabularLayout | null {
+  const width = columns.length;
+  for (const row of rows) {
+    let at = 1;
+    for (const c of row.cells) {
+      c.column = at;
+      at += c.span;
+    }
+    if (at - 1 > width) return null;
+  }
+  for (const row of rows) {
+    const [only] = row.cells;
+    if (row.cells.length === 1 && only.caption) Object.assign(only, { span: width, col: CAPTION_COLUMN });
+  }
+  for (let r = 0; r < rows.length; r++) {
+    for (const c of rows[r].cells.slice()) {
+      if (c.rowSpan === 1) continue;
+      const top = c.rowSpan > 0 ? r : r + c.rowSpan + 1;
+      const n = Math.abs(c.rowSpan);
+      if (top < 0 || top + n > rows.length) return null;
+      for (let k = top; k < top + n; k++) {
+        if (k === r) continue;
+        const covered = rows[k].cells.filter((o) => o.column < c.column + c.span && o.column + o.span > c.column);
+        if (covered.some((o) => o.column < c.column || o.column + o.span > c.column + c.span || o.to > o.from)) return null;
+        rows[k].cells = rows[k].cells.filter((o) => !covered.includes(o));
+      }
+      if (top !== r) {
+        rows[r].cells = rows[r].cells.filter((o) => o !== c);
+        rows[top].cells = [...rows[top].cells, c].sort((a, b) => a.column - b.column);
+      }
+      c.rowSpan = n;
+    }
+  }
+  return { columns, rows, below };
+}
+
+/** A caption row's column: centred, no rules. */
+const CAPTION_COLUMN: TableColumn = { align: "c", width: null, ruleLeft: 0, ruleRight: 0, noPadLeft: false, noPadRight: false };
+
+/** The cell over [from, to] of `src`: its content trimmed, a \multicolumn's span and spec, a \multirow's rows and text. */
 function cell(src: string, from: number, to: number): TabularCell {
   let span = 1;
   let col: TableColumn | null = null;
+  let rowSpan = 1;
+  let vpos: TabularCell["vpos"] = "c";
   const trim = (a: number, b: number): [number, number] => {
     while (a < b && /\s/.test(src[a])) a++;
     while (b > a && /\s/.test(src[b - 1])) b--;
@@ -264,12 +357,22 @@ function cell(src: string, from: number, to: number): TabularCell {
   const row = /^\\multirow\b/.exec(src.slice(from, to));
   if (row) {
     // \multirow[vpos]{rows}[bigstruts]{width}[vmove]{text}
-    const rows = arg(src, optEnd(src, from + row[0].length));
+    const posEnd = optEnd(src, from + row[0].length);
+    const pos = /^\[\s*([tcb])\s*\]$/.exec(src.slice(skip(src, from + row[0].length), posEnd))?.[1];
+    const rows = arg(src, posEnd);
     const widthArg = rows && arg(src, optEnd(src, rows.end));
     const text = widthArg && arg(src, optEnd(src, widthArg.end));
-    if (text && text.end <= to && !src.slice(text.end, to).trim()) [from, to] = trim(text.from, text.to);
+    if (text && text.end <= to && !src.slice(text.end, to).trim()) {
+      [from, to] = trim(text.from, text.to);
+      const n = Math.trunc(Number(src.slice(rows.from, rows.to).trim()));
+      if (Math.abs(n) > 1) rowSpan = n;
+      if (pos) vpos = pos as TabularCell["vpos"];
+    }
   }
-  return { from, to, span, col };
+  const caption = /^\\caption\b/.exec(src.slice(from, to));
+  const text = caption && arg(src, optEnd(src, from + caption[0].length));
+  if (text && text.end <= to) return { from: text.from, to: text.to, column: 0, span, col, rowSpan, vpos, caption: true };
+  return { from, to, column: 0, span, col, rowSpan, vpos };
 }
 
 // ---- The request ---------------------------------------------------------------------------
@@ -283,6 +386,8 @@ export type TablePart =
 
 export interface TableSpecCell {
   span: number;
+  rowSpan: number;
+  vpos: TabularCell["vpos"];
   /** The column's alignment (`p` a paragraph column: left, wrapping) and vertical rules. */
   align: "l" | "c" | "r" | "p";
   ruleLeft: number;
@@ -323,16 +428,17 @@ export function tableSpec(layout: TabularLayout, base: number, text: (from: numb
   const { columns, rows, below } = layout;
   return {
     center,
-    rows: rows.map((row, r) => {
-      const next = rows[r + 1]?.above ?? below;
-      let at = 1;
-      return row.cells.map((cell) => {
-        const first = at;
-        at += cell.span;
-        const col = cell.col ?? columns[first - 1] ?? columns[columns.length - 1];
-        const last = cell.col ? col : (columns[at - 2] ?? col);
+    rows: rows.map((row, r) =>
+      row.cells.map((cell) => {
+        const first = cell.column;
+        const at = first + cell.span;
+        const next = rows[r + cell.rowSpan]?.above ?? below;
+        const col = cell.col ?? columns[first - 1];
+        const last = cell.col ? col : columns[at - 2];
         return {
           span: cell.span,
+          rowSpan: cell.rowSpan,
+          vpos: cell.vpos,
           align: align(col),
           ruleLeft: cell.col ? col.ruleLeft : first === 1 ? col.ruleLeft : 0,
           ruleRight: cell.col ? col.ruleRight : last.ruleRight,
@@ -342,8 +448,8 @@ export function tableSpec(layout: TabularLayout, base: number, text: (from: numb
           parts: parts(base + cell.from, base + cell.to),
           src: text(base + cell.from, base + cell.to),
         };
-      });
-    }),
+      }),
+    ),
   };
 }
 
@@ -483,7 +589,8 @@ export function tableNode(src: string, doc: Document, math: (src: string, displa
     for (const c of row) {
       const td = tr.appendChild(doc.createElement("td"));
       if (c.span > 1) td.colSpan = c.span;
-      td.className = [`is-${c.align}`, c.top && `top-${c.top}`, c.bottom && `bottom-${c.bottom}`, c.ruleLeft && `left-${Math.min(2, c.ruleLeft)}`, c.ruleRight && `right-${Math.min(2, c.ruleRight)}`].filter(Boolean).join(" ");
+      if (c.rowSpan > 1) td.rowSpan = c.rowSpan;
+      td.className = [`is-${c.align}`, c.rowSpan > 1 && c.vpos !== "t" && `v-${c.vpos}`, c.top && `top-${c.top}`, c.bottom && `bottom-${c.bottom}`, c.ruleLeft && `left-${Math.min(2, c.ruleLeft)}`, c.ruleRight && `right-${Math.min(2, c.ruleRight)}`].filter(Boolean).join(" ");
       if (c.width) td.style.width = c.width;
       try {
         fill(td, c.parts);

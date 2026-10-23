@@ -12,14 +12,14 @@ PDF 和导出仍按 TeX 处理。
 | `\begin{frame}[t]{标题}{副标题}` … `\end{frame}`（`\begin`、`\end` 各自独占一行） | 一张卡片。`\begin` 行是标题栏：标题（其中的公式照常渲染）和副标题，选项和其余标记隐藏；`\end{frame}` 行折叠。卡片内容照常编辑，里面可以有定理框 | 该行显示源码 |
 | `\frametitle{…}`、`\framesubtitle{…}` | 标题栏样式的一行，命令和花括号隐藏 | 显示源码 |
 | 卡片右上角的页码 | 这一帧在 PDF 里的页码，带 overlay 的帧显示 `a–b`。点击让已打开的 PDF 预览跳到第一页；没有打开预览时不做任何事 | — |
-| `\titlepage`（beamer 里的 `\maketitle` 同样）独占一行 | 居中的标题页卡片：导言区的 `\title`（大字）、`\subtitle`、`\author`、`\institute`、`\date`。卡片不可编辑，点击打开 `\title` 所在的行（可能在另一个文件） | 显示源码 |
+| `\titlepage`（beamer 里的 `\maketitle` 同样）独占一行 | 折叠成一行 `▸ Title page`（和 TikZ 折叠一样，点击把光标放进去）；标题页的样子看 PDF 预览 | 显示源码 |
 | `\pause`，以及 `\item`、`\only`、`\onslide`、`\uncover`、`\visible`、`\alt` 的 `<…>` | 隐藏；`\only<2>{文字}` 只藏 `\only<2>{` 和 `}`，参数照常显示 | 显示源码 |
 | `columns`、`column` 环境 | 外壳：`\begin`/`\end` 行折叠，各列上下排列（不并排） | 显示源码 |
 | 字体大小命令（`\small`、`\Large` 等） | 隐藏 | 显示源码 |
 | 横幅宏的调用，例如 `\sectionframe{Part}{标题}{说明}` | 一张居中的横幅卡片，各参数分行显示，参数可以直接编辑；右上角是页码 | 显示源码 |
 | 图片宏的调用，例如 `\DeckFigure[height=3cm]{figures/a.pdf}`，独占一行 | 显示图片（同 `\includegraphics`） | 显示源码，图片在下方 |
 | `tikzpicture`（以及 `tikzcd`、`pgfpicture`、`circuitikz`） | 折叠成一行「▸ TikZ (N lines)」。点击或光标进入时展开成源码 | 显示源码 |
-| `tabular`、`tabular*`、`tabularx`（`\begin` 独占一行，可接 `\toprule`/`\hline`；`\end` 行可接其他 `\end`） | 简单表格：列对齐，`\hline`、booktabs 线和 `\cline`/`\cmidrule` 画成横线，`\|` 画成竖线，`\multicolumn` 跨列，`\multirow` 只显示内容。格子里的公式、`\textbf` 等样式和引用照常渲染，不认识的命令照原样显示，公式渲染失败的格子显示源码。解析不了（括号不配对、表里套表等）时显示源码。`longtable` 和 `array` 不处理 | 显示源码 |
+| `tabular`、`tabular*`、`tabularx`、`longtable`（`\begin` 独占一行，可接 `\toprule`/`\hline`；`\end` 行可接其他 `\end`） | 简单表格：列对齐，`\hline`、booktabs 线和 `\cline`/`\cmidrule` 画成横线，`\|` 画成竖线，`\multicolumn` 跨列，`\multirow` 跨行（负数向上，盖住的格子要空）。longtable 的表头只显示一次（有 `\endfirsthead` 时用它），表尾放在最后（有 `\endlastfoot` 时用它），`\kill` 行不显示。外面包的 `\resizebox`、`\scalebox`、`\rotatebox`（`{` 在行末）和 adjustbox 的行折叠起来，表格按正常大小显示。格子里的公式、`\textbf` 等样式和引用照常渲染，不认识的命令照原样显示，公式渲染失败的格子显示源码。解析不了（括号不配对、表里套表、某行格子比列多、`\multirow` 盖住有内容的格子等）时整张表显示源码。`array` 不处理 | 显示源码 |
 
 **居中**（论文也生效）：`\centering` 之后到所在分组结束的行，和 `center` 环境里的行，按行居中显示，
 内容仍是可编辑的文字。
@@ -59,8 +59,18 @@ PDF 和导出仍按 TeX 处理。
 
 ## 设置
 
-**Crop tabular/TikZ in beamer**（默认关）：打开后，beamer 里的表格和 TikZ 图和论文一样显示为 PDF 裁剪图，
-不再折叠；没有裁剪图（还没编译、没有预览）的表格仍显示为简单表格。论文里的裁剪不受这个设置影响。
+**Crop TikZ in beamer**（默认关）：打开后，beamer 里的 TikZ 图和论文一样显示为 PDF 裁剪图，不再折叠。
+表格不受这个设置影响，总是由插件画成表格（论文里也一样，从不裁剪）。论文里的裁剪不受这个设置影响。
+
+裁剪的来源依次是：
+
+1. 编译时插件注入的位置记录（不改 .tex 文件）：TeX 记下每个最外层 TikZ 图的盒子。一帧的每张幻灯片按图的种类顺序
+   对回源码，块取最后一张显示它的幻灯片上的盒子，所以 `\pause`、`\only`、`\uncover`、`\begin{frame}<2>` 都能裁紧。
+2. SyncTeX，用于记录对不上的块：带 `overlay` 选项的图、`\resizebox`/`\scalebox`/`\rotatebox`/`adjustbox` 里面的、
+   `\foreach` 重复的、`[fragile]` 帧里的，以及一帧里有同种类的二选一（如两个 `\only` 各一张 TikZ 图）或
+   多出来的记录（宏里画的图）时整帧。SyncTeX 在 beamer 里常给出整页大小的区域。
+
+细节见 [设计记录](./design.md) 的“位置记录”。
 
 ## 不做的
 

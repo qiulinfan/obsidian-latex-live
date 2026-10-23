@@ -2,9 +2,10 @@ import type { ChildProcess } from "child_process";
 import type { RenderResult } from "../editor/shared/livePreview";
 import type { CompiledPdf, SessionEvent } from "../session";
 import { PdfBox, forwardSearchAll, synctexStamp } from "../tex/synctex";
-import type { PdfDoc } from "./pdfRenderer";
+import { PosRecord, RECORDED_ENVS } from "../tex/llpos";
+import type { PdfDoc, Viewport } from "./pdfRenderer";
 
-// PDF crops (design 4.6): a block MathJax cannot draw (a TikZ picture, a table, a formula it
+// PDF crops (design 4.6): a block MathJax cannot draw (a TikZ picture, a formula it
 // rejects) or that the hover shows as printed (a theorem box, a figure) is cut out of the last
 // compile's PDF. Free of the obsidian module: main.ts passes Obsidian's pdf.js in, and tests
 // run the SyncTeX part against real TeX.
@@ -14,6 +15,19 @@ import type { PdfDoc } from "./pdfRenderer";
 //             nearest to its current line giving the compiled lines (`compiledLines`; a search,
 //             not change mapping: lines inserted above must not pick the neighbouring block).
 //             Changed, a file written while the compile ran, no preview (no session): no crop.
+//   Positions a TikZ picture (RECORDED_ENVS) takes the box its compile recorded
+//             (CompiledPdf.positions, llpos) when exactly one record is its own (`pairedRecord`),
+//             drawn RECORD_PAD_PT around it; anything else asks SyncTeX (Lines, Geometry). In a
+//             paper a record is its own by (file, env, \end line). A beamer frame's body is
+//             read as an argument, so its records carry the \end{frame} line: each slide's
+//             records (by page, in order) must embed one way into the frame's outermost
+//             recorded environments as a sequence of kinds, and a block takes its box from the
+//             last slide showing it (covered content keeps its box). A frame where some slide
+//             embeds no way or two (\only alternatives of one kind, a \foreach, a picture from
+//             a macro) has none. No record either: a zero-size box or an `overlay` option, a
+//             block inside \resizebox, \scalebox, \rotatebox, \reflectbox or an adjustbox (the
+//             box is the unscaled one) or repeated by \foreach, a [fragile] frame (records
+//             name the .vrb), pgfpicture (not recorded).
 //   Lines     SyncTeX (`forwardSearchAll`, every record) over the block's lines without its
 //             \begin line (`queryLines`: at most QUERY_LINES inside, the first and last ones, and
 //             the \end line), plus the nearest lines above and below it that are not blank or a
@@ -24,7 +38,7 @@ import type { PdfDoc } from "./pdfRenderer";
 //             last line of a paragraph a display ends is tagged with the line that ended it.
 //   Geometry  measured on the synthetic books (`cropRegion`, by CropKind). A formula, a block of
 //             running text or a float takes every record left (an equation's \end line holds its
-//             number); a TikZ picture or table takes its lines' records and the enclosing box its
+//             number); a TikZ picture takes its lines' records and the enclosing box its
 //             \end line reports (tikz-cd's cells sit where TeX set them, not where pgf drew them;
 //             the picture box holds them), never the paragraph line around one in running text;
 //             a tcolorbox (elegantbook's theorems) takes its \end line's records alone: they are
@@ -56,7 +70,7 @@ import type { PdfDoc } from "./pdfRenderer";
 //             "Invert preview colors" says so (`is-inverted`, part of the request).
 
 /**
- * How a block's records make its crop (see Geometry): a formula, a TikZ picture or table, a
+ * How a block's records make its crop (see Geometry): a formula, a TikZ picture, a
  * tcolorbox, a block of running text (a theorem-like environment), a figure or table float.
  */
 export type CropKind = "math" | "picture" | "box" | "block" | "float";
@@ -110,6 +124,8 @@ const QUERY_LINES = 12;
 /** Padding above and below a region, and at its sides (a picture's neighbours in its line). */
 const PAD_PT = 4;
 const PAD_X_PT = 1.5;
+/** A recorded box is drawn this far above and below (pgf strokes reach past its bounding box). */
+const RECORD_PAD_PT = 2;
 /** A box encloses the lines' union when it reaches within this of each side. */
 const TOLERANCE_PT = 4;
 /** A first page holding less than this of a block is a shipout's leftover (onFirstPage). */
@@ -296,6 +312,159 @@ export function cropRegion(kind: CropKind, records: CropRecords): CropRegion | n
   if (above.length) region.top = Math.max(...above);
   if (under.length) region.bottom = Math.min(...under);
   return region;
+}
+
+/** `source` with its `%` comments blanked (offsets and lines kept). */
+const uncommented = (source: string) => source.replace(/(^|[^\\])(%.*)$/gm, (_, p: string, c: string) => p + " ".repeat(c.length));
+const lineAt = (source: string, offset: number) => {
+  let line = 1;
+  for (let k = source.indexOf("\n"); k >= 0 && k < offset; k = source.indexOf("\n", k + 1)) line++;
+  return line;
+};
+/** The \begin and \end tags of recorded environments, adjustboxes and frames. */
+function* envTags(text: string, from: number): Generator<RegExpExecArray> {
+  const re = /\\(begin|end)\s*\{(tikzpicture|tikzcd|circuitikz|adjustbox|frame)\}/g;
+  re.lastIndex = from;
+  for (let m = re.exec(text); m; m = re.exec(text)) yield m;
+}
+const isPositive = (r: PosRecord) => r.width > 0 && r.height > 0;
+
+/** Where `env`'s \begin at `at` ends: the offset after its \end, or -1. */
+function envEnd(text: string, at: number, env: string): number {
+  let depth = 0;
+  for (const m of envTags(text, at)) {
+    if (m[2] !== env) continue;
+    depth += m[1] === "begin" ? 1 : -1;
+    if (depth === 0) return m.index + m[0].length;
+  }
+  return -1;
+}
+
+/**
+ * Whether the environment beginning at `at` cannot take its recorded box (see Positions): an
+ * `overlay` option (no size), inside a scaling or rotating command or an adjustbox (the box is
+ * the unscaled one), or repeated by \foreach.
+ */
+function unrecordable(text: string, at: number): boolean {
+  const options = /^\\begin\s*\{[^{}]*\}\s*\[([^\]]*)\]/.exec(text.slice(at, at + 400))?.[1];
+  if (options !== undefined && /(?:^|,)\s*overlay\s*(?:[,=]|$)/.test(options)) return true;
+  let adjustbox = 0;
+  for (const m of envTags(text, 0)) {
+    if (m.index >= at) break;
+    if (m[2] === "adjustbox") adjustbox += m[1] === "begin" ? 1 : -1;
+  }
+  if (adjustbox > 0) return true;
+  // The groups open at `at`, innermost first: what their `{` follows.
+  let depth = 0;
+  for (let i = at - 1; i >= 0; i--) {
+    const c = text[i];
+    if ((c !== "{" && c !== "}") || (i > 0 && text[i - 1] === "\\")) continue;
+    if (c === "}") depth++;
+    else if (depth > 0) depth--;
+    else {
+      const head = text.slice(Math.max(0, i - 400), i);
+      if (/\\(?:resizebox|scalebox|rotatebox|reflectbox|adjustbox)\*?(?:\s*(?:\[[^\]]*\]|\{[^{}]*\}))*\s*$/.test(head)) return true;
+      if (/\\foreach\b(?:[^{}]|\{[^{}]*\})*$/.test(head)) return true;
+    }
+  }
+  return false;
+}
+
+/** The number of ways `kinds` is a subsequence of `of` (counted to 2), and the first way's indices. */
+function embeddings(kinds: readonly string[], of: readonly string[]): { count: number; at: number[] } {
+  // ways[i][j]: the ways kinds[i..] embeds into of[j..], at most 2.
+  const ways = Array.from({ length: kinds.length + 1 }, () => new Array<number>(of.length + 1).fill(0));
+  ways[kinds.length].fill(1);
+  for (let i = kinds.length - 1; i >= 0; i--)
+    for (let j = of.length - 1; j >= 0; j--) ways[i][j] = Math.min(2, ways[i][j + 1] + (kinds[i] === of[j] ? ways[i + 1][j + 1] : 0));
+  const at: number[] = [];
+  for (let i = 0, j = 0; i < kinds.length && ways[0][0] > 0; j++) if (kinds[i] === of[j] && ways[i + 1][j + 1] > 0) (at.push(j), i++);
+  return { count: ways[0][0], at };
+}
+
+/**
+ * The position record (llpos) of the block on lines `from`..`to` of `file` (its compiled text
+ * `source`; the block begins with a recorded environment and ends with its \end), or null when
+ * no record is its own (see Positions).
+ */
+export function pairedRecord(source: string, file: string, from: number, to: number, records: readonly PosRecord[]): PosRecord | null {
+  const text = uncommented(source);
+  let start = 0;
+  for (let l = 1; l < from && start >= 0; l++) start = text.indexOf("\n", start) + 1 || -1;
+  if (start < 0) return null;
+  const lineEnd = text.indexOf("\n", start) < 0 ? text.length : text.indexOf("\n", start);
+  // The block's \begin: the one on its first line whose \end is on its last.
+  let at = -1;
+  let env = "";
+  for (const m of envTags(text, start)) {
+    if (m.index >= lineEnd) break;
+    const end = m[1] === "begin" ? envEnd(text, m.index, m[2]) : -1;
+    if (end >= 0 && lineAt(text, end - 1) === to) {
+      [at, env] = [m.index, m[2]];
+      break;
+    }
+  }
+  if (at < 0 || !RECORDED_ENVS.has(env) || unrecordable(text, at)) return null;
+  // The beamer frame around it, if any.
+  const frameBegin = text.lastIndexOf("\\begin{frame}", at);
+  const frameEnd = text.indexOf("\\end{frame}", at);
+  const inFrame = frameBegin >= 0 && frameEnd >= 0 && text.lastIndexOf("\\end{frame}", at) < frameBegin;
+  if (!inFrame) {
+    // A paper: the record of its \end line.
+    const own = records.filter((r) => r.file === file && r.line === to && r.env === env);
+    return own.length === 1 && isPositive(own[0]) ? own[0] : null;
+  }
+  // A frame's body is read as an argument: its records carry its \end{frame} line. A fragile
+  // frame's are its .vrb's.
+  const options = /^\\begin\{frame\}\s*(?:<[^>]*>\s*)?(?:\[([^\]]*)\])?/.exec(text.slice(frameBegin, frameBegin + 400))?.[1] ?? "";
+  if (/\b(?:fragile|containsverbatim)\b/.test(options)) return null;
+  const key = lineAt(text, frameEnd);
+  // Its outermost recorded environments, in order (overlay pictures have no size: not counted).
+  const sources: { at: number; env: string }[] = [];
+  let depth = 0;
+  for (const m of envTags(text, frameBegin)) {
+    if (m.index >= frameEnd) break;
+    if (!RECORDED_ENVS.has(m[2])) continue;
+    if (m[1] === "end") depth = Math.max(0, depth - 1);
+    else if (depth++ === 0 && !/(?:^|,)\s*overlay\s*(?:[,=]|$)/.test(/^\\begin\s*\{[^{}]*\}\s*\[([^\]]*)\]/.exec(text.slice(m.index, m.index + 400))?.[1] ?? "")) sources.push({ at: m.index, env: m[2] });
+  }
+  const index = sources.findIndex((s) => s.at === at);
+  if (index < 0) return null;
+  // Each slide's records embed one way into the sources, or the frame has none of its own.
+  const slides = new Map<number, PosRecord[]>();
+  for (const r of records) {
+    if (r.file !== file || r.line !== key || !isPositive(r)) continue;
+    const slide = slides.get(r.page);
+    if (slide) slide.push(r);
+    else slides.set(r.page, [r]);
+  }
+  const kinds = sources.map((s) => s.env);
+  let found: PosRecord | null = null;
+  for (const page of [...slides.keys()].sort((a, b) => a - b)) {
+    const slide = slides.get(page)!;
+    const { count, at: placed } = embeddings(slide.map((r) => r.env), kinds);
+    if (count !== 1) return null;
+    // The last slide showing it: covered content keeps its box, so that one is the fullest.
+    const k = placed.indexOf(index);
+    if (k >= 0) found = slide[k];
+  }
+  return found;
+}
+
+/**
+ * A record's box as a region on its page (`page`: the page's viewport at scale 1, whose
+ * origin is its top left), clipped RECORD_PAD_PT around the box.
+ */
+export function recordRegion(record: PosRecord, page: Viewport): CropRegion {
+  const corners = page.convertToViewportRectangle?.([record.x, record.y, record.x + record.width, record.y + record.height]) ?? [
+    record.x,
+    page.height - record.y,
+    record.x + record.width,
+    page.height - record.y - record.height,
+  ];
+  const [x0, x1] = [Math.min(corners[0], corners[2]), Math.max(corners[0], corners[2])];
+  const [y0, y1] = [Math.min(corners[1], corners[3]), Math.max(corners[1], corners[3])];
+  return { page: record.page, x: x0, y: y0, width: x1 - x0, height: y1 - y0, continues: false, top: y0 - RECORD_PAD_PT, bottom: y1 + RECORD_PAD_PT };
 }
 
 /** A drawn crop: a blob URL and its size in CSS pixels. */
@@ -521,11 +690,20 @@ export class CropService {
     return hit;
   }
 
-  /** SyncTeX's records for the block's lines (see Lines), as a region (see Geometry). */
+  /**
+   * The block's region: its position record's box (see Positions), else SyncTeX's records for
+   * its lines (see Lines) as a region (see Geometry).
+   */
   private async query(r: RootCrops, file: string, from: number, to: number, kind: CropKind): Promise<CropRegion | null> {
-    const binDir = this.host.binDir();
     const source = r.compiled.source(file);
-    if (!binDir || source === undefined || r.compiled.synctex === null) return null;
+    if (source === undefined) return null;
+    const record = kind === "picture" && r.compiled.positions ? pairedRecord(source, file, from, to, r.compiled.positions) : null;
+    if (record) {
+      const doc = await this.doc(r);
+      if (record.page <= doc.numPages) return recordRegion(record, (await doc.getPage(record.page)).getViewport({ scale: 1 }));
+    }
+    const binDir = this.host.binDir();
+    if (!binDir || r.compiled.synctex === null) return null;
     const lines = queryLines(source, from, to);
     const ask = (line: number | null): Promise<PdfBox[]> =>
       line === null
@@ -542,6 +720,12 @@ export class CropService {
     ]);
     if (synctexStamp(r.compiled.pdfPath) !== r.compiled.synctex) throw new Error("The PDF changed during the query.");
     return cropRegion(kind, { before, begin, inside, end, after });
+  }
+
+  /** The result's pdf.js document, loaded on first use (see Cache). */
+  private doc(r: RootCrops): Promise<PdfDoc> {
+    if (!r.live) return Promise.reject(new Error("A newer compile replaced this one."));
+    return (r.doc ??= this.host.openPdf(r.compiled.pdf.slice()));
   }
 
   /** At most MAX_SPAWNS queries run at once. */
@@ -562,8 +746,7 @@ export class CropService {
     const region = await this.region(r, file, from, to, kind);
     if (!region) return null;
     if (!r.live) throw new Error("A newer compile replaced this one.");
-    r.doc ??= this.host.openPdf(r.compiled.pdf.slice());
-    const page = await (await r.doc).getPage(region.page);
+    const page = await (await this.doc(r)).getPage(region.page);
     const size = page.getViewport({ scale: 1 });
     const x0 = Math.max(0, region.x - PAD_X_PT);
     const y0 = Math.max(0, region.top ?? 0, region.y - PAD_PT);

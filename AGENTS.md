@@ -65,6 +65,12 @@
     stamp `<job>-preamble.json` (its key and the project files its preamble read,
     with mtimes), deleted before a rebuild and when the format proves broken;
     other runs (fragment compiles) take a format only through `readyPreambleFormat`.
+  - mylatexformat swallows the first line a run reads, up to `\begin{document}`:
+    an `\input` put before the root on the command line of a run with the preamble
+    format is lost and the run dies ("no legal \end found"). Inject through the
+    format instead (`buildFormat` reads a wrapper in place of the root; the position
+    recorder's version is part of `formatKey`). Runs without a format need an explicit
+    `-jobname`, or the job is named after the injected file.
   - Delete the job log before each run so a run that dies early never
     reports the previous log as success.
     A full latexmk no-op may reuse the existing PDF only when this invocation exits 0,
@@ -292,7 +298,11 @@
     place (bold for a term) and its constructs render; touching `\item[` or `]` reveals both. The
     `\begin`/`\end` lines of lists, `center`, `figure(*)` and `table(*)` alone on their lines
     collapse (a block replace without a widget) until the cursor is on the line; arrows reach them
-    through `enterBlocks` like any block.
+    through `enterBlocks` like any block. A wrapper's `\begin` line collapses with the hidden
+    commands and layout settings after it (`\begin{center}\renewcommand{\arraystretch}{1.35}`), for
+    any wrapper (`table`, a user's); a layout setting (envRules' `layoutSettingEnd`: `\renewcommand`/
+    `\def` of `\arraystretch`/`\baselinestretch` to a value without commands, `\setlength`,
+    `\addtolength`) is a hidden command anywhere. Beamer layout detection reads the same settings.
   - theorem boxes: latexScan emits every other environment whose `\begin` (with its balanced,
     possibly wrapped title arguments and a following `\label`) and `\end` own their lines,
     within 200 lines, as an `env`
@@ -344,19 +354,27 @@
     A name whose extension is none of graphicx's (`loss_lr0.01`) gets the extensions appended.
   - crops (P5): latexScan reports a TikZ picture (tikzpicture, tikzcd, pgfpicture, circuitikz; its
     inside still skipped) whose `\begin` and `\end` are alone on their lines as an `env`, like tables;
-    `CROP_ENVS` and a block formula whose MathJax render failed get `LatexLiveEnv.crop` (TexRender's
+    one description, envRules' `BLOCK_ENVS` (`blockEnvKind`: "table" or "picture"), says which.
+    Pictures and a block formula whose MathJax render failed get `LatexLiveEnv.crop` (TexRender's
     `cropOf`: the crop service's `locate`) and render (epoch-free requests) as a `crop` block
     widget through `renderConstruct(.., { below: false })`: its source while the cursor is on its
     lines, no preview below. While a new result's crop is pending, the block shows the crop its
     `previous` request drew (the key changes with every result, so the core's stale-while-revalidate
     cannot match it); changed, without a preview or failing (quietly) it is source (#4: MathJax's
-    error), a `TABLE_ENVS` tabular a table (#23).
+    error). Tables are drawn (#23), never cropped.
   - tables (#23, `src/editor/latexTable.ts`, pure; `tests/latexTable.test.ts`): `tabular`,
-    `tabular*` and `tabularx` (not longtable or array) whose `\begin` line may go on with
+    `tabular*`, `tabularx` and `longtable` (not array) whose `\begin` line may go on with
     `\toprule`/`\hline` and whose `\end` line with further `\end`s (latexScan's `tableAlone`).
     `parseTabular` reuses the export's column specs (`tables.ts`) and splits rows and cells at the
-    body's own `\\` and `&`; it gives up (null: source) on unbalanced braces or `$`, a tabular
-    inside, an open inner environment. `cellParts` turns a cell's constructs into parts (math,
+    body's own `\\` and `&` (longtable's `\endfirsthead`/`\endhead`/`\endfoot`/`\endlastfoot` too:
+    first head or head once, body, last foot or foot; `\kill` rows dropped, a `\caption` row spans);
+    `\multirow` gets a rowSpan (negative: upward) and takes the empty cells it covers (`grid`). It
+    gives up (null: source) on unbalanced braces or `$`, a tabular inside, an open inner
+    environment, or rows that do not fit the columns (no fallback column). A `\resizebox`,
+    `\scalebox` or `\rotatebox` whose `{` ends its line and holds just a table is a shell
+    (latexScan's `tableShell`): its line and its `}` line collapse as hidden commands (the `}` may
+    instead follow the table's `\end`); adjustbox is a default wrapper. The table shows at its
+    normal size. `cellParts` turns a cell's constructs into parts (math,
     styles, chips; hidden commands omitted; anything else its source) and the gaps into text
     (`cellText`: unknown commands as written). latexLive sends the spec as JSON in a `table` block
     request (`below: false`), TexRender's `renderLive` builds it with `tableNode` through the

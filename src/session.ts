@@ -10,6 +10,7 @@ import {
 } from "./tex/compiler";
 import { TexDiagnostic } from "./tex/logParser";
 import { detectEngine, Engine } from "./tex/project";
+import { PosRecord, readLlpos } from "./tex/llpos";
 import { synctexStamp } from "./tex/synctex";
 import type LatexLivePlugin from "./main";
 
@@ -34,6 +35,11 @@ export interface CompiledPdf {
    * later pass's, whose lines are not this PDF's (crops query SyncTeX while compiles run).
    */
   readonly synctex: number | null;
+  /**
+   * The position records the compile wrote (`<job>.llpos`, llpos), read when the result lands
+   * (the next run starts after), or null without them.
+   */
+  readonly positions: readonly PosRecord[] | null;
 }
 
 let compiledSeq = 0;
@@ -126,6 +132,7 @@ export class LatexSession {
             pdf: r.pdfData,
             source: compiledSources(this.sources, this.startedAt, (f) => this.inProject(f)),
             synctex: synctexStamp(r.pdfPath),
+            positions: readLlpos(r.pdfPath, this.compiler.rootDir, this.compiler.toLogical),
           };
         }
         this.emit("result");

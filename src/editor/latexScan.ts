@@ -1,8 +1,7 @@
 import type { Text } from "@codemirror/state";
 import { texText } from "../tex/texText";
-import { Arity, DEFAULT_RULES, EnvRules, commandEnd } from "../tex/envRules";
+import { Arity, DEFAULT_RULES, EnvRules, commandEnd, blockEnvKind, layoutSettingEnd } from "../tex/envRules";
 import { CITE_COMMANDS, VERBATIM_ENVS, iffalseEnd, iffalseStarts } from "./latexHighlight";
-import { TABLE_ENVS } from "./latexTable";
 
 // The constructs a LaTeX document renders: pure, no CodeMirror view and no Obsidian, so the
 // hover and live preview share one scan and tests run it directly (design 4.3, 4.4).
@@ -24,14 +23,20 @@ import { TABLE_ENVS } from "./latexTable";
 //             references, citations and labels. An \item[label]
 //             with math or a reference in it keeps its label in place, scanned on. Figure and
 //             table \begin/\end lines alone on their lines collapse like lists (#8), an
-//             \includegraphics alone on its line is an image (#13).
+//             \includegraphics alone on its line is an image (#13). A wrapper's \begin line takes
+//             the hidden commands and layout settings (envRules' layoutSettingEnd) after it
+//             (`\begin{center}\small`); a layout setting (`\renewcommand{\arraystretch}{1.35}`) is
+//             a hidden command. A \resizebox, \scalebox or \rotatebox whose `{` ends its line
+//             and holds just a table is a shell (#23): its line and its `}` line are hidden
+//             commands; adjustbox is a wrapper.
 //             A heading's title and a style's content are scanned on: constructs nest, in
 //             document order. A definition (\newcommand, \def, \newenvironment, ...) is code:
 //             nothing in it is a construct (macro files have no \begin{document}).
 //   Envs      any other environment whose \begin (with the arguments and \label on its line) and
 //             \end are alone on their lines, within MAX_LINES lines, is an `env` construct: the
-//             language decides with the project's theorem map whether it is a box (#12), or a
-//             PDF crop (#14: TikZ pictures, whose inside is skipped, and tables). The arguments
+//             language decides with the project's theorem map whether it is a box (#12), and
+//             envRules' BLOCK_ENVS whether it is a table (#23) or a TikZ picture (#14, its
+//             inside skipped). The arguments
 //             are scanned on (a title's math); nested environments pair by name. `blockAt`
 //             finds them (and figure and table floats) for the render hover's crops.
 //   Cost      memoized per document (Text), like the highlighter's own state. Formulas inside
@@ -134,8 +139,8 @@ export interface LatexArg {
 
 /**
  * An environment whose \begin and \end are alone on their lines (not a list, center, figure,
- * table, formula or verbatim): a theorem-like box when the project defines it (#12), a PDF crop
- * when it is a TikZ picture or a table (#14).
+ * table, formula or verbatim): a theorem-like box when the project defines it (#12), else what
+ * envRules' BLOCK_ENVS makes it (a table #23, a TikZ picture #14).
  */
 export interface LatexEnv {
   readonly kind: "env";
@@ -483,12 +488,49 @@ const aloneOnLines = (s: string, from: number, to: number): boolean =>
 
 /**
  * A table's \begin (#23) may share its line with the first rules (`\begin{tabular}{cll}\toprule`),
- * its \end with the \end of the wrappers around it (`\end{tabular}\end{center}`).
+ * its \end with the \end of the wrappers around it (`\end{tabular}\end{center}`) and a shell's `}`.
  */
 const TABLE_BEGIN_TAIL = /^(?:\s*\\(?:hline|toprule|midrule)(?![A-Za-z])(?:\[[^\]\n]*\])?)*\s*(%.*)?$/;
-const TABLE_END_TAIL = /^(?:\s*\\end\s*\{[^{}\n]*\})*\s*(%.*)?$/;
+const TABLE_END_TAIL = /^(?:\s*(?:\\end\s*\{[^{}\n]*\}|\}))*\s*(%.*)?$/;
 const tableAlone = (s: string, from: number, to: number, tail: RegExp): boolean =>
   !s.slice(s.lastIndexOf("\n", from - 1) + 1, from).trim() && tail.test(s.slice(to, lineEnd(s, to)));
+
+/** Box commands around a table (#23): their mandatory arguments before the box's own `{`. */
+const TABLE_SHELLS = new Map([["resizebox", 2], ["scalebox", 1], ["rotatebox", 1]]);
+
+/**
+ * A box command at s[i] (its name ending at j) whose `{` ends its line and holds just a table
+ * (`\resizebox{\textwidth}{!}{%`, then the tabular, then `}`): its line, and its `}` when that is
+ * alone on its line (else it follows the table's \end on its line). The table shows at its
+ * normal size; the shell's lines collapse like a wrapper's.
+ */
+function tableShell(s: string, i: number, j: number, mandatory: number): { openTo: number; close: number | null; tableEnd: number } | null {
+  if (s.slice(s.lastIndexOf("\n", i - 1) + 1, i).trim()) return null;
+  const opt = () => {
+    const k = skipBlanks(s, j);
+    if (s[k] === "[") j = argEnd(s, k);
+  };
+  if (s[j] === "*") j++;
+  for (let a = 0; a < mandatory && j > 0; a++) {
+    opt();
+    const k = skipBlanks(s, j);
+    j = s[k] === "{" ? argEnd(s, k) : -1;
+  }
+  if (j < 0) return null;
+  opt();
+  const open = skipBlanks(s, j);
+  if (s[open] !== "{" || !/^\s*(%.*)?$/.test(s.slice(open + 1, lineEnd(s, open)))) return null;
+  const head = /^(?:\s|%[^\n]*)*\\begin\s*\{([^{}\n]*)\}/.exec(s.slice(open + 1, open + 400));
+  const env = head?.[1].trim();
+  if (!env || blockEnvKind(env) !== "table") return null;
+  const endTag = `\\end{${env}}`;
+  const tableEnd = s.indexOf(endTag, open);
+  if (tableEnd < 0 || lineBreaks(s, open, tableEnd) > MAX_LINES) return null;
+  const after = /^(?:[ \t]*(?:%[^\n]*)?\n)*?[ \t]*\}/.exec(s.slice(tableEnd + endTag.length));
+  if (!after) return null;
+  const close = tableEnd + endTag.length + after[0].length - 1;
+  return { openTo: open + 1, close: close > lineEnd(s, tableEnd) && aloneOnLines(s, close, close + 1) ? close : null, tableEnd };
+}
 
 const labelsIn = (src: string): string[] => [...src.matchAll(/\\label\s*\{([^{}]*)\}/g)].map((m) => m[1].trim());
 
@@ -602,11 +644,6 @@ const DEFINERS = new Set([
   "newenvironment", "renewenvironment", "NewDocumentEnvironment", "RenewDocumentEnvironment",
   "DeclareMathOperator", "DeclarePairedDelimiter", "DeclarePairedDelimiterX", "newtheorem",
 ]);
-/**
- * TikZ code (#14, a PDF crop in P5): nothing in it is a construct. `($(a)!(b)!(c)$)` is a calc
- * coordinate, `$\t$` a \foreach variable, a node's `[label={\textbf{A}}]` an option.
- */
-const TIKZ_ENVS = new Set(["tikzpicture", "tikzcd", "pgfpicture", "circuitikz"]);
 /** The counters of enumerate levels 1-4 (\setcounter{enumii}{3} inside a list). */
 const ENUM_COUNTERS: Record<string, number> = { enumi: 1, enumii: 2, enumiii: 3, enumiv: 4 };
 /**
@@ -665,6 +702,26 @@ function argEnd(s: string, i: number, maxLines = 0): number {
     }
   }
   return -1;
+}
+
+/**
+ * Hidden commands and layout settings from s[j] on the same line (`\centering\small`), or null
+ * when there are none; `centering`: one of them is `\centering`.
+ */
+function layoutTail(s: string, j: number, rules: EnvRules): { end: number; centering: boolean } | null {
+  const cmd = /[ \t]*\\([A-Za-z@]+\*?)/y;
+  let end = j;
+  let centering = false;
+  for (let m; (cmd.lastIndex = end), (m = cmd.exec(s)); ) {
+    const name = m[1];
+    const base = name.endsWith("*") ? name.slice(0, -1) : name;
+    let e = layoutSettingEnd(s, cmd.lastIndex, name, argEnd);
+    if (e < 0 && rules.hidden.has(base)) e = commandEnd(s, cmd.lastIndex, rules.hidden.get(base) ?? null, false, (t, k) => argEnd(t, k));
+    if (e < 0) break;
+    centering ||= base === "centering";
+    end = e;
+  }
+  return end > j ? { end, centering } : null;
 }
 
 type Counter = "arabic" | "alph" | "Alph" | "roman" | "Roman";
@@ -943,6 +1000,8 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
   /** The figures and tables open here, with their captions. */
   const floats: { env: string; captions: OpenCaption[] }[] = [];
   const envs: OpenEnv[] = [];
+  /** A table shell's `}` line (#23), by its table's \end. */
+  const shellCloses = new Map<number, LatexCommand>();
   const ends: TextEnds = new Map();
   const math = (from: number, to: number, display: boolean, env: string | null, src: string) => {
     if (!src.trim()) return;
@@ -1012,6 +1071,27 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
       continue;
     }
     const base = name.endsWith("*") ? name.slice(0, -1) : name;
+    const shell = TABLE_SHELLS.has(base) ? tableShell(s, i, j, TABLE_SHELLS.get(base)!) : null;
+    if (shell) {
+      out.push({ kind: "command", from: i, to: shell.openTo, name: base, block: true });
+      if (shell.close !== null) shellCloses.set(shell.tableEnd, { kind: "command", from: shell.close, to: shell.close + 1, name: base, block: true });
+      i = shell.openTo;
+      continue;
+    }
+    // Hidden commands and layout settings alone on their line collapse together (`\centering\small`).
+    const run = layoutTail(s, i, rules);
+    if (run && aloneOnLines(s, i, run.end)) {
+      out.push({ kind: "command", from: i, to: run.end, name: base, block: true });
+      if (run.centering) pushCenter(out, centerFrom(s, run.end));
+      i = run.end;
+      continue;
+    }
+    const setting = layoutSettingEnd(s, j, name, argEnd);
+    if (setting > 0) {
+      out.push({ kind: "command", from: i, to: setting, name: base, block: aloneOnLines(s, i, setting) });
+      i = setting;
+      continue;
+    }
     if (DEFINERS.has(base)) {
       i = definitionEnd(s, j);
       continue;
@@ -1200,19 +1280,23 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
           const open = envs[at];
           if (open) {
             envs.length = at;
-            const alone = TABLE_ENVS.has(env) ? tableAlone(s, i, j, TABLE_END_TAIL) : aloneOnLines(s, i, j);
+            const alone = blockEnvKind(env) === "table" ? tableAlone(s, i, j, TABLE_END_TAIL) : aloneOnLines(s, i, j);
             if (open.at >= 0 && alone && lineBreaks(s, open.from, i) <= MAX_LINES) {
               const { from, beginTo, args, label } = open;
               out[open.at] = { kind: "env", from, to: j, env, beginTo, endFrom: i, args, label };
             }
+            const close = shellCloses.get(i);
+            if (close) out.push(close);
           }
         }
       } else if (VERBATIM_ENVS.has(env)) {
         const e = s.indexOf(`\\end{${env}}`, j);
         j = e < 0 ? n : e + env.length + 6;
-      } else if (TIKZ_ENVS.has(env)) {
-        // A half-typed picture (no \end yet) hides nothing below it. One whose \begin (with
-        // its options) and \end are alone on their lines is an `env` (a PDF crop, #14).
+      } else if (blockEnvKind(env) === "picture") {
+        // TikZ code: nothing in it is a construct. `($(a)!(b)!(c)$)` is a calc coordinate, `$\t$`
+        // a \foreach variable, a node's `[label={\textbf{A}}]` an option. A half-typed picture
+        // (no \end yet) hides nothing below it. One whose \begin (with its options) and \end are
+        // alone on their lines is an `env` (a PDF crop, #14).
         const e = s.indexOf(`\\end{${env}}`, j);
         if (e >= 0) {
           const to = e + env.length + 6;
@@ -1265,6 +1349,12 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
           const label = /^[ \t]*\\label\s*\{[^{}\n]*\}/.exec(s.slice(j, j + 200));
           if (label && aloneOnLines(s, i, j + label[0].length)) j += label[0].length;
         }
+        // Layout commands after it on its line collapse with it (`\begin{center}\renewcommand{\arraystretch}{1.35}`).
+        const tail = rules.wrappers.has(env) ? layoutTail(s, j, rules) : null;
+        if (tail && aloneOnLines(s, i, tail.end)) {
+          j = tail.end;
+          if (tail.centering) pushCenter(out, centerFrom(s, j));
+        }
         if (rules.wrappers.has(env) && aloneOnLines(s, i, j)) out.push({ kind: "envline", from: i, to: j, env, begin: true });
         if (env === "center") pushCenter(out, centerFrom(s, j));
       } else if (env !== "document") {
@@ -1281,7 +1371,7 @@ function scanText(s: string, rules: EnvRules): LatexConstruct[] {
           LABEL.lastIndex = lineEnd(s, beginTo) + 1;
           label = LABEL.lastIndex < n ? LABEL.exec(s) : null;
         }
-        const alone = TABLE_ENVS.has(env) ? tableAlone(s, i, beginTo, TABLE_BEGIN_TAIL) : aloneOnLines(s, i, beginTo);
+        const alone = blockEnvKind(env) === "table" ? tableAlone(s, i, beginTo, TABLE_BEGIN_TAIL) : aloneOnLines(s, i, beginTo);
         const at = alone ? out.push(null) - 1 : -1;
         envs.push({ env, from: i, beginTo, args, label: label ? label[1].trim() : null, at });
       }

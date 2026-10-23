@@ -1,10 +1,9 @@
 // Beamer decks (docs/beamer.md): detection of banners, image and layout macros (envRules), the
-// frames counted per file in reading order, the .nav's pages and the preamble's title page
-// (src/tex/beamer.ts).
+// frames counted per file in reading order, the .nav's pages (src/tex/beamer.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join, resolve } from "node:path";
-import { deckFrames, deckTitle, navPages } from "../src/tex/beamer";
+import { deckFrames, navPages } from "../src/tex/beamer";
 import { detectEnvRules, frameStarts, mergeEnvRules, EMPTY_USER_RULES } from "../src/tex/envRules";
 
 const PREAMBLE = [
@@ -62,7 +61,7 @@ test("frameStarts:\\begin{frame} and banner calls outside comments; a root's fro
   assert.equal(frameStarts(root, banners, true).length, 1, "the definition in the preamble is no frame");
 });
 
-test("deck: the .nav's pages, the frames per file in reading order, the title page from the preamble", () => {
+test("deck: the .nav's pages, the frames per file in reading order", () => {
   assert.deepEqual(navPages("\\headcommand {\\beamer@framepages {1}{1}}\n\\headcommand {\\beamer@framepages {2}{4}}"), [
     { first: 1, last: 1 },
     { first: 2, last: 4 },
@@ -92,11 +91,4 @@ test("deck: the .nav's pages, the frames per file in reading order, the title pa
   assert.deepEqual(f.files.get(join(dir, "slides/one.tex")), { offset: 1, count: 3 });
   assert.deepEqual(f.files.get(join(dir, "slides/two.tex")), { offset: 5, count: 1 });
   assert.equal(f.files.has(join(dir, "preamble.tex")), false, "the preamble's \\input is not the body");
-  const t = deckTitle([join(dir, "main.tex"), join(dir, "preamble.tex")], text);
-  assert.deepEqual(t, {
-    fields: { title: "Long\ntitle", subtitle: "", author: "A\nB", institute: "Uni", date: "Master's talk\n2026" },
-    file: join(dir, "main.tex"),
-    line: 2,
-  });
-  assert.equal(deckTitle([join(dir, "slides/two.tex")], text), null, "no \\title");
 });

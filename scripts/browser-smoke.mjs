@@ -31,7 +31,7 @@
 //       flashes it, the cursor on the line above; a click 2 px beside it or ArrowRight onto it reveals its source; a chip whose \label is in
 //       another file calls `elsewhere` once per click, 5 of 5
 //   B10 a beamer deck (docs/beamer.md) with the plugin's styles: a frame card's title bar, its
-//       page in the corner, a \sectionframe banner, the title page and the TikZ fold; every
+//       page in the corner, a \sectionframe banner, the title page fold and the TikZ fold; every
 //       gutter number sits on its line (±1 px); ArrowDown visits each shown line of the card in
 //       order; a real click on the page number shows that page, one on the fold opens its source
 //   B11 a tabular in a frame card (latexTable.ts, latexLive #23): a table with its cells, rule
@@ -100,7 +100,7 @@ const refs = {
   checkpoints: new Map(),
 };
 const latex = latexLiveLanguage({ refs: () => refs, rules });
-/** B10: a deck's rules (beamer, a banner, a layout macro), its pages and title page. */
+/** B10: a deck's rules (beamer, a banner, a layout macro) and its pages. */
 const deckRules = mergeEnvRules(EMPTY_USER_RULES, detectEnvRules([[
   "\\documentclass{beamer}",
   "\\newcommand{\\sectionframe}[2]{\\begin{frame}\\centering{\\Huge #1}\\\\#2\\end{frame}}",
@@ -112,7 +112,6 @@ const deck = latexLiveLanguage({
   rules: deckRules,
   framePage: (doc, pos) => { const n = doc.lineAt(pos).number; return { first: n, last: n + 1 }; },
   showPage: (page) => window.__pages.push(page),
-  titlePage: () => ({ title: "A Talk", subtitle: "", author: "A. Author", institute: "Uni", date: "2026" }),
   beamerCrops: () => false,
 });
 window.__jumpedElsewhere = [];
@@ -925,15 +924,15 @@ async function b10({ page, evaluate }) {
       math: !!q(".ll-frame-head .lsp-lp-math"),
       pages: [...v.contentDOM.querySelectorAll(".ll-frame-page")].map((e) => e.textContent),
       banner: !!q(".lsp-lp-box.ll-banner"),
-      title: q(".ll-titlepage-title")?.textContent,
+      title: q(".ll-titlepage")?.textContent,
       fold: q(".ll-tikz-fold")?.textContent,
       text: v.contentDOM.textContent,
       worst: Math.max(...rows.map((r) => Math.abs(r[1]))), off: rows.filter((r) => Math.abs(r[1]) > 1),
     };
   })()`);
-  check("B10", "two frame cards, the title bar (math rendered), pages in the corners, a banner, the title page and the fold",
-    shown.frames === 2 && shown.math && shown.banner && shown.title === "A Talk" && shown.fold === "▸ TikZ (4 lines)" &&
-      JSON.stringify(shown.pages) === JSON.stringify(["2–3", "5–6", "16–17"]) && !/\\begin\{frame|<2->|DeckGap|\\end\{frame/.test(shown.text),
+  check("B10", "two frame cards, the title bar (math rendered), pages in the corners, a banner, the title page fold and the TikZ fold",
+    shown.frames === 2 && shown.math && shown.banner && shown.title === "▸ Title page" && shown.fold === "▸ TikZ (4 lines)" &&
+      JSON.stringify(shown.pages) === JSON.stringify(["2–3", "5–6", "16–17"]) && !/\\begin\{frame|<2->|DeckGap|\\end\{frame|\\titlepage/.test(shown.text),
     { head: shown.head, pages: shown.pages, fold: shown.fold, text: shown.text });
   check("B10", "gutter numbers sit on their lines (±1 px)", shown.worst <= 1, shown.off);
   // ArrowDown from line 1 through the second card: each shown line once, in order (the \\end

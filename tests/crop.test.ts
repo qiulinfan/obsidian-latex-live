@@ -22,8 +22,11 @@ import {
   NOTE_NO_PREVIEW,
   compiledLines,
   cropRegion,
+  pairedRecord,
   queryLines,
+  recordRegion,
 } from "../src/preview/blockCrop";
+import { POS_RECORDER, POS_RECORDER_FILE, PosRecord, readLlpos, texInput } from "../src/tex/llpos";
 import type LatexLivePlugin from "../src/main";
 import { CompiledPdf, LatexSession, SessionEvent, outDirFor } from "../src/session";
 import { resolveTexBinDir, texEnv, texTool } from "../src/tex/binaries";
@@ -33,6 +36,7 @@ import { waitFor } from "./support/keyMatrix";
 
 const box = (page: number, x: number, y: number, width: number, height: number): PdfBox => ({ page, x, y, width, height });
 const bottom = (b: PdfBox) => b.y + b.height;
+const binDir = process.env.TEXBIN ?? resolveTexBinDir("");
 
 test("compiledLines: the occurrence nearest to where the text starts now; null for text never compiled", () => {
   const block = "\\begin{align}\n  a &= b\n\\end{align}";
@@ -161,10 +165,220 @@ test("cropRegion: what a page shipped out while the block was read is dropped, a
   assert.equal(broken.top!.toFixed(2), "380.74", "the padding stops at the line before");
 });
 
+const rec = (serial: number, env: string, page: number, file: string, line: number, size = 10): PosRecord => ({
+  serial,
+  env,
+  page,
+  x: 50,
+  y: 100 + serial,
+  width: size,
+  height: size,
+  file,
+  line,
+});
+/** The pairing of each block (its first and last line) as [serial or null]. */
+const paired = (source: string, records: PosRecord[], blocks: [number, number][]) =>
+  blocks.map(([from, to]) => pairedRecord(source, "/p/main.tex", from, to, records)?.serial ?? null);
+
+test("pairedRecord: a paper's block takes the one record of its \\end line; scaled, repeated, overlay or zero-size ones none", () => {
+  const source = [
+    "\\begin{tikzpicture}", // 1
+    "  \\draw (0,0) -- (1,1);",
+    "\\end{tikzpicture}", // 3
+    "\\resizebox{\\linewidth}{!}{%",
+    "\\begin{tikzcd}", // 5
+    "  a \\arrow[r] & b",
+    "\\end{tikzcd}}", // 7
+    "\\begin{center}\\begin{tikzcd} x \\end{tikzcd}\\end{center}", // 8
+    "\\foreach \\k in {1,2} {\\begin{tikzpicture}\\draw (0,0) circle (1);\\end{tikzpicture}}", // 9
+    "\\begin{tikzpicture}[remember picture, overlay]", // 10
+    "\\end{tikzpicture}", // 11
+    "\\begin{adjustbox}{width=\\linewidth}", // 12
+    "\\begin{tikzcd} y \\end{tikzcd}", // 13
+    "\\end{adjustbox}",
+    "% \\begin{tikzpicture}",
+    "\\begin{tikzpicture}\\draw (0,0) -- (1,0);\\end{tikzpicture} % \\end{tikzpicture}", // 16
+    "\\begin{tabular}{c} z \\end{tabular}", // 17
+    "\\begin{tikzpicture}", // 18
+    "\\end{tikzpicture}", // 19
+  ].join("\n");
+  const file = "/p/main.tex";
+  const records = [
+    rec(1, "tikzpicture", 1, file, 3),
+    rec(2, "tikzcd", 1, file, 7),
+    rec(3, "tikzcd", 1, file, 8),
+    rec(4, "tikzpicture", 1, file, 9),
+    rec(5, "tikzpicture", 1, file, 9),
+    rec(6, "tikzpicture", 1, file, 11, 0),
+    rec(7, "tikzcd", 1, file, 13),
+    rec(8, "tikzpicture", 2, file, 16),
+    rec(9, "tikzpicture", 2, file, 19, 0),
+    rec(10, "tikzpicture", 2, "/p/other.tex", 3),
+    // A table is drawn, never cropped: even a record of its line is not its own.
+    rec(11, "tabular", 2, file, 17),
+  ];
+  assert.deepEqual(paired(source, records, [[1, 3], [5, 7], [8, 8], [9, 9], [10, 11], [13, 13], [16, 16], [17, 17], [18, 19]]), [1, null, 3, null, null, null, 8, null, null]);
+  // Two blocks' records on one line: neither is its own.
+  assert.equal(paired(source, [...records, rec(11, "tikzpicture", 1, file, 3)], [[1, 3]])[0], null);
+  // No record of its line (a picture in a macro's argument read on another line).
+  assert.equal(paired(source, records.slice(1), [[1, 3]])[0], null);
+});
+
+test("pairedRecord: a frame's slides embed one way into its pictures; a block takes the last slide's box", () => {
+  const source = [
+    "\\begin{frame}{Pause}", // 1
+    "  \\begin{tikzcd} a \\arrow[r] & b \\end{tikzcd}", // 2
+    "  \\pause",
+    "  \\begin{tikzpicture}\\draw (0,0) rectangle (2,1);\\end{tikzpicture}", // 4
+    "  \\begin{tikzpicture}[overlay]\\draw (0,0) -- (1,1);\\end{tikzpicture}", // 5
+    "\\end{frame}", // 6
+    "\\begin{frame}{Only}", // 7
+    "  \\only<1>{\\begin{tikzpicture}\\draw (0,0) circle (1);\\end{tikzpicture}}", // 8
+    "  \\only<2>{\\begin{tikzcd} two \\end{tikzcd}}", // 9
+    "\\end{frame}", // 10
+    "\\begin{frame}{Alternatives of one kind}", // 11
+    "  \\only<1>{\\begin{tikzpicture}\\draw (0,0) circle (1);\\end{tikzpicture}}", // 12
+    "  \\only<2>{\\begin{tikzpicture}\\draw (0,0) circle (2);\\end{tikzpicture}}", // 13
+    "\\end{frame}", // 14
+    "\\begin{frame}{Foreach}", // 15
+    "  \\foreach \\k in {1,2,3} { \\begin{tikzpicture}\\draw (0,0) circle (0.3);\\end{tikzpicture} }", // 16
+    "\\end{frame}", // 17
+    "\\begin{frame}[fragile]{Verbatim}", // 18
+    "  \\begin{tikzcd} \\verb|x| \\end{tikzcd}", // 19
+    "\\end{frame}", // 20
+    "\\begin{frame}<2>{Restricted}", // 24
+    "  \\begin{tikzpicture}", // 22
+    "    \\node {\\begin{tabular}{c} in a node \\end{tabular}};",
+    "  \\end{tikzpicture}", // 24
+    "\\end{frame}", // 25
+  ].join("\n");
+  const file = "/p/main.tex";
+  const records = [
+    // Pause: two slides, the overlay picture zero-size.
+    rec(1, "tikzcd", 1, file, 6),
+    rec(2, "tikzpicture", 1, file, 6),
+    rec(3, "tikzpicture", 1, file, 6, 0),
+    rec(4, "tikzcd", 2, file, 6),
+    rec(5, "tikzpicture", 2, file, 6),
+    rec(6, "tikzpicture", 2, file, 6, 0),
+    // Only: one record per slide.
+    rec(7, "tikzpicture", 3, file, 10),
+    rec(8, "tikzcd", 4, file, 10),
+    // Alternatives of one kind.
+    rec(9, "tikzpicture", 5, file, 14),
+    rec(10, "tikzpicture", 6, file, 14),
+    // Foreach: three records, one source.
+    rec(11, "tikzpicture", 7, file, 17),
+    rec(12, "tikzpicture", 7, file, 17),
+    rec(13, "tikzpicture", 7, file, 17),
+    // Fragile: the .vrb's.
+    rec(14, "tikzcd", 8, "/p/main.vrb", 2),
+    // Restricted to slide 2: the tabular in the node is not recorded (no table is).
+    rec(15, "tikzpicture", 9, file, 25),
+  ];
+  const blocks: [number, number][] = [[2, 2], [4, 4], [5, 5], [8, 8], [9, 9], [12, 12], [13, 13], [16, 16], [19, 19], [22, 24]];
+  assert.deepEqual(paired(source, records, blocks), [4, 5, null, 7, 8, null, null, null, null, 15]);
+  // A slide with more records than the frame has sources (a picture from a macro): none in it.
+  assert.deepEqual(paired(source, [...records, rec(16, "tikzpicture", 4, file, 10)], [[8, 8], [9, 9], [4, 4]]), [null, null, 5]);
+});
+
+test("recordRegion: a record's box from the page's top left, clipped just around it", () => {
+  const region = recordRegion(rec(1, "tikzpicture", 2, "/p/main.tex", 3, 20), { width: 600, height: 800 });
+  assert.deepEqual(region, { page: 2, x: 50, y: 800 - 101 - 20, width: 20, height: 20, continues: false, top: 800 - 101 - 20 - 2, bottom: 800 - 101 + 2 });
+});
+
+test("pairedRecord on real pdfLaTeX records: a beamer deck's overlays and a paper's scaled pictures; tables are not recorded", { skip: !binDir && "no TeX installation found", timeout: 60_000 }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "ll-pos-"));
+  try {
+    writeFileSync(join(dir, POS_RECORDER_FILE), POS_RECORDER);
+    const deck = [
+      "\\documentclass{beamer}",
+      "\\usepackage{tikz}",
+      "\\usetikzlibrary{cd}",
+      "\\begin{document}",
+      "\\begin{frame}{Pause}",
+      "  \\begin{tikzcd} A \\end{tikzcd}", // 6
+      "  \\pause",
+      "  \\begin{tikzpicture}\\draw (0,0) rectangle (2,1);\\end{tikzpicture}", // 8
+      "  \\pause",
+      "  \\begin{tabular}{c} a table \\end{tabular}", // 10
+      "\\end{frame}",
+      "\\begin{frame}{Only}",
+      "  \\only<1>{\\begin{tikzpicture}\\draw (0,0) circle (1);\\end{tikzpicture}}", // 13
+      "  \\only<2>{\\begin{tikzcd} B \\end{tikzcd}}", // 14
+      "\\end{frame}",
+      "\\begin{frame}{Foreach of pictures}",
+      "  \\foreach \\k in {1,2,3} { \\begin{tikzpicture}\\draw (0,0) circle (0.3);\\end{tikzpicture} }", // 17
+      "\\end{frame}",
+      "\\begin{frame}<2>{Restricted}",
+      "  \\begin{tikzpicture}", // 20
+      "    \\draw (0,0) rectangle (1,1);",
+      "    \\draw<2> (0,0) -- (1,1);",
+      "  \\end{tikzpicture}", // 23
+      "  \\begin{tikzpicture}[remember picture, overlay]\\node at (current page.center) {x};\\end{tikzpicture}", // 24
+      "\\end{frame}",
+      "\\end{document}",
+    ].join("\n");
+    const paper = [
+      "\\documentclass{article}",
+      "\\usepackage{graphicx,tikz}",
+      "\\usetikzlibrary{cd}",
+      "\\begin{document}",
+      "Text before.",
+      "\\begin{figure}[h]\\centering",
+      "\\resizebox{\\linewidth}{!}{%",
+      "\\begin{tikzcd} A", // 8
+      "\\end{tikzcd}}", // 9
+      "\\end{figure}",
+      "\\begin{center}",
+      "\\scalebox{0.5}{\\begin{tikzpicture}\\draw (0,0) rectangle (4,2);\\end{tikzpicture}}", // 12
+      "\\end{center}",
+      "\\begin{center}",
+      "\\begin{tikzcd} A \\arrow[r] & B", // 15
+      "\\end{tikzcd}", // 16
+      "\\end{center}",
+      "\\begin{tabular}{|c|} \\hline a table \\\\ \\hline", // 18
+      "\\end{tabular}", // 19
+      "\\end{document}",
+    ].join("\n");
+    const run = (name: string, text: string) => {
+      writeFileSync(join(dir, `${name}.tex`), text);
+      execFileSync(texTool(binDir!, "pdflatex"), ["-interaction=nonstopmode", `-jobname=${name}`, texInput(POS_RECORDER_FILE) + texInput(name)], { cwd: dir, env: texEnv(binDir!), stdio: "ignore" });
+      return readLlpos(join(dir, `${name}.pdf`), dir)!;
+    };
+    const deckRecords = run("deck", deck);
+    const pages = (blocks: [number, number][], source: string, file: string, records: PosRecord[]) =>
+      blocks.map(([from, to]) => {
+        const r = pairedRecord(source, file, from, to, records);
+        return r && `${r.env}@${r.page}`;
+      });
+    // Pause: slides 1-3, the last one; the table none; Only: one slide each; Foreach: three
+    // records, no pairing; Restricted: its one slide; the overlay picture none.
+    assert.deepEqual(pages([[6, 6], [8, 8], [10, 10], [13, 13], [14, 14], [17, 17], [20, 23], [24, 24]], deck, join(dir, "deck.tex"), deckRecords), [
+      "tikzcd@3",
+      "tikzpicture@3",
+      null,
+      "tikzpicture@4",
+      "tikzcd@5",
+      null,
+      "tikzpicture@7",
+      null,
+    ]);
+    const paperRecords = run("paper", paper);
+    assert.deepEqual(pages([[8, 9], [12, 12], [15, 16], [18, 19]], paper, join(dir, "paper.tex"), paperRecords), [null, null, "tikzcd@1", null]);
+    assert.ok(![...deckRecords, ...paperRecords].some((r) => r.env === "tabular"), "tables are not recorded");
+    const plain = pairedRecord(paper, join(dir, "paper.tex"), 15, 16, paperRecords);
+    // The plain diagram's box: two letters and an arrow, about 60 x 10 bp.
+    assert.ok(plain && plain.width > 30 && plain.width < 120 && plain.height > 5 && plain.height < 30, JSON.stringify(plain));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("locate: identical blocks each crop from their own occurrence, whichever is asked first", () => {
   const block = "\\begin{equation}\n  E = mc^2\n\\end{equation}";
   const source = ["text", block, "more", "text", "", "again", "", "x", block, "end"].join("\n");
-  const compiled: CompiledPdf = { seq: 7, pdfPath: "/p/main.pdf", pdf: new Uint8Array(), source: (f) => (f === "/p/ch.tex" ? source : undefined), synctex: 1 };
+  const compiled: CompiledPdf = { seq: 7, pdfPath: "/p/main.pdf", pdf: new Uint8Array(), source: (f) => (f === "/p/ch.tex" ? source : undefined), synctex: 1, positions: null };
   const crops = new CropService({
     session: () => ({ compiling: null, compiled, onEvent: () => () => {} }),
     binDir: () => null,
@@ -185,7 +399,7 @@ test("a new compile keeps each identical block's own previous drawing after line
   const root = "/p/main.tex", file = "/p/ch.tex";
   const block = "\\begin{align}\n a&=b\\\\\n\\intertext{same}\n c&=d\n\\end{align}";
   const source = ["before", block, "middle", "padding", "padding", "padding", block, "after"].join("\n");
-  let compiled: CompiledPdf = { seq: 1, pdfPath: "/p/main.pdf", pdf: new Uint8Array(), source: () => source, synctex: 1 };
+  let compiled: CompiledPdf = { seq: 1, pdfPath: "/p/main.pdf", pdf: new Uint8Array(), source: () => source, synctex: 1, positions: null };
   const crops = new CropService({
     session: () => ({ compiling: null, compiled, onEvent: () => () => {} }),
     binDir: () => null,
@@ -251,7 +465,6 @@ test("release wakes only its root's first-compile hover; dispose wakes all remai
 
 // ---- Real TeX ------------------------------------------------------------------------------
 
-const binDir = process.env.TEXBIN ?? resolveTexBinDir("");
 function hasFandol(): boolean {
   try {
     return !!execFileSync(texTool(binDir!, "kpsewhich"), ["FandolSong-Regular.otf"], { env: texEnv(binDir!), encoding: "utf8" }).trim();
@@ -347,7 +560,7 @@ test("T-L10: SyncTeX's records give each block of the compiled fixture its own r
 
 /** A session for the crop service over a compile of the fixture, `sources` as its snapshot. */
 function fakeSession(result: CompileResult, sources: Map<string, string>, seq = 1): CropSession & { compiling: unknown; compiled: CompiledPdf | null } {
-  const compiled: CompiledPdf = { seq, pdfPath: result.pdfPath, pdf: result.pdfData!, source: (f) => sources.get(f), synctex: synctexStamp(result.pdfPath) };
+  const compiled: CompiledPdf = { seq, pdfPath: result.pdfPath, pdf: result.pdfData!, source: (f) => sources.get(f), synctex: synctexStamp(result.pdfPath), positions: null };
   return { compiling: null, compiled, onEvent: () => () => {} };
 }
 
@@ -479,7 +692,7 @@ test("a SyncTeX query that fails fails its crop, asked again next time (never a 
     chmodSync(join(bin, "synctex"), 0o755);
     writeFileSync(flag, "");
     const pdfPath = join(dir, "main.pdf");
-    const compiled: CompiledPdf = { seq: 1, pdfPath, pdf: new Uint8Array(readFileSync(pdfPath)), source: (f) => (f === root ? text : undefined), synctex: synctexStamp(pdfPath) };
+    const compiled: CompiledPdf = { seq: 1, pdfPath, pdf: new Uint8Array(readFileSync(pdfPath)), source: (f) => (f === root ? text : undefined), synctex: synctexStamp(pdfPath), positions: null };
     const crops = new CropService({
       session: () => ({ compiling: null, compiled, onEvent: () => () => {} }),
       binDir: () => bin,

@@ -70,9 +70,24 @@ export const DEFAULT_MATH_ENVS: readonly string[] = [...BASE_MATH, ...EXTRA_MATH
 export const DEFAULT_WRAPPERS: readonly string[] = [
   "itemize", "enumerate", "description", "problemset", "center",
   "figure", "figure*", "table", "table*",
-  "subequations", "minipage", "flushleft", "flushright",
+  "subequations", "minipage", "flushleft", "flushright", "adjustbox",
   "columns", "column",
 ];
+
+/**
+ * What the live editor does with a block environment whose \begin and \end are alone on their
+ * lines, beyond the rules above (latexLive #14, #22, #23). Not user rules: each needs its own code.
+ *   table    drawn by the plugin from its source (latexTable): its rows, columns and merged
+ *            cells, editable; in papers and in beamer, never cropped from the PDF.
+ *   picture  TikZ code (nothing in it is a construct): cropped from the last compile's PDF in a
+ *            paper; folded to one line in beamer unless the beamer crops setting is on.
+ */
+export type BlockEnvKind = "table" | "picture";
+export const BLOCK_ENVS: ReadonlyMap<string, BlockEnvKind> = new Map([
+  ...["tabular", "tabular*", "tabularx", "longtable"].map((e): [string, BlockEnvKind] => [e, "table"]),
+  ...["tikzpicture", "tikzcd", "pgfpicture", "circuitikz"].map((e): [string, BlockEnvKind] => [e, "picture"]),
+]);
+export const blockEnvKind = (env: string): BlockEnvKind | null => BLOCK_ENVS.get(env) ?? null;
 
 /** The built-in hidden commands and their arities. */
 export const DEFAULT_HIDDEN: ReadonlyMap<string, Arity> = new Map([
@@ -90,12 +105,27 @@ export const BEAMER_HIDDEN: ReadonlyMap<string, Arity> = new Map([...FONT_SIZES,
 /** What else a layout-only body may use in beamer (detection only: they are not hidden themselves). */
 const BEAMER_LAYOUT: ReadonlyMap<string, Arity> = new Map([
   ...FONT_SIZES.map(zero),
-  ...["setlength", "addtolength"].map((n): [string, Arity] => [n, { args: 2, optional: false }]),
   ["addvspace", { args: 1, optional: false }],
 ]);
 
-/** Length parameters a layout-only body may redefine (`\renewcommand{\arraystretch}{1.2}`). */
+/** Parameters a layout setting may redefine (`\renewcommand{\arraystretch}{1.2}`). */
 const LAYOUT_PARAMETERS = new Set(["arraystretch", "baselinestretch"]);
+const LAYOUT_TARGET = /\s*(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))\s*/y;
+
+/**
+ * The index after a layout setting from s[i] (just after the command `name`), else -1: a
+ * \renewcommand or \def of one of LAYOUT_PARAMETERS to a value without commands, or a
+ * \setlength / \addtolength (`\setlength\tabcolsep{4pt}`). A setting typesets nothing.
+ */
+export function layoutSettingEnd(s: string, i: number, name: string, argEnd: (s: string, i: number) => number = (t, k) => group(t, k)?.end ?? -1): number {
+  const value = name === "renewcommand" || name === "def";
+  if (!value && name !== "setlength" && name !== "addtolength") return -1;
+  LAYOUT_TARGET.lastIndex = i;
+  const m = LAYOUT_TARGET.exec(s);
+  if (!m || s[LAYOUT_TARGET.lastIndex] !== "{" || (value && !LAYOUT_PARAMETERS.has(m[1] ?? m[2]))) return -1;
+  const end = argEnd(s, LAYOUT_TARGET.lastIndex);
+  return end > 0 && !(value && s.slice(LAYOUT_TARGET.lastIndex, end).includes("\\")) ? end : -1;
+}
 
 /** Commands a layout-only body may also use: they typeset nothing. */
 const NEUTRAL = new Set(["relax", "ignorespaces", "ignorespacesafterend", "unskip"]);
@@ -202,8 +232,8 @@ function group(s: string, i: number): { text: string; end: number } | null {
 
 /**
  * Whether `code` typesets nothing but wrapper environments and layout commands (`hidden`'s
- * arities consumed; `#n` only inside their arguments). `beamer`: also BEAMER_LAYOUT, the
- * LAYOUT_PARAMETERS' redefinitions, bare braces, and `\csname P#n\endcsname` when some hidden command is named
+ * arities consumed; `#n` only inside their arguments). `beamer`: also BEAMER_LAYOUT, layout
+ * settings (`layoutSettingEnd`), bare braces, and `\csname P#n\endcsname` when some hidden command is named
  * P... and every one so named is hidden (`project`: the names the project defines).
  */
 export function onlyLayout(
@@ -228,12 +258,8 @@ export function onlyLayout(
       if (base === "begin") for (let g; (g = group(code, skipSpace(code, i))); ) i = g.end;
     } else if (NEUTRAL.has(name)) {
       continue;
-    } else if (beamer && (name === "renewcommand" || name === "def")) {
-      const p = /^\s*(?:\{\s*\\([A-Za-z]+)\s*\}|\\([A-Za-z]+))\s*/.exec(code.slice(i));
-      const param = p && (p[1] ?? p[2]);
-      const value = p && group(code, i + p[0].length);
-      if (!param || !LAYOUT_PARAMETERS.has(param) || !value || value.text.includes("\\")) return false;
-      i = value.end;
+    } else if (beamer && layoutSettingEnd(code, i, name) > 0) {
+      i = layoutSettingEnd(code, i, name);
     } else if (beamer && name === "csname") {
       const m2 = /^\s*([A-Za-z@]+)#\d\s*\\endcsname/.exec(code.slice(i));
       if (!m2) return false;

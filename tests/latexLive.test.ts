@@ -1206,7 +1206,7 @@ const CROP_DOC = [
   "    A \\arrow[r] & B",
   "  \\end{tikzcd}",
   "\\end{equation*}",
-  "\\begin{table}[htbp]", // 9-14: #14 in a float
+  "\\begin{table}[htbp]", // 9-14: #23 in a float, drawn (never a crop)
   "  \\begin{tabular}{ll}",
   "    a & $x^2$ \\\\",
   "  \\end{tabular}",
@@ -1221,22 +1221,23 @@ const CROP_DOC = [
   "end",
 ].join("\n");
 
-test("P5 #4 and #14: PDF crops for TikZ pictures, tables and rejected block formulas; source when changed", async () => {
+test("P5 #4 and #14: PDF crops for TikZ pictures and rejected block formulas, tables drawn; source when changed", async () => {
   const f = fakeCrops();
   f.compiled = CROP_DOC;
   const p = await project(f.crops);
   try {
     const view = await p.mount(CROP_DOC, undefined, CROP_DOC.length);
-    await waitFor(() => cropCards(view).length === 3);
+    await waitFor(() => cropCards(view).length === 2);
     assert.deepEqual(cropCards(view), [
       "crop 1|picture|\\begin{tikzpicture}[scale=2]",
       "crop 1|math|\\begin{equation*}",
-      "crop 1|picture|\\begin{tabular}{ll}",
     ]);
+    await waitFor(() => !!view.contentDOM.querySelector(".lsp-lp-table"));
+    assert.deepEqual(tableCells(view), [["a", "𝑥2"]], "a table is drawn from its source, never cropped");
     assert.deepEqual(
       lines(view),
       ["[w]", "[w]", "<>", "[w]", "  T", "<>", "$\\undefinedmacro$ inline", "<lsp-lp-box is-second>", "end"],
-      "the float's \\begin and \\end lines collapse around the crop, its caption stays (no label: only \\caption hides)",
+      "the float's \\begin and \\end lines collapse around the table, its caption stays (no label: only \\caption hides)",
     );
     assert.match(view.contentDOM.querySelector(".lsp-lp-box")!.textContent!, /\\begin\{tikzpicture\}/, "inside elegantbook's tcolorbox: source");
     assert.deepEqual(errors(view), ["$\\undefinedmacro$"], "inline math never crops");
@@ -1250,7 +1251,7 @@ test("P5 #4 and #14: PDF crops for TikZ pictures, tables and rejected block form
     view.dispatch({ selection: EditorSelection.cursor(view.state.doc.length) });
     await rendered(view);
     assert.equal(lines(view)[0], "\\begin{tikzpicture}[scale=2]");
-    assert.equal(cropCards(view).length, 2);
+    assert.equal(cropCards(view).length, 1);
     // A rejected formula without a crop is MathJax's error again.
     view.dispatch({ changes: { from: view.state.doc.line(6).from + 4, insert: "C " } });
     await rendered(view);
@@ -1266,23 +1267,22 @@ test("P5 a new compile's crop replaces the last one when it lands; a crop that f
   const p = await project(f.crops);
   try {
     const view = await p.mount(CROP_DOC, undefined, CROP_DOC.length);
-    await waitFor(() => cropCards(view).length === 3);
+    await waitFor(() => cropCards(view).length === 2);
     // A new result: every block's request changes; the old crops stay until the new ones land.
     f.seq = 2;
     f.delay = 60;
     p.render.cropsChanged(p.root);
     await sleep(30);
-    assert.deepEqual(cropCards(view).map((c) => c!.slice(0, 7)), ["crop 1|", "crop 1|", "crop 1|"], "the last crops meanwhile");
+    assert.deepEqual(cropCards(view).map((c) => c!.slice(0, 7)), ["crop 1|", "crop 1|"], "the last crops meanwhile");
     await waitFor(() => cropCards(view).every((c) => c!.startsWith("crop 2|")), 3000);
-    assert.equal(cropCards(view).length, 3);
+    assert.equal(cropCards(view).length, 2);
 
-    // A crop that cannot render (no SyncTeX records): #14 a table drawn from its source (#23), #4 MathJax's error.
+    // A crop that cannot render (no SyncTeX records): #14 the picture's source, #4 MathJax's error.
     f.seq = 3;
     f.delay = 5;
-    f.failing = new Set(["\\begin{tabular}{ll}", "\\begin{equation*}"]);
+    f.failing = new Set(["\\begin{tikzpicture}[scale=2]", "\\begin{equation*}"]);
     p.render.cropsChanged(p.root);
-    await waitFor(() => cropCards(view).length === 1 && cropCards(view)[0]!.startsWith("crop 3|"), 3000);
-    await waitFor(() => !!view.contentDOM.querySelector(".lsp-lp-table"));
+    await waitFor(() => cropCards(view).length === 0 && lines(view)[0] === "\\begin{tikzpicture}[scale=2]", 3000);
     assert.deepEqual(tableCells(view), [["a", "𝑥2"]]);
     assert.ok(errors(view).includes("\\begin{equation*}"));
   } finally {
@@ -1298,7 +1298,7 @@ const cellChars = (el: Node): string =>
 const tableCells = (view: EditorView) =>
   [...view.contentDOM.querySelectorAll(".lsp-lp-table tr")].map((tr) => [...tr.querySelectorAll("td")].map(cellChars));
 
-test("#23 a tabular without a crop is a table: rules, spans, formulas, styles and chips in its cells; source while touched", async () => {
+test("#23 a tabular is a table: rules, spans, formulas, styles and chips in its cells; source while touched", async () => {
   const p = await project();
   try {
     const doc = [
@@ -1316,7 +1316,8 @@ test("#23 a tabular without a crop is a table: rules, spans, formulas, styles an
     const view = await p.mount(doc);
     await waitFor(() => !!view.contentDOM.querySelector(".lsp-lp-table"));
     await rendered(view);
-    assert.deepEqual(lines(view), ["\\begin{center}\\renewcommand{\\arraystretch}{1.35}", "[w]", "\\begin{tabular}{ll}", "a & \\begin{tabular}{l}x\\end{tabular}", "\\end{tabular}", "end"]);
+    // The center's \\begin line collapses with its \\arraystretch (ARISE deck 06_rates.tex:197).
+    assert.deepEqual(lines(view), ["<>", "[w]", "\\begin{tabular}{ll}", "a & \\begin{tabular}{l}x\\end{tabular}", "\\end{tabular}", "end"]);
     const table = view.contentDOM.querySelector(".lsp-lp-table table.ll-table")!;
     assert.ok(table.classList.contains("is-center"), "in a center environment");
     assert.deepEqual(tableCells(view), [
@@ -1347,9 +1348,101 @@ test("#23 a tabular without a crop is a table: rules, spans, formulas, styles an
   }
 });
 
+test("#23 a longtable is a table with its head once; a \\multirow spans its rows", async () => {
+  const p = await project();
+  try {
+    const doc = [
+      "\\begin{longtable}{lll}\\toprule", // 1
+      "A & B & C \\\\ \\midrule",
+      "\\endfirsthead",
+      "A & B & C (cont.) \\\\ \\midrule",
+      "\\endhead", // 5
+      "\\multirow{2}{*}{$g$} & x & 1 \\\\",
+      " & y & 2 \\\\ \\bottomrule",
+      "\\end{longtable}",
+      "end", // 9
+    ].join("\n");
+    const view = await p.mount(doc);
+    await waitFor(() => !!view.contentDOM.querySelector(".lsp-lp-table"));
+    await rendered(view);
+    assert.deepEqual(tableCells(view), [["A", "B", "C"], ["𝑔", "x", "1"], ["y", "2"]]);
+    const g = view.contentDOM.querySelectorAll(".lsp-lp-table td")[3] as HTMLTableCellElement;
+    assert.equal(g.rowSpan, 2);
+    assert.ok(g.classList.contains("v-c") && g.classList.contains("bottom-heavy"));
+    view.destroy();
+  } finally {
+    p.done();
+  }
+});
+
+test("#23 a box around a table is a shell: its lines collapse, the table shows at its normal size", async () => {
+  const p = await project();
+  try {
+    const doc = [
+      "\\resizebox{\\textwidth}{!}{% scaled", // 1
+      "\\begin{tabular}{ll}",
+      "a & b \\\\",
+      "\\end{tabular}",
+      "}", // 5
+      "\\scalebox{0.8}[1]{",
+      "\\begin{tabular}{l}",
+      "c",
+      "\\end{tabular}}", // 9
+      "\\begin{adjustbox}{max width=\\textwidth}",
+      "\\rotatebox[origin=c]{90}{",
+      "\\begin{tabular}{l}",
+      "d",
+      "\\end{tabular}",
+      "}", // 15
+      "\\end{adjustbox}",
+      "\\resizebox{2cm}{!}{x}", // 17: not a shell
+      "end",
+    ].join("\n");
+    const view = await p.mount(doc);
+    await waitFor(() => view.contentDOM.querySelectorAll(".lsp-lp-table").length === 3);
+    await rendered(view);
+    assert.deepEqual(tableCells(view), [["a", "b"], ["c"], ["d"]]);
+    assert.deepEqual(lines(view), ["<>", "[w]", "<>", "<>", "[w]", "<>", "<>", "[w]", "<>", "<>", "\\resizebox{2cm}{!}{x}", "end"]);
+    // The cursor on a shell's line: that line's source.
+    cursorAt(view, view.state.doc.line(1).from + 2);
+    await rendered(view);
+    assert.equal(lines(view)[0], "\\resizebox{\\textwidth}{!}{% scaled");
+    view.destroy();
+  } finally {
+    p.done();
+  }
+});
+
+test("#23 a wrapper's \\begin line collapses with the layout commands after it, on its line or the next, around a table", async () => {
+  const p = await project();
+  try {
+    const doc = [
+      "\\begin{table}[h]\\centering\\renewcommand{\\arraystretch}{1.2}", // 1
+      "\\begin{tabular}{ll}",
+      "a & b \\\\",
+      "\\end{tabular}",
+      "\\end{table}", // 5
+      "\\begin{center}",
+      "\\setlength{\\tabcolsep}{4pt}\\renewcommand{\\arraystretch}{1.2}",
+      "\\begin{tabular}{ll}",
+      "c & d \\\\",
+      "\\end{tabular}", // 10
+      "\\end{center}",
+      "end",
+    ].join("\n");
+    const view = await p.mount(doc);
+    await waitFor(() => view.contentDOM.querySelectorAll(".lsp-lp-table").length === 2);
+    await rendered(view);
+    // 1: \\centering and the setting go with \\begin{table}; 7: two settings alone on a line collapse together.
+    assert.deepEqual(lines(view), ["<>", "[w]", "<>", "<>", "<>", "[w]", "<>", "end"]);
+  } finally {
+    p.done();
+  }
+});
+
 // ---- Beamer (#17-#22, docs/beamer.md) ------------------------------------------------------
 
-test("beamer: frame cards with their title bar and page, banners, the title page, overlays, the TikZ fold; papers keep crops", async () => {
+test("beamer: frame cards with their title bar and page, banners, the title-page and TikZ folds, overlays; papers keep crops", async () => {
   const p = await project();
   try {
     const rules = mergeEnvRules(
@@ -1363,7 +1456,6 @@ test("beamer: frame cards with their title bar and page, banners, the title page
       ]),
     );
     const shownPages: number[] = [];
-    let opened = 0;
     const doc = [
       "\\begin{frame}[t]{Title $x$}", // 1
       "\\DeckGap", // 2
@@ -1399,8 +1491,6 @@ test("beamer: frame cards with their title bar and page, banners, the title page
                 refs: () => p.render.refsOf(p.root),
                 framePage: (d, pos) => (d.lineAt(pos).number === 1 ? { first: 2, last: 3 } : { first: 4, last: 4 }),
                 showPage: (page) => shownPages.push(page),
-                titlePage: () => ({ title: "Big", subtitle: "", author: "A\nB", institute: "Uni", date: "2026" }),
-                openTitle: () => opened++,
                 beamerCrops: () => beamerCrops,
                 crop: () => null,
               }),
@@ -1423,10 +1513,7 @@ test("beamer: frame cards with their title bar and page, banners, the title page
     assert.deepEqual(pages.map((e) => e.textContent), ["2–3", "4"], "the frame's pages and the banner's");
     pages[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
     assert.deepEqual(shownPages, [2], "a click shows the first page");
-    const tp = view.contentDOM.querySelector<HTMLElement>(".ll-titlepage");
-    assert.equal(tp?.querySelector(".ll-titlepage-title")?.textContent, "Big");
-    tp!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
-    assert.equal(opened, 1, "a click opens \\title");
+    assert.equal(view.contentDOM.querySelector(".ll-titlepage")?.textContent, "▸ Title page", "\\titlepage folds to one line");
     assert.equal(view.contentDOM.querySelector(".ll-tikz-fold")?.textContent, "▸ TikZ (3 lines)");
     const text = view.contentDOM.textContent ?? "";
     assert.ok(!text.includes("<2->") && !text.includes("\\DeckGap") && !text.includes("\\end{frame}"), text);
@@ -1445,12 +1532,17 @@ test("beamer: frame cards with their title bar and page, banners, the title page
     await rendered(view);
     assert.equal(view.contentDOM.querySelector(".ll-tikz-fold"), null);
     assert.ok((view.contentDOM.textContent ?? "").includes("\\draw (0,0)"));
+    // The cursor on \titlepage: its source.
+    cursorAt(view, view.state.doc.line(3).from + 2);
+    await rendered(view);
+    assert.equal(view.contentDOM.querySelector(".ll-titlepage"), null);
+    assert.ok((view.contentDOM.textContent ?? "").includes("\\titlepage"));
     view.destroy();
-    // The setting on: the picture is a crop request, as in a paper (no crop here: its source).
+    // The setting on: the picture is a crop request, as in a paper (no crop here: its source); the table is drawn either way.
     const cropped = make(true);
     await rendered(cropped);
     assert.equal(cropped.contentDOM.querySelector(".ll-tikz-fold"), null);
-    assert.equal(tableCells(cropped).length, 2, "no crop to show: the table");
+    assert.equal(tableCells(cropped).length, 2, "a table, never a crop");
     cropped.destroy();
   } finally {
     p.done();

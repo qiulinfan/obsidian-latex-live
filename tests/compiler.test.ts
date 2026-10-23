@@ -9,9 +9,11 @@ import {
   CompileOptions,
   CompileResult,
   Compiler,
+  formatKey,
   readBibFiles,
   readyPreambleFormat,
 } from "../src/tex/compiler";
+import { readLlpos } from "../src/tex/llpos";
 import { Engine, preambleOf } from "../src/tex/project";
 import { forwardSearch, inverseSearch } from "../src/tex/synctex";
 
@@ -157,6 +159,7 @@ test("preamble cache: built in background, used, and invalidated", { skip }, asy
       "\\begin{document}",
       "$x \\in \\R$",
       "\\undefinedmacro",
+      "\\begin{tikzpicture}\\draw (0,0) rectangle (1,1);\\end{tikzpicture}",
       "\\end{document}",
       "",
     ].join("\n"),
@@ -187,6 +190,10 @@ test("preamble cache: built in background, used, and invalidated", { skip }, asy
       assert.equal(ready?.name, "main-preamble");
       assert.equal(await readyPreambleFormat(h.outDir, join(dir, "main.tex"), "pdflatex", preambleOf(text)! + "%"), null);
       assert.equal(await readyPreambleFormat(h.outDir, join(dir, "main.tex"), "xelatex", preambleOf(text)!), null);
+      // The format holds the position recorder: the run records without it on the command line.
+      const pos = readLlpos(r.pdfPath, dir);
+      assert.deepEqual(pos?.map((p) => [p.env, p.page, p.file, p.line]), [["tikzpicture", 1, join(dir, "main.tex"), 7]]);
+      assert.notEqual(formatKey("pdflatex", preambleOf(text)!), formatKey("pdflatex", preambleOf(text)!, 0), "a new recorder version rebuilds the format");
       break;
     }
     assert.ok(i < 99, "preamble cache never became ready");
@@ -215,6 +222,46 @@ for (const engine of ["xelatex", "lualatex"] as Engine[]) {
   });
 }
 
+const PICTURES = [
+  "\\documentclass{article}",
+  "\\usepackage{tikz,tabularx}",
+  "\\begin{document}",
+  "Text \\begin{tikzpicture}\\draw (0,0) rectangle (2,1);\\end{tikzpicture} text.",
+  "",
+  "\\begin{tabular}{cc}",
+  "a & b\\\\",
+  "\\end{tabular}",
+  "\\begin{tikzpicture}[overlay]\\draw (0,0) -- (1,1);\\end{tikzpicture}",
+  "\\begin{tikzpicture}\\node{\\begin{tabular}{c}x\\end{tabular}};\\end{tikzpicture}",
+  "\\newpage",
+  "\\begin{tabularx}{\\linewidth}{X}",
+  "wide\\\\",
+  "\\end{tabularx}",
+  "\\end{document}",
+  "",
+].join("\n");
+
+for (const [engine, name] of [["pdflatex", "main.tex"], ["pdflatex", "my main.tex"], ["xelatex", "main.tex"], ["lualatex", "main.tex"]] as [Engine, string][]) {
+  test(`${engine} records the positions of TikZ pictures (root "${name}")`, { skip }, async () => {
+    const dir = project({ [name]: PICTURES });
+    const h = harness(join(dir, name), { engine });
+    h.compiler.request();
+    const r = await h.final();
+    assert.equal(r.pdfWritten, true, r.rawLog.slice(-800));
+    assert.equal(r.pdfPath, join(h.outDir, name.replace(/\.tex$/, ".pdf")), "the job keeps the root's name");
+    const pos = readLlpos(r.pdfPath, dir)!;
+    // Pictures only (tables are drawn, never cropped: #23); an overlay picture has no size.
+    assert.deepEqual(pos.map((p) => [p.env, p.page, p.line]), [["tikzpicture", 1, 4], ["tikzpicture", 1, 9], ["tikzpicture", 1, 10]]);
+    assert.ok(pos.every((p) => p.file === join(dir, name)));
+    const [pic] = pos;
+    // 2 cm by 1 cm plus the line width, in bp; x after "Text " in the text block (1in + margin).
+    assert.ok(Math.abs(pic.width - 57.1) < 1 && Math.abs(pic.height - 28.8) < 1, JSON.stringify(pic));
+    assert.ok(pic.x > 72 && pic.x < 200 && pic.y > 600, JSON.stringify(pic));
+    assert.equal(pos[1].width, 0);
+    h.compiler.dispose();
+  });
+}
+
 test("full build runs latexmk", { skip }, async () => {
   const dir = project({ "main.tex": BODY, "chapters/one.tex": "x\n" });
   const h = harness(join(dir, "main.tex"));
@@ -222,6 +269,9 @@ test("full build runs latexmk", { skip }, async () => {
   const r = await h.next();
   assert.equal(r.mode, "full");
   assert.equal(r.pdfWritten, true, r.rawLog.slice(-800));
+  assert.equal(r.pdfPath, join(h.outDir, "main.pdf"));
+  // latexmk reads the position recorder first (-usepretex).
+  assert.deepEqual(readLlpos(r.pdfPath, dir), []);
   h.compiler.dispose();
 });
 
