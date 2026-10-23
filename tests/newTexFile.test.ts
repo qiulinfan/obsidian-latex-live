@@ -2,6 +2,7 @@ import "./support/dom";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { EditorView } from "@codemirror/view";
+import { ExternalExtensions } from "../src/editor/externalExtensions";
 import { NewTexFileModal, registerNewTexFile, texFileName } from "../src/editor/newTexFile";
 import type LatexLivePlugin from "../src/main";
 import { TexView } from "../src/editor/texView";
@@ -93,6 +94,7 @@ test("the newly created file can load into the actual TexView editor", async () 
     yolo: { extension: () => [] }, texlab: { triggerCharacters: () => [], open: () => {}, close: () => {}, change: () => {} },
     texRender: { opened: () => {}, ready: false, subscribe: () => () => {} }, diagnosticsFor: () => [],
     theoremGraphs: { invalidate: () => {}, subscribe: () => () => {} },
+    externalEditorExtensions: new ExternalExtensions(() => []),
   } as unknown as LatexLivePlugin;
   const view = new TexView(new WorkspaceLeaf(app) as unknown as import("obsidian").WorkspaceLeaf, plugin);
   try { await (view as unknown as { loadFile(file: TFile): Promise<void> }).loadFile(new TFile(path)); assert.ok(view.editorView instanceof EditorView); assert.equal(view.getViewData(), ""); assert.equal(view.file?.path, path); }

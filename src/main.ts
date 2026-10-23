@@ -1,4 +1,5 @@
 import { startCompletion } from "@codemirror/autocomplete";
+import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { readFile } from "fs/promises";
 import { isAbsolute, join, relative, sep } from "path";
@@ -19,6 +20,7 @@ import { YoloBridge } from "./editor/shared/yoloBridge";
 import type { MathJaxLike } from "./editor/mathjaxProject";
 import type { SuiteConfig } from "./editor/suiteSnippets";
 import type { ClickText } from "./editor/reveal";
+import { API_READY_EVENT, ExternalExtensions } from "./editor/externalExtensions";
 import { TexRender } from "./editor/texRender";
 import { parseTemplateProfiles, type TemplateVisualizationProfile } from "./editor/templateVisualization";
 import { TemplateVisualizationModal } from "./editor/templateVisualizationModal";
@@ -54,6 +56,10 @@ export default class LatexLivePlugin extends Plugin {
   settings: LatexLiveSettings = DEFAULT_SETTINGS;
   /** Undo history of recently closed files (restored on reopen). */
   readonly histories = new HistoryCache();
+  /** Extensions other plugins added to the `.tex` editors (registerTexEditorExtension). */
+  readonly externalEditorExtensions = new ExternalExtensions(() =>
+    this.texViews().flatMap((v) => (v.editorView ? [v.editorView] : [])),
+  );
   yolo!: YoloBridge;
   texlab!: TexlabServer;
   /** Project math for hover rendering (one private MathJax instance per root). */
@@ -268,10 +274,26 @@ export default class LatexLivePlugin extends Plugin {
         for (const v of this.texViews()) if (v.editorView) syncDarkTheme(v.editorView);
       }),
     );
+    this.app.workspace.trigger(API_READY_EVENT, this);
+  }
+
+  /**
+   * Public API: add a CodeMirror 6 extension to every open and later latex-live `.tex` editor
+   * (view type `latex-live-editor`, its own EditorView, which Obsidian's registerEditorExtension
+   * never reaches). It comes after latex-live's own extensions, so their keymaps keep precedence
+   * unless the caller wraps it in `Prec`. The returned disposer removes it from every editor; it
+   * is idempotent and a no-op after latex-live unloads, which removes every registered extension.
+   * After each load and reload, latex-live triggers the workspace event `"latex-live:api-ready"`
+   * (API_READY_EVENT) with this plugin, so a plugin that loaded earlier can register again.
+   * See docs/editor-extension-api.md.
+   */
+  registerTexEditorExtension(extension: Extension): () => void {
+    return this.externalEditorExtensions.register(extension);
   }
 
   onunload(): void {
     this.unloading = true;
+    this.externalEditorExtensions.dispose();
     for (const modal of this.templateModals) modal.close();
     this.templateModals.clear();
     for (const s of this.sessions.values()) s.dispose();

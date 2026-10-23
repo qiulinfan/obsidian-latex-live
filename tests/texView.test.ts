@@ -9,13 +9,15 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { undo, undoDepth } from "@codemirror/commands";
-import { EditorView } from "@codemirror/view";
+import { Facet } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import { ExternalExtensions } from "../src/editor/externalExtensions";
 import { HistoryCache } from "../src/editor/shared/editorKit";
 import { TextWidget, isLive } from "../src/editor/shared/livePreview";
 import { YoloBridge } from "../src/editor/shared/yoloBridge";
 import { TexRender } from "../src/editor/texRender";
 import { TexView } from "../src/editor/texView";
-import type LatexLivePlugin from "../src/main";
+import LatexLivePlugin from "../src/main";
 import type { EditingMode } from "../src/settings";
 import { waitFor } from "./support/keyMatrix";
 import { obsidianMathJax } from "./support/mathjax";
@@ -44,6 +46,7 @@ async function texView(editingMode: EditingMode = "source") {
     },
   });
   const yolo = new YoloBridge(app as never, { name: "test", enabled: () => false });
+  const views: TexView[] = [];
   const plugin = {
     app,
     settings: { editingMode, hoverRender: true, debounceMs: 100000, followCursor: false },
@@ -56,6 +59,7 @@ async function texView(editingMode: EditingMode = "source") {
       content: async () => document.createElement("div"),
     },
     histories: new HistoryCache(),
+    externalEditorExtensions: new ExternalExtensions(() => views.flatMap((v) => (v.editorView ? [v.editorView] : []))),
     texlab: {
       status: "stopped",
       triggerCharacters: () => [],
@@ -72,17 +76,22 @@ async function texView(editingMode: EditingMode = "source") {
     openPreview: async () => {},
     syncPreviewToCursor: async () => {},
   };
-  const view = new TexView(new WorkspaceLeaf(app) as never, plugin as unknown as LatexLivePlugin);
+  const newView = () => {
+    const v = new TexView(new WorkspaceLeaf(app) as never, plugin as unknown as LatexLivePlugin);
+    views.push(v);
+    return v;
+  };
+  const view = newView();
   const cm = () => view.editorView!;
   const action = () => view.containerEl.querySelector<HTMLElement>(".view-action:is([data-icon=book-open], [data-icon=code])")!;
   const widgets = () => cm().contentDOM.querySelectorAll(".lsp-lp-render").length;
   const done = async () => {
-    await view.onClose();
+    for (const v of views) await v.onClose();
     yolo.destroy();
     texRender.dispose();
     rmSync(dir, { recursive: true, force: true });
   };
-  return { view, app, plugin, cm, action, widgets, out: join(dir, "out"), done };
+  return { view, newView, app, plugin, cm, action, widgets, out: join(dir, "out"), done };
 }
 
 const open = (v: TexView, file: string, mode?: EditingMode) => v.setState(mode ? { file, mode } : { file }, {} as never);
@@ -285,6 +294,49 @@ test("files the root reads before \\begin{document} (a split preamble) have no c
     assert.equal(decorated(), 0, "boxes.tex, input by preamble.tex");
     await open(t.view, "chapters/ch1.tex");
     await waitFor(() => t.widgets() > 0);
+  } finally {
+    await t.done();
+  }
+});
+
+test("other plugins' extensions reach open and later views after latex-live's own, until disposed or unloaded", async () => {
+  const t = await texView("source");
+  const marker = Facet.define<string>();
+  const marked = (v: TexView) => v.editorView!.state.facet(marker);
+  try {
+    await open(t.view, "chapters/ch1.tex");
+    const editor = t.cm();
+    t.cm().dispatch({ changes: { from: 0, insert: "% kept\n" }, selection: { anchor: 3 }, userEvent: "input.type" });
+    const before = [editor.state.doc.toString(), editor.state.selection.main.head, undoDepth(editor.state)];
+    const consumerKeys = [{ key: "F12", run: () => true }];
+    const register = LatexLivePlugin.prototype.registerTexEditorExtension; // the public API
+    const dispose = register.call(t.plugin as unknown as LatexLivePlugin, [marker.of("kg"), keymap.of(consumerKeys)]);
+    assert.deepEqual(marked(t.view), ["kg"], "added to the open editor");
+    assert.equal(t.cm(), editor, "the same EditorView");
+    assert.deepEqual([editor.state.doc.toString(), editor.state.selection.main.head, undoDepth(editor.state)], before);
+    const maps = editor.state.facet(keymap);
+    const own = maps.findIndex((m) => m !== consumerKeys && m.some((b) => b.key === "F12"));
+    assert.ok(own >= 0 && own < maps.indexOf(consumerKeys), "latex-live's keymap keeps precedence");
+
+    const later = t.newView();
+    await open(later, "chapters/ch2.tex");
+    assert.deepEqual(marked(later), ["kg"], "added to a later editor");
+    await open(t.view, "chapters/ch2.tex"); // a new state in the same view
+    assert.deepEqual(marked(t.view), ["kg"]);
+    const second = t.plugin.externalEditorExtensions.register(marker.of("second"));
+    assert.deepEqual([marked(t.view), marked(later)], [["kg", "second"], ["kg", "second"]]);
+
+    dispose();
+    dispose(); // idempotent
+    assert.deepEqual([marked(t.view), marked(later)], [["second"], ["second"]], "removed from both");
+
+    t.plugin.externalEditorExtensions.dispose(); // latex-live unloads
+    assert.deepEqual([marked(t.view), marked(later)], [[], []], "unload clears external extensions");
+    second(); // a consumer's disposer after latex-live reloaded
+    t.plugin.externalEditorExtensions.register(marker.of("late"))();
+    const after = t.newView();
+    await open(after, "chapters/ch1.tex");
+    assert.deepEqual([marked(t.view), marked(after)], [[], []], "nothing registers after unload");
   } finally {
     await t.done();
   }

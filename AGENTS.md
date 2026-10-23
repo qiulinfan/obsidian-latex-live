@@ -747,6 +747,12 @@
   decisions with the caller (the notes knowledge registry) and reuse the
   existing renderer; bridge tests and the full suite share one bundle cache and
   must run sequentially.
+- Other plugins add CodeMirror extensions to the `.tex` editors through the public
+  `registerTexEditorExtension` (`src/editor/externalExtensions.ts`, event `latex-live:api-ready`),
+  documented in [docs/editor-extension-api.md](docs/editor-extension-api.md). One compartment,
+  last in `TexView.extensions` so latex-live's keymaps keep precedence, holds them in every state
+  (new, `clear`, HistoryCache restore); unload empties it and later disposers are no-ops. Keep the
+  event name and signature stable; `tests/texView.test.ts` covers open/later views and unload.
 - Build output goes to `$TMPDIR/obsidian-latex-live/<hash of root>/`, never
   into the vault.
 - Desktop only (`isDesktopOnly: true`).

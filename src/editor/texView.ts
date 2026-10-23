@@ -410,7 +410,12 @@ export class TexView extends TextFileView {
     );
   }
 
-  private extensions(data: string) {
+  /** latex-live's own extensions, then those other plugins registered (lower precedence). */
+  private extensions(data: string): Extension[] {
+    return [this.ownExtensions(data), this.plugin.externalEditorExtensions.extension()];
+  }
+
+  private ownExtensions(data: string) {
     const plugin = this.plugin;
     const backend: LspCompletionBackend = {
       triggerCharacters: () => plugin.texlab.triggerCharacters(),
