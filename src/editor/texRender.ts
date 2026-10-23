@@ -249,8 +249,8 @@ export class TexRender {
   /** Per root: \includegraphics paths -> what they show (see Images), and the file it read. */
   private images = new Map<string, Map<string, { found: { src: string } | { error: string } | null; file: string | null }>>();
 
-  /** frameStarts per document text (framePageOf), with the banners it counted. */
-  private frameStarts = new WeakMap<Text, { banners: DetectedRules["banners"]; starts: number[] }>();
+  /** frameStarts per document text (framePageOf): each frame's index by its start, with the banners it counted. */
+  private frameStarts = new WeakMap<Text, { banners: DetectedRules["banners"]; starts: Map<number, number> }>();
 
   constructor(private host: TexRenderHost) {}
 
@@ -777,12 +777,13 @@ export class TexRender {
     if (!deck || !at || deck.frames.total !== deck.pages.length) return null;
     let local = this.frameStarts.get(doc);
     if (!local || local.banners !== r.detected.banners) {
-      local = { banners: r.detected.banners, starts: frameStarts(doc.toString(), r.detected.banners, file === root) };
+      const starts = frameStarts(doc.toString(), r.detected.banners, file === root);
+      local = { banners: r.detected.banners, starts: new Map(starts.map((p, k) => [p, k])) };
       this.frameStarts.set(doc, local);
     }
-    if (local.starts.length !== at.count) return null;
-    const k = local.starts.indexOf(pos);
-    return k < 0 ? null : deck.pages[at.offset + k];
+    if (local.starts.size !== at.count) return null;
+    const k = local.starts.get(pos);
+    return k === undefined ? null : deck.pages[at.offset + k];
   }
 
   /**

@@ -704,19 +704,23 @@ function argEnd(s: string, i: number, maxLines = 0): number {
   return -1;
 }
 
+/** A command after blanks (layoutTail; its lastIndex is set before every use). */
+const LAYOUT_COMMAND = /[ \t]*\\([A-Za-z@]+\*?)/y;
+
 /**
  * Hidden commands and layout settings from s[j] on the same line (`\centering\small`), or null
  * when there are none; `centering`: one of them is `\centering`.
  */
 function layoutTail(s: string, j: number, rules: EnvRules): { end: number; centering: boolean } | null {
-  const cmd = /[ \t]*\\([A-Za-z@]+\*?)/y;
+  const cmd = LAYOUT_COMMAND;
   let end = j;
   let centering = false;
   for (let m; (cmd.lastIndex = end), (m = cmd.exec(s)); ) {
     const name = m[1];
+    const after = cmd.lastIndex;
     const base = name.endsWith("*") ? name.slice(0, -1) : name;
-    let e = layoutSettingEnd(s, cmd.lastIndex, name, argEnd);
-    if (e < 0 && rules.hidden.has(base)) e = commandEnd(s, cmd.lastIndex, rules.hidden.get(base) ?? null, false, (t, k) => argEnd(t, k));
+    let e = layoutSettingEnd(s, after, name, argEnd);
+    if (e < 0 && rules.hidden.has(base)) e = commandEnd(s, after, rules.hidden.get(base) ?? null, false, (t, k) => argEnd(t, k));
     if (e < 0) break;
     centering ||= base === "centering";
     end = e;
