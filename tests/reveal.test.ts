@@ -75,6 +75,29 @@ test("locateClick: the PDF words around the click pick the occurrence, far from 
   assert.equal(locateClick(para, 2, only("emph")), null);
 });
 
+test("locateClick: from a beamer \\end{frame}, the whole frame, blank lines included", () => {
+  const frames = Text.of([
+    "\\begin{frame}{First}",
+    "  Earlier frame text",
+    "\\end{frame}",
+    "",
+    "\\begin{frame}{Overview}",
+    "  \\begin{itemize}",
+    "    \\item Photocurrent rises",
+    "  \\end{itemize}",
+    "",
+    "  Parameterizing the model",
+    "",
+    "\\end{frame}",
+  ]);
+  // SyncTeX names line 12 for every word of the frame.
+  assert.deepEqual(locateClick(frames, 12, only("Photocurrent")), { line: 7, column: 10 });
+  assert.deepEqual(locateClick(frames, 12, only("Parameterizing")), { line: 10, column: 2 });
+  assert.deepEqual(locateClick(frames, 12, only("Overview")), { line: 5, column: 14 });
+  // Never into the frame before.
+  assert.equal(locateClick(frames, 12, only("Earlier")), null);
+});
+
 test("flashLine marks the target line, then clears it", async () => {
   const view = new EditorView({ state: EditorState.create({ doc: doc.toString(), extensions: revealFlash }), parent: document.body });
   try {

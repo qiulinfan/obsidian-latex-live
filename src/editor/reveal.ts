@@ -9,10 +9,14 @@ import { Decoration, DecorationSet, EditorView } from "@codemirror/view";
 //             of the paragraph's end (or start). A double-click in the PDF selects a word in its
 //             text layer; that word, matched in the source paragraph around SyncTeX's line and
 //             told apart from its other occurrences by the PDF words around it, places the cursor.
+//             Beamer reads a frame's body as one macro argument, so every box in it carries the
+//             `\end{frame}` line; from there the whole frame is searched, blank lines included.
 
 export const FLASH_MS = 1500;
 /** How far from SyncTeX's line the paragraph is searched, never across a blank line. */
 const PARA_REACH = 40;
+/** How far above an `\end{frame}` line its `\begin{frame}` is looked for. */
+const FRAME_REACH = 400;
 /** PDF words on each side of the clicked one that tell its occurrences apart. */
 const CONTEXT_WORDS = 6;
 /** Source words on each side of an occurrence they are looked for in (macros add a few). */
@@ -99,7 +103,8 @@ function pdfWords(text: string): string[] {
 
 /**
  * The 1-based line and 0-based column of the clicked word in the source paragraph holding
- * SyncTeX's `line` (up to PARA_REACH lines either way, never across a blank line), or null when
+ * SyncTeX's `line` (up to PARA_REACH lines either way, never across a blank line; the whole frame
+ * when `line` is a beamer `\end{frame}`), or null when
  * the word is not there. Occurrences are a whole word, else a part of one (a word hyphenated
  * across PDF lines, CJK text); each scores the PDF words around the click found next to it in
  * the source, and ties go to the one nearest SyncTeX's line.
@@ -108,8 +113,12 @@ export function locateClick(doc: Text, line: number, click: ClickText): { line: 
   if (!click.word) return null;
   line = Math.min(Math.max(line, 1), doc.lines);
   let first = line, last = line;
-  while (first > 1 && line - first < PARA_REACH && doc.line(first - 1).text.trim()) first--;
-  while (last < doc.lines && last - line < PARA_REACH && doc.line(last + 1).text.trim()) last++;
+  const frame = frameAbove(doc, line);
+  if (frame) first = frame;
+  else {
+    while (first > 1 && line - first < PARA_REACH && doc.line(first - 1).text.trim()) first--;
+    while (last < doc.lines && last - line < PARA_REACH && doc.line(last + 1).text.trim()) last++;
+  }
   const start = doc.line(first).from;
   const tokens = sourceTokens(doc.sliceString(start, doc.line(last).to));
   let hits = tokens.flatMap((t, i) => (t.text === click.word ? [{ i, column: 0 }] : []));
@@ -155,4 +164,15 @@ export function flashElement(view: EditorView, el: HTMLElement): void {
   void el.offsetWidth; // restart the animation when the same block is flashed again
   el.classList.add("ll-reveal-flash");
   win.setTimeout(() => el.classList.remove("ll-reveal-flash"), FLASH_MS);
+}
+
+/** The `\begin{frame}` line of the frame that `line` ends with `\end{frame}`, or null. */
+function frameAbove(doc: Text, line: number): number | null {
+  if (!/^\s*\\end\s*\{frame\}/.test(doc.line(line).text)) return null;
+  for (let n = line - 1; n >= 1 && line - n <= FRAME_REACH; n--) {
+    const text = doc.line(n).text.replace(/(?<!\\)%.*/, "");
+    if (/\\begin\s*\{frame\}/.test(text)) return n;
+    if (/\\end\s*\{frame\}/.test(text)) return null;
+  }
+  return null;
 }

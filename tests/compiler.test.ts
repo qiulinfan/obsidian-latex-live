@@ -15,6 +15,8 @@ import {
 } from "../src/tex/compiler";
 import { readLlpos } from "../src/tex/llpos";
 import { Engine, preambleOf } from "../src/tex/project";
+import { Text } from "@codemirror/state";
+import { locateClick } from "../src/editor/reveal";
 import { forwardSearch, inverseSearch } from "../src/tex/synctex";
 
 // Integration tests against the machine's TeX installation.
@@ -299,6 +301,39 @@ test("SyncTeX round trip", { skip }, async () => {
   assert.ok(loc);
   assert.equal(loc.file, file);
   assert.equal(loc.line, 3);
+  h.compiler.dispose();
+});
+
+// Beamer reads a frame's body as a macro argument, so SyncTeX gives every word in it the
+// `\end{frame}` line; the click lands on the word only because locateClick searches the whole
+// frame, across its blank lines.
+test("SyncTeX in a beamer frame names \\end{frame}; the click still lands on the word", { skip }, async () => {
+  const slides = [
+    "\\begin{frame}{Overview}",
+    "  Photocurrent rises",
+    "",
+    "  Parameterizing the model",
+    "",
+    "\\end{frame}",
+  ];
+  const dir = project({
+    "main.tex": "\\documentclass{beamer}\n\\begin{document}\n\\input{slides}\n\\end{document}\n",
+    "slides.tex": slides.join("\n") + "\n",
+  });
+  const h = harness(join(dir, "main.tex"));
+  h.compiler.request();
+  const r = await h.final();
+  const file = join(dir, "slides.tex");
+  const doc = Text.of(slides);
+  for (const [word, line] of [["Photocurrent", 2], ["Parameterizing", 4]] as const) {
+    const box = await forwardSearch(binDir!, r.pdfPath, file, line, 0);
+    assert.ok(box, `forward search found ${word}`);
+    const loc = await inverseSearch(binDir!, r.pdfPath, box.page, box.x + 5, box.y + box.height / 2, dir, h.compiler.toLogical);
+    assert.ok(loc);
+    assert.equal(loc.file, file);
+    assert.equal(loc.line, 6, `SyncTeX names \\end{frame} for ${word}`);
+    assert.equal(locateClick(doc, loc.line, { word, before: "", after: "" })?.line, line);
+  }
   h.compiler.dispose();
 });
 
