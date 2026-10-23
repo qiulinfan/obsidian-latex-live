@@ -13,6 +13,8 @@ import { EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { JSDOM } from "jsdom";
 import { mathAt } from "../src/editor/latexScan";
+import type { TableSpec } from "../src/editor/latexTable";
+import { ProjectMath } from "../src/editor/mathjaxProject";
 import { TexCrops, TexFragments, TexRender, fragmentBody } from "../src/editor/texRender";
 import { NOTE_CHANGED, NOTE_NO_PREVIEW } from "../src/preview/blockCrop";
 import { obsidianMathJax } from "./support/mathjax";
@@ -321,6 +323,36 @@ test("TexRender live: preload loads MathJax once and warms it up; the renderer r
     const tagged = r.render(req("\\begin{equation}x\\tag{2.5}\\end{equation}", true)) as { ok: true; node: Element };
     assert.ok(chars(tagged.node).endsWith("(2.5)"));
   } finally {
+    t.done();
+  }
+});
+
+test("TexRender live: a table drawn again converts only its cells' changed formulas; a rejected one shows its source", async () => {
+  const t = await setup();
+  const render = ProjectMath.prototype.render;
+  const converted: string[] = [];
+  ProjectMath.prototype.render = function (this: ProjectMath, ...args: Parameters<typeof render>) {
+    converted.push(args[0]);
+    return render.apply(this, args);
+  };
+  try {
+    await t.render.preload(t.root);
+    const r = t.render.rendererFor(t.root);
+    const cell = (src: string): TableSpec["rows"][number][number] =>
+      ({ span: 1, rowSpan: 1, vpos: "c", align: "l", ruleLeft: 0, ruleRight: 0, width: null, top: null, bottom: null, parts: [{ t: "math", src, display: false }], src: `$${src}$` });
+    const table = (...cells: string[]) => {
+      const src = JSON.stringify({ center: false, rows: [cells.map(cell)] } satisfies TableSpec);
+      const res = r.render({ key: src, src, display: true, kind: "table", pos: 0 }) as { ok: true; node: Element };
+      return [...res.node.querySelectorAll("td")].map((td) => (td.classList.contains("is-source") ? td.textContent : chars(td)));
+    };
+    converted.length = 0;
+    assert.deepEqual(table("x_1", "\\Lip", "\\foo"), ["𝑥1", "𝐿", "$\\foo$"]);
+    assert.deepEqual(converted, ["x_1", "\\Lip", "\\foo"]);
+    converted.length = 0;
+    assert.deepEqual(table("x_1", "\\Lip", "\\foo", "y"), ["𝑥1", "𝐿", "$\\foo$", "𝑦"]);
+    assert.deepEqual(converted, ["y"], "the other cells' renderings (and the failure) are remembered");
+  } finally {
+    ProjectMath.prototype.render = render;
     t.done();
   }
 });

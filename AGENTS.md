@@ -381,8 +381,8 @@
     inline MathJax path; a cell whose formula throws shows its source. Every keystroke rebuilds
     every table's decoration: latexLive remembers a request's source by the table's text and
     centering (the memo starts over on new refs), so an untouched table is a lookup, and builds
-    a spec from binary searches over the scan. Smoke B12 guards the lookup (66 tables, <= 1 ms a
-    keystroke).
+    a spec from binary searches over the scan; TexRender caches cell formulas per ProjectMath
+    instance (`cellMath`, bounded). Smoke B12 guards the lookup (66 tables, <= 1 ms a keystroke).
     Shown in papers without a crop and in decks with crops off (or none yet); classes `ll-table`,
     styles in styles.css.
     `cropKindOf` decides how a block crops and refuses anything inside a tcolorbox (elegantbook's

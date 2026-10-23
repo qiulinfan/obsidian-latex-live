@@ -66,6 +66,8 @@ import { applyTemplateVisualization, parseTemplateProfiles, type TemplateVisuali
 //   Cache     rendered formulas per root (display + source -> node or MathJax's message,
 //             CACHE_SIZE, least recently used out), handed out as clones; dropped when the
 //             instance or the labels change. A hover repeated over a formula costs a clone.
+//             Live tables' cell formulas (prepared: no labels) the same way per instance
+//             (CELL_CACHE_SIZE), so a table drawn again converts only the formulas that changed.
 //   Styles    after a new render MathJax's stylesheet is updated at once (its glyph rules are
 //             added only when chtmlStylesheet() runs) and put into the main window's head if
 //             Obsidian has not yet, so the first hover never draws without glyph CSS; a
@@ -93,6 +95,8 @@ const FILE_DEBOUNCE_MS = 300;
 const IMAGE_MAX_HEIGHT = 320;
 const EDIT_DEBOUNCE_MS = 500;
 const CACHE_SIZE = 200;
+/** Table cells' formulas remembered per ProjectMath instance (see Cache). */
+const CELL_CACHE_SIZE = 1000;
 /** A MathJax failure TeX would stop at too: no fragment compile for it. */
 const BRACE_ERROR = /^(?:Missing|Extra) (?:open|close) brace/;
 
@@ -597,7 +601,7 @@ export class TexRender {
     if (req.kind === "table") {
       // A cell whose formula MathJax rejects shows its source (tableNode).
       const math = this.rootMath(mj, root).math;
-      return { ok: true, node: tableNode(req.src, this.host.mathJax.document, (src, display) => math.render(src, display)) };
+      return { ok: true, node: tableNode(req.src, this.host.mathJax.document, (src, display) => cellMath(math, src, display)) };
     }
     try {
       return { ok: true, node: this.rootMath(mj, root).math.render(req.src, req.display) };
@@ -841,6 +845,33 @@ export class TexRender {
     else doc.head.appendChild(copy);
     this.popoutSheets.set(doc, { el: copy, rules: rules?.length ?? -1 });
   }
+}
+
+/** Per ProjectMath instance: display flag + a table cell's prepared formula -> its rendering or MathJax's message. */
+const cellCaches = new WeakMap<ProjectMath, Map<string, Element | string>>();
+
+/**
+ * A table cell's formula (see Cache): a table drawn again after an edit in one of its cells
+ * converts that cell's formula alone. tableNode clones the node; a failure throws again.
+ */
+function cellMath(math: ProjectMath, src: string, display: boolean): Element {
+  let cache = cellCaches.get(math);
+  if (!cache) cellCaches.set(math, (cache = new Map()));
+  const key = (display ? "D" : "I") + src;
+  let hit = cache.get(key);
+  if (hit !== undefined) cache.delete(key);
+  else {
+    try {
+      hit = math.render(src, display);
+    } catch (e) {
+      if (!(e instanceof MathError)) throw e;
+      hit = e.message;
+    }
+  }
+  cache.set(key, hit);
+  if (cache.size > CELL_CACHE_SIZE) cache.delete(cache.keys().next().value!);
+  if (typeof hit === "string") throw new MathError(hit);
+  return hit;
 }
 
 /** amsmath's numbered environments whose starred forms take \tag (fragmentBody). */
