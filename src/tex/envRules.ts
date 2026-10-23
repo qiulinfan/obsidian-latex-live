@@ -389,31 +389,41 @@ export function detectEnvRules(sources: readonly string[]): DetectedRules {
   const runtime = runtimeAssigned(sources, commands);
   for (const name of runtime) hidden.delete(name);
   if (!beamer) return { math, wrappers, hidden, beamer, banners: new Map(), images: new Map() };
-  // Beamer: a layout command may use the project's other layout commands, so repeat until
-  // nothing new is found (\DeckLayout uses \DeckNormal and \DeckFamily@...).
+  // Beamer: a layout command may use the project's other layout commands (\DeckLayout uses
+  // \DeckNormal and \DeckFamily@...).
   const banners = new Map<string, Arity>();
   const images = new Map<string, ImageMacro>();
   const project = { project: new Set(commands.keys()) };
   const known = new Map<string, Arity | null>([...layoutHidden, ...BEAMER_HIDDEN]);
+  // Which project commands each one's body names: a command found hidden or an image macro
+  // checks again only the commands naming it, and those with a \csname (onlyLayout's family of
+  // hidden names), until nothing new is found.
+  const users = new Map<string, Set<string>>();
+  const families: string[] = [];
   for (const [name, c] of commands) {
     if (/\\begin\s*\{\s*frame\s*\}/.test(c.body)) banners.set(name, c.arity);
-  }
-  for (let changed = true; changed; ) {
-    changed = false;
-    for (const [name, c] of commands) {
-      if (hidden.has(name) || images.has(name) || banners.has(name)) continue;
-      if (!runtime.has(name) && usesAll(c.body, c.arity.args) && onlyLayout(c.body, layoutWrappers, known, project)) {
-        hidden.set(name, c.arity);
-        known.set(name, c.arity);
-        changed = true;
-        continue;
-      }
-      const path = imagePath(c.body, images, layoutWrappers, known, project);
-      if (path > 0 && path <= c.arity.args) {
-        images.set(name, { ...c.arity, path });
-        changed = true;
-      }
+    for (const m of c.body.matchAll(CALL)) {
+      if (!commands.has(m[1])) continue;
+      let set = users.get(m[1]);
+      if (!set) users.set(m[1], (set = new Set()));
+      set.add(name);
     }
+    if (c.body.includes("\\csname")) families.push(name);
+  }
+  const pending = new Set(commands.keys());
+  for (const name of pending) {
+    pending.delete(name);
+    const c = commands.get(name)!;
+    if (hidden.has(name) || images.has(name) || banners.has(name)) continue;
+    if (!runtime.has(name) && usesAll(c.body, c.arity.args) && onlyLayout(c.body, layoutWrappers, known, project)) {
+      hidden.set(name, c.arity);
+      known.set(name, c.arity);
+    } else {
+      const path = imagePath(c.body, images, layoutWrappers, known, project);
+      if (!(path > 0 && path <= c.arity.args)) continue;
+      images.set(name, { ...c.arity, path });
+    }
+    for (const user of [...(users.get(name) ?? []), ...families]) pending.add(user);
   }
   return { math, wrappers, hidden, beamer, banners, images };
 }
@@ -490,6 +500,12 @@ function callArgs(s: string, i: number, arity: Arity): string[] | null {
   return out;
 }
 
+/** A command name (`\x`): the calls runtimeAssigned and the layout fixpoint look up. */
+const CALL = /\\([A-Za-z@]+)/g;
+
+/** An argument as it reaches the macro (`\noexpand` dropped). */
+const passedArg = (arg: string | undefined): string => (arg ?? "").replace(/\\noexpand\s*/g, "").trim();
+
 /**
  * Names the sources change while the document typesets: `\g@addto@macro\x`, `\def\x`, `\let\x`,
  * … anywhere, and a name passed to a macro that assigns its `#k` (`\collect{\educationContent}`),
@@ -505,31 +521,45 @@ function runtimeAssigned(sources: readonly string[], commands: ReadonlyMap<strin
     const ks = [...d.body.matchAll(ASSIGN_ARG)].map((m) => Number(m[1]));
     if (ks.length) assigns.set(name, new Set(ks));
   }
-  const passed = (src: string, onArg: (arg: string) => void) => {
-    for (const [name, ks] of assigns) {
-      const arity = commands.get(name)!.arity;
-      for (const m of src.matchAll(new RegExp(String.raw`\\${name}(?![A-Za-z@])`, "g"))) {
-        const args = callArgs(src, (m.index ?? 0) + m[0].length, arity);
-        for (const k of ks) onArg((args?.[k - 1] ?? "").replace(/\\noexpand\s*/g, "").trim());
+  if (!assigns.size) return assigned;
+  // The project's calls in each body, by the command called: a macro that gains a position
+  // passes it on to the macros calling it with `#j` there (a worklist, each call read once).
+  const callers = new Map<string, { caller: string; args: string[] | null }[]>();
+  for (const [caller, d] of commands) {
+    for (const m of d.body.matchAll(CALL)) {
+      const callee = commands.get(m[1]);
+      if (!callee) continue;
+      let calls = callers.get(m[1]);
+      if (!calls) callers.set(m[1], (calls = []));
+      calls.push({ caller, args: callArgs(d.body, (m.index ?? 0) + m[0].length, callee.arity) });
+    }
+  }
+  const queue = [...assigns.keys()];
+  for (let name; (name = queue.pop()) !== undefined; ) {
+    const ks = assigns.get(name)!;
+    for (const { caller, args } of callers.get(name) ?? []) {
+      for (const k of ks) {
+        const j = /^#(\d)$/.exec(passedArg(args?.[k - 1]));
+        if (!j) continue;
+        const own = assigns.get(caller) ?? new Set<number>();
+        if (own.has(Number(j[1]))) continue;
+        own.add(Number(j[1]));
+        assigns.set(caller, own);
+        queue.push(caller);
       }
     }
-  };
-  for (let changed = true; changed; ) {
-    changed = false;
-    for (const [name, d] of commands) passed(d.body, (arg) => {
-      const j = /^#(\d)$/.exec(arg);
-      if (!j) return;
-      const ks = assigns.get(name) ?? new Set<number>();
-      if (ks.has(Number(j[1]))) return;
-      ks.add(Number(j[1]));
-      assigns.set(name, ks);
-      changed = true;
-    });
   }
-  for (const s of sources) passed(s, (arg) => {
-    const a = /^\\([A-Za-z@]+)$/.exec(arg);
-    if (a) assigned.add(a[1]);
-  });
+  // The names the sources pass to them, in one pass over each source.
+  const call = new RegExp(String.raw`\\(${[...assigns.keys()].join("|")})(?![A-Za-z@])`, "g");
+  for (const s of sources) {
+    for (const m of s.matchAll(call)) {
+      const args = callArgs(s, (m.index ?? 0) + m[0].length, commands.get(m[1])!.arity);
+      for (const k of assigns.get(m[1])!) {
+        const a = /^\\([A-Za-z@]+)$/.exec(passedArg(args?.[k - 1]));
+        if (a) assigned.add(a[1]);
+      }
+    }
+  }
   return assigned;
 }
 

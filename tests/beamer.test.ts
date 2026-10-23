@@ -53,6 +53,24 @@ test("detection in beamer: a register filled while typesetting or a discarded ar
   assert.deepEqual([...d.banners.keys()], ["sectionframe"]);
 });
 
+test("detection in beamer: long chains of layout macros and of assigning macros, each defined before the one it uses", () => {
+  const name = (i: number) => "Lay" + String.fromCharCode(97 + Math.floor(i / 26)) + String.fromCharCode(97 + (i % 26));
+  const lines = ["\\documentclass{beamer}"];
+  // \Layaa .. \Layln, each using the next: only the last one is a layout by itself.
+  for (let i = 0; i < 300; i++) lines.push(`\\newcommand{\\${name(i)}}{${i < 299 ? `\\${name(i + 1)}` : "\\small"}\\centering}`);
+  // \Pass<k> hands its argument on to \Pass<k+1>, the last one \defs it: every \Val<k> is a register.
+  const pass = (i: number) => "Pass" + name(i).slice(3);
+  for (let i = 0; i < 200; i++) lines.push(`\\newcommand{\\${pass(i)}}[1]{${i < 199 ? `\\${pass(i + 1)}{#1}` : "\\def#1{x}"}}`, `\\newcommand{\\Val${name(i).slice(3)}}{}`);
+  lines.push(...Array.from({ length: 200 }, (_, i) => `\\${pass(i)}{\\Val${name(i).slice(3)}}`));
+  const t = performance.now();
+  const d = detectEnvRules([lines.join("\n")]);
+  const ms = performance.now() - t;
+  assert.equal([...d.hidden.keys()].filter((n) => n.startsWith("Lay")).length, 300);
+  assert.equal([...d.hidden.keys()].filter((n) => n.startsWith("Val")).length, 0);
+  // A name found re-checks only the macros naming it (4 s here when every pass read every macro).
+  assert.ok(ms < 50, `${ms.toFixed(1)} ms`);
+});
+
 test("frameStarts:\\begin{frame} and banner calls outside comments; a root's from \\begin{document}", () => {
   const banners = new Map([["sectionframe", { args: 3, optional: false }]]);
   const s = "\\sectionframe{a}{b}{c}\n% \\begin{frame}\n\\begin{frame}{x}\n\\end{frame}\n\\sectionframes{no}";
