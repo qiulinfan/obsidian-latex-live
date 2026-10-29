@@ -128,8 +128,9 @@ ${inputAliases(inputs)}
 \def\llx@where{\llx@filefields{\the\inputlineno}}
 \def\llx@gobblethree#1#2#3{}
 % Expand a value for the log with typesetting commands silenced (\color, font sizes) and text
-% chosen over math (\@fnsymbol's \TextOrMath).
-\def\llx@expand#1#2{\let\color\@gobble\let\@setfontsize\llx@gobblethree\let\TextOrMath\@firstoftwo\protected@edef#1{#2}}
+% chosen over math (\@fnsymbol's \TextOrMath). Labels in moving titles are anchors,
+% not title text: expanding their kernel hooks inside an edef corrupts the log.
+\def\llx@expand#1#2{\let\color\@gobble\let\label\@gobble\let\@setfontsize\llx@gobblethree\let\TextOrMath\@firstoftwo\protected@edef#1{#2}}
 % Keep dates from this TeX run, not the exporting host's calendar. \maketitle clears \@date
 % in the article classes, and elegantbook deliberately starts with an empty date.
 \def\llx@valueinfo#1#2{\begingroup\llx@expand\llx@t{#2}%
@@ -266,8 +267,18 @@ ${inputAliases(inputs)}
   \newenvironment{llxfrag}[1]{\def\llx@id{#1}\edef\llx@fragmentvisit{\llx@visit}\llx@write{llxopen{#1}}\begin{lrbox}{\llx@box}}{\end{lrbox}%
     \llx@write{llxclose{\llx@id}}\llx@write{llxfrag{\llx@id}{\the\ht\llx@box}{\the\dp\llx@box}{\the\wd\llx@box}{\llx@fragmentvisit}}%
     \leavevmode\llx@inlinemarker\usebox\llx@box}%
+  % A captured block is a preview box: figures and tables inside it cannot enter
+  % the page's float queue. Keep their contents and native caption counters in
+  % place instead; these definitions are local to the captured environment.
+  \def\llx@nonfloat#1{\def\@captype{#1}\@ifnextchar[\llx@floatbody{\llx@floatbody[]}}%
+  \def\llx@floatbody[#1]{\par\noindent\ignorespaces}%
+  \def\llx@localfloats{%
+    \def\figure{\llx@nonfloat{figure}}\let\endfigure\par
+    \def\table{\llx@nonfloat{table}}\let\endtable\par
+    \@namedef{figure*}{\llx@nonfloat{figure}}\expandafter\let\csname endfigure*\endcsname\par
+    \@namedef{table*}{\llx@nonfloat{table}}\expandafter\let\csname endtable*\endcsname\par}%
   \newenvironment{llxblock}[1]{\def\llx@id{#1}\edef\llx@fragmentvisit{\llx@visit}\llx@write{llxopen{#1}}\llx@write{llxblock{#1}{\llx@fragmentvisit}}%
-    \llx@blockmarker}{\llx@write{llxclose{\llx@id}}}%
+    \llx@localfloats\llx@blockmarker}{\llx@write{llxclose{\llx@id}}}%
   \PreviewEnvironment{llxfrag}\PreviewEnvironment{llxblock}\fi}
 \endinput
 `;

@@ -91,6 +91,68 @@ test("document bridge adds exact semantic anchors and repeated refs without touc
   } finally { await rm(folder, { recursive: true, force: true }); }
 });
 
+test("heading markers preserve native numbering without expanding label hooks into contents", { skip: !tex, timeout: 90_000 }, async () => {
+  const folder = await mkdtemp(join(tmpdir(), "latex-live-bridge-heading-test-"));
+  try {
+    const source = join(folder, "main.tex");
+    const main = String.raw`\documentclass{article}
+\usepackage{hyperref}
+\providecommand{\kn}[1]{\textbf{#1}}
+\begin{document}
+\tableofcontents
+\section{\texorpdfstring{Native heading \kn{QR factorization}}{Bookmark heading}}
+First paragraph.
+\section{Following section}
+Second paragraph.
+\end{document}
+`;
+    await writeFile(source, main);
+    const result = await kgdistillerHtml({ schema, operation: "document", source, markers: [
+      { name: "QR factorization", id: "qr-factorization", url: "#kn-qr-factorization" },
+    ] });
+    assert.equal(result.operation, "document");
+    if (result.operation !== "document") throw new Error("Expected document");
+    assert.deepEqual(result.report.items.filter((item) => item.kind === "probe" || item.kind === "numbering"), []);
+    const dom = new JSDOM(result.html);
+    assert.equal(dom.window.document.querySelectorAll('[id="kn-qr-factorization"]').length, 1);
+    assert.match(dom.window.document.querySelector("main")?.textContent ?? "", /Native heading QR factorization/);
+    assert.doesNotMatch(dom.window.document.querySelector("main")?.textContent ?? "", /Bookmark heading/);
+    assert.equal(await readFile(source, "utf8"), main);
+    dom.window.close();
+  } finally { await rm(folder, { recursive: true, force: true }); }
+});
+
+test("nested floats remain valid inside a captured custom environment", { skip: !tex, timeout: 90_000 }, async () => {
+  const folder = await mkdtemp(join(tmpdir(), "latex-live-bridge-float-test-"));
+  try {
+    const source = join(folder, "main.tex");
+    const main = String.raw`\documentclass{article}
+\usepackage{tikz}
+\newenvironment{customremark}[1]{\par\noindent\textbf{#1}\quad}{\par}
+\newenvironment{customdrawing}{}{}
+\expandafter\newcommand\csname native-drawing\endcsname{\begin{tikzpicture}\draw (0,0) rectangle (1,1);\end{tikzpicture}}
+\begin{document}
+\begin{customremark}{Remark}
+\begin{figure}[htbp]
+\centering
+\begin{customdrawing}\csname native-drawing\endcsname\end{customdrawing}
+\caption{Nested drawing}\label{fig:nested}
+\end{figure}
+\end{customremark}
+After the figure.
+\end{document}
+`;
+    await writeFile(source, main);
+    const result = await kgdistillerHtml({ schema, operation: "document", source, markers: [] });
+    assert.equal(result.operation, "document");
+    if (result.operation !== "document") throw new Error("Expected document");
+    assert.deepEqual(result.report.items.filter((item) => item.kind === "probe"), []);
+    assert.match(result.html, /<svg\b/);
+    assert.match(result.html, /After the figure/);
+    assert.equal(await readFile(source, "utf8"), main);
+  } finally { await rm(folder, { recursive: true, force: true }); }
+});
+
 test("document bridge anchors a bracketed name where its text is shown", { skip: !tex, timeout: 90_000 }, async () => {
   const folder = await mkdtemp(join(tmpdir(), "latex-live-bridge-named-test-"));
   try {

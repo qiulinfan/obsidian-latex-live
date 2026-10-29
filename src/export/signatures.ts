@@ -59,6 +59,7 @@ const BUILTIN_MACROS: Record<string, Spec> = {
   url: "v",
   nolinkurl: "v",
   href: "o v m",
+  texorpdfstring: "m m",
   includegraphics: "s o o m",
   includepdf: "o m",
   lstinputlisting: "o m",

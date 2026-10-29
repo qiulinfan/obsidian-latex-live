@@ -757,6 +757,7 @@ class Emitter {
     if (name in SPACES) return SPACES[name];
     if (name === "\\" || name === "newline" || name === "linebreak") return "<br>";
     if (name === "label") return this.anchor(argText(src, n.args[0]).trim());
+    if (name === "texorpdfstring") return body(0);
     if (name in REF_COMMANDS) return this.ref(n, ctx);
     if (CITES.has(name)) return this.cite(n, ctx);
     if (name === "footnote") return this.footnote(n, ctx);
